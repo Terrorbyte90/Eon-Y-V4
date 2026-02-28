@@ -1,0 +1,32 @@
+# ── Stora ML-modeller (exkluderas från repo) ──────────────────────────────────
+Eon-Y/Models/GptSw3_1_3B_Instruct.mlpackage/
+Eon-Y/Models/KBBertSwedish.mlpackage/
+
+# ── Xcode ─────────────────────────────────────────────────────────────────────
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+build/
+
+# ── Swift Package Manager ──────────────────────────────────────────────────────
+.build/
+Packages/
+*.resolved
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ── iCloud ────────────────────────────────────────────────────────────────────
+*.icloud
+
+# ── Cursor ────────────────────────────────────────────────────────────────────
+.cursor/

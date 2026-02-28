@@ -1,24 +1,18 @@
-//
-//  ContentView.swift
-//  Eon-Y
-//
-//  Created by Ted Svärd on 2026-02-27.
-//
-
 import SwiftUI
+import Combine
+
+// ContentView är ersatt av RootNavigationView i App/Eon_YApp.swift
+// Denna fil behålls för Xcode-kompatibilitet
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+        RootNavigationView()
+            .environmentObject(EonBrain.shared)
+            .environmentObject(UserProfileEngine.shared)
     }
 }
 
 #Preview {
     ContentView()
+        .preferredColorScheme(.dark)
 }
