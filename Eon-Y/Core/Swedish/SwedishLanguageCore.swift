@@ -40,18 +40,36 @@ actor SwedishLanguageCore {
     // MARK: - Register-detektion
 
     private func detectRegister(_ text: String) -> SwedishRegister {
-        let formal = ["emellertid", "således", "härav", "varför", "därtill", "beträffande"]
-        let informal = ["typ", "liksom", "asså", "ju", "va", "grejen", "kul", "gött"]
-        let technical = ["algoritm", "implementation", "konfiguration", "parameter", "funktion"]
+        let formalWords = ["emellertid", "således", "härav", "därtill", "beträffande", "avseende", "vederbörande", "härmed", "dock"]
+        let informalWords = ["typ", "liksom", "asså", "ju", "va", "grejen", "kul", "gött", "skit", "jävla", "fett", "soft"]
+        let technicalWords = ["algoritm", "implementation", "konfiguration", "parameter", "funktion", "databas", "server", "api", "framework"]
 
         let lower = text.lowercased()
-        let formalCount = formal.filter { lower.contains($0) }.count
-        let informalCount = informal.filter { lower.contains($0) }.count
-        let technicalCount = technical.filter { lower.contains($0) }.count
+        let words = lower.components(separatedBy: .whitespaces)
 
-        if technicalCount > 1 { return .technical }
-        if formalCount > informalCount { return .formal }
-        if informalCount > formalCount { return .informal }
+        // Positional weighting: words at the start of sentences carry more register signal
+        var formalScore: Double = 0
+        var informalScore: Double = 0
+        var technicalScore: Double = 0
+
+        for (i, word) in words.enumerated() {
+            let positionWeight = i < 5 ? 1.5 : 1.0 // Opening words weighted 1.5x
+            if formalWords.contains(word) { formalScore += positionWeight }
+            if informalWords.contains(word) { informalScore += positionWeight }
+            if technicalWords.contains(word) { technicalScore += positionWeight }
+        }
+
+        // Sentence structure indicators
+        let avgWordLength = words.isEmpty ? 0 : Double(words.map { $0.count }.reduce(0, +)) / Double(words.count)
+        if avgWordLength > 7.0 { formalScore += 0.5 } // Long words → formal
+        if avgWordLength < 4.5 { informalScore += 0.3 } // Short words → informal
+
+        // Exclamation/emoji → informal
+        if text.contains("!") || text.contains("😂") || text.contains("🤔") { informalScore += 0.5 }
+
+        if technicalScore > 2.0 { return .technical }
+        if formalScore > informalScore + 0.5 { return .formal }
+        if informalScore > formalScore + 0.5 { return .informal }
         return .neutral
     }
 
@@ -64,13 +82,17 @@ actor SwedishLanguageCore {
             ("nog", .probability),
             ("visst", .confirmation),
             ("faktiskt", .emphasis),
-            ("egentligen", .concession)
+            ("egentligen", .concession),
+            ("dock", .concession),
+            ("ändå", .concession),
+            ("liksom", .hedging),
+            ("typ", .hedging),
         ]
 
         var found: [ModalParticle] = []
-        let lower = text.lowercased()
+        let words = text.lowercased().components(separatedBy: .whitespaces)
         for (particle, meaning) in particles {
-            if lower.contains(" \(particle) ") || lower.hasSuffix(" \(particle)") {
+            if words.contains(particle) {
                 found.append(ModalParticle(word: particle, meaning: meaning))
             }
         }
@@ -120,34 +142,99 @@ actor SwedishMorphologyEngine {
                 )
             }
 
-            // Kompositaanalys: försök dela upp sammansatta ord
-            if word.count > 8 {
-                return analyzeCompound(word)
+            // Compound analysis: try to split unknown words (Swedish compounds can be short)
+            if word.count > 6 {
+                let compoundResult = analyzeCompound(word)
+                if compoundResult.isCompound || compoundResult.pos != "unknown" {
+                    return compoundResult
+                }
             }
 
             return MorphemeAnalysis(word: word, baseForm: word, pos: "unknown", morphemes: [word], isCompound: false, forms: [:])
         }
     }
 
+    /// Common Swedish compound linking morphemes ("fog")
+    private static let compoundLinks = ["s", "e", "o", "u", "es"]
+
+    /// Known Swedish prefixes that modify meaning
+    private static let knownPrefixes = ["be", "för", "under", "över", "om", "an", "upp", "av", "ut", "in", "på", "fram", "till", "åter", "sam", "mot"]
+
     private func analyzeCompound(_ word: String) -> MorphemeAnalysis {
-        // Sök efter kända prefix i lexikonet
+        // Strategy 1: Check known prefixes first (be-, för-, under-, etc.)
+        for prefix in Self.knownPrefixes {
+            if word.hasPrefix(prefix) && word.count > prefix.count + 3 {
+                let stem = String(word.dropFirst(prefix.count))
+                if lexicon[stem] != nil {
+                    return MorphemeAnalysis(
+                        word: word, baseForm: word,
+                        pos: lexicon[stem]?.pos ?? "verb",
+                        morphemes: [prefix, stem],
+                        isCompound: true, forms: [:]
+                    )
+                }
+            }
+        }
+
+        // Strategy 2: Try all split points, including with compound linking morpheme ("s", "e")
+        var bestSplit: (prefix: String, suffix: String, score: Double)?
         for splitPoint in stride(from: 3, through: word.count - 3, by: 1) {
             let prefix = String(word.prefix(splitPoint))
             let suffix = String(word.suffix(word.count - splitPoint))
 
-            if lexicon[prefix] != nil && (lexicon[suffix] != nil || suffix.count > 4) {
-                return MorphemeAnalysis(
-                    word: word,
-                    baseForm: word,
-                    pos: lexicon[prefix]?.pos ?? "noun",
-                    morphemes: [prefix, suffix],
-                    isCompound: true,
-                    forms: [:]
-                )
+            // Direct split: both parts in lexicon
+            let prefixKnown = lexicon[prefix] != nil
+            let suffixKnown = lexicon[suffix] != nil
+
+            if prefixKnown && suffixKnown {
+                let score = Double(prefix.count + suffix.count) / Double(word.count) // Longer parts = better
+                if bestSplit == nil || score > bestSplit!.score {
+                    bestSplit = (prefix, suffix, score)
+                }
+            } else if prefixKnown && suffix.count > 4 {
+                // Known prefix + unknown but long suffix (might be an unlexed word)
+                let score = Double(prefix.count) / Double(word.count) * 0.7
+                if bestSplit == nil || score > bestSplit!.score {
+                    bestSplit = (prefix, suffix, score)
+                }
+            }
+
+            // Try removing a compound linking morpheme between parts
+            for link in Self.compoundLinks {
+                if suffix.hasPrefix(link) && suffix.count > link.count + 3 {
+                    let actualSuffix = String(suffix.dropFirst(link.count))
+                    if prefixKnown && lexicon[actualSuffix] != nil {
+                        let score = Double(prefix.count + actualSuffix.count) / Double(word.count) + 0.1
+                        if bestSplit == nil || score > bestSplit!.score {
+                            bestSplit = (prefix, actualSuffix, score)
+                        }
+                    }
+                }
             }
         }
 
-        return MorphemeAnalysis(word: word, baseForm: word, pos: "unknown", morphemes: [word], isCompound: false, forms: [:])
+        if let split = bestSplit {
+            return MorphemeAnalysis(
+                word: word, baseForm: word,
+                pos: lexicon[split.suffix]?.pos ?? lexicon[split.prefix]?.pos ?? "noun",
+                morphemes: [split.prefix, split.suffix],
+                isCompound: true, forms: [:]
+            )
+        }
+
+        // Strategy 3: Suffix-based POS guessing for unknown words
+        let pos: String
+        if word.hasSuffix("het") || word.hasSuffix("tion") || word.hasSuffix("ning") || word.hasSuffix("ande") || word.hasSuffix("else") {
+            pos = "noun"
+        } else if word.hasSuffix("lig") || word.hasSuffix("bar") || word.hasSuffix("sam") || word.hasSuffix("isk") {
+            pos = "adjective"
+        } else if word.hasSuffix("era") || word.hasSuffix("ade") || word.hasSuffix("ades") {
+            pos = "verb"
+        } else {
+            pos = "unknown"
+        }
+
+        return MorphemeAnalysis(word: word, baseForm: word, pos: pos, morphemes: [word], isCompound: false, forms: [:])
     }
 }
 
@@ -210,16 +297,39 @@ actor SwedishWSDEngine {
     }
 
     private func scoreSenses(_ senses: [WordSense], context: String, targetWord: String) -> [WordSense] {
-        let contextWords = Set(context.lowercased().split(separator: " ").map(String.init))
+        let contextWords = context.lowercased().split(separator: " ").map(String.init)
+        let contextSet = Set(contextWords.filter { $0.count > 2 && $0 != targetWord })
+
+        // Find target word position for proximity weighting
+        let targetIdx = contextWords.firstIndex(of: targetWord) ?? contextWords.count / 2
 
         return senses.map { sense in
-            var score = 0.3 // Baslinje
-            // Kontextöverlapp med exempelmeningar
+            var score = 0.3 // Baseline
+
+            // Factor 1: Example word overlap (weighted by proximity to target)
             for example in sense.examples {
                 let exampleWords = Set(example.lowercased().split(separator: " ").map(String.init))
-                let overlap = contextWords.intersection(exampleWords).count
-                score += Double(overlap) * 0.2
+                let overlap = contextSet.intersection(exampleWords)
+                for overlapWord in overlap {
+                    // Weight by proximity: closer words to the target word score higher
+                    if let wordIdx = contextWords.firstIndex(of: overlapWord) {
+                        let distance = abs(wordIdx - targetIdx)
+                        let proximityWeight = distance <= 2 ? 0.3 : (distance <= 5 ? 0.2 : 0.1)
+                        score += proximityWeight
+                    } else {
+                        score += 0.15
+                    }
+                }
             }
+
+            // Factor 2: Definition word overlap with context
+            let defWords = Set(sense.definition.lowercased().split(separator: " ").map(String.init).filter { $0.count > 3 })
+            let defOverlap = contextSet.intersection(defWords)
+            score += Double(defOverlap.count) * 0.15
+
+            // Factor 3: First-sense preference (most common sense gets slight boost)
+            if sense.id.hasSuffix(".1") { score += 0.08 }
+
             var updated = sense
             updated.confidence = min(0.99, score)
             return updated

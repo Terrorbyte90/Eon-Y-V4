@@ -95,12 +95,14 @@ final class CognitiveState: ObservableObject {
     func update(dimension: CognitiveDimension, delta: Double, source: String) {
         let old = dimensions[dimension] ?? 0.3
 
-        // Diminishing returns: the higher the dimension, the less effect each boost has.
-        // At 0.3: full effect. At 0.7: 60% effect. At 0.9: 20% effect.
-        let diminishingFactor = max(0.1, 1.0 - old * 0.9)
+        // Diminishing returns: adapt based on growth phase.
+        // During positive growth: slightly relaxed diminishing (learning is accelerating)
+        // During stagnation/decline: standard diminishing
+        let velocityBonus = growthVelocity > 0.0005 ? 0.15 : 0.0
+        let diminishingFactor = max(0.1, (1.0 - old * 0.9) + velocityBonus)
         let effectiveDelta = delta * diminishingFactor
 
-        let new = max(0.01, min(0.95, old + effectiveDelta)) // Cap at 0.95 instead of 0.99
+        let new = max(0.01, min(0.95, old + effectiveDelta))
         dimensions[dimension] = new
 
         // Spara historik
@@ -109,10 +111,22 @@ final class CognitiveState: ObservableObject {
             dimensionHistory[dimension]?.removeFirst(20)
         }
 
-        // Propagera kausal påverkan — reduced from 0.3x to 0.15x to prevent cascading inflation
-        propagateCausalEffect(from: dimension, delta: effectiveDelta * 0.15)
+        // Adaptive causal propagation factor:
+        // Stable system (many data points, low variance) → stronger propagation (0.18)
+        // Noisy system (few data points, high variance) → weaker propagation (0.10)
+        let historyCount = dimensionHistory[dimension]?.count ?? 0
+        let propagationFactor: Double
+        if historyCount > 30 {
+            let values = dimensionHistory[dimension] ?? []
+            let mean = values.reduce(0, +) / Double(values.count)
+            let variance = values.map { pow($0 - mean, 2) }.reduce(0, +) / Double(values.count)
+            let stability = max(0, 1.0 - sqrt(variance) * 5.0) // 0..1 where 1 = very stable
+            propagationFactor = 0.10 + stability * 0.08 // 0.10..0.18
+        } else {
+            propagationFactor = 0.12 // Conservative default for early system
+        }
+        propagateCausalEffect(from: dimension, delta: effectiveDelta * propagationFactor)
 
-        // Uppdatera integrerat intelligensindex
         recalculateIntegratedIntelligence()
     }
 
@@ -120,7 +134,12 @@ final class CognitiveState: ObservableObject {
         let clamped = max(0.01, min(0.95, value))
         let old = dimensions[dimension] ?? 0.3
         dimensions[dimension] = clamped
-        propagateCausalEffect(from: dimension, delta: (clamped - old) * 0.15)
+        let delta = clamped - old
+        propagateCausalEffect(from: dimension, delta: delta * 0.12)
+        dimensionHistory[dimension, default: []].append(clamped)
+        if (dimensionHistory[dimension]?.count ?? 0) > 100 {
+            dimensionHistory[dimension]?.removeFirst(20)
+        }
         recalculateIntegratedIntelligence()
     }
 
@@ -145,11 +164,32 @@ final class CognitiveState: ObservableObject {
     // MARK: - Kausal propagering
 
     private func propagateCausalEffect(from source: CognitiveDimension, delta: Double) {
-        let effects = causalInfluences.filter { $0.from == source }
-        for effect in effects {
+        // First-order effects: A → B
+        let directEffects = causalInfluences.filter { $0.from == source }
+        var secondOrderSources: [(CognitiveDimension, Double)] = []
+
+        for effect in directEffects {
             let propagated = delta * effect.strength
+            guard abs(propagated) > 0.0005 else { continue } // Skip negligible effects
             let old = dimensions[effect.to] ?? 0.3
-            dimensions[effect.to] = max(0.01, min(0.99, old + propagated))
+            let dimFactor = max(0.1, 1.0 - old * 0.9) // Diminishing returns on propagated too
+            let actual = propagated * dimFactor
+            dimensions[effect.to] = max(0.01, min(0.95, old + actual))
+            secondOrderSources.append((effect.to, actual))
+        }
+
+        // Second-order effects: A → B → C (diminished by 0.3x)
+        // Only propagate if the primary delta is significant
+        if abs(delta) > 0.001 {
+            for (secondSource, secondDelta) in secondOrderSources {
+                let indirect = causalInfluences.filter { $0.from == secondSource && $0.to != source }
+                for effect in indirect {
+                    let propagated = secondDelta * effect.strength * 0.3 // Heavy dampening for 2nd order
+                    guard abs(propagated) > 0.0003 else { continue }
+                    let old = dimensions[effect.to] ?? 0.3
+                    dimensions[effect.to] = max(0.01, min(0.95, old + propagated))
+                }
+            }
         }
     }
 
@@ -444,6 +484,12 @@ final class CognitiveState: ObservableObject {
         let recentAvg = recent.reduce(0, +) / Double(recent.count)
         let olderAvg = older.reduce(0, +) / Double(older.count)
         return recentAvg - olderAvg
+    }
+
+    /// Count how many causal influences originate from a given dimension.
+    /// Used to identify high-synergy dimensions that affect many others.
+    func causalInfluenceCount(from dimension: CognitiveDimension) -> Int {
+        causalInfluences.filter { $0.from == dimension }.count
     }
 
     // MARK: - Persistens: spara och återställ kognitiv state över omstarter

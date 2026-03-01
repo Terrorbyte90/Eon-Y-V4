@@ -584,22 +584,44 @@ final class EonLiveAutonomy: ObservableObject {
         return mode.autonomyPaused
     }
 
-    // Djup kognitiv analys — körs var ~30s för att hålla Eon aktiv och tänkande
+    // Djup kognitiv analys — körs var ~30s med synergy-aware dimension boosting
     private func runDeepCognitiveAnalysis() async {
         guard let brain, !brain.isThinking else { return }
         let state = CognitiveState.shared
         let ii = state.integratedIntelligence
 
-        // Välj vad som behöver mest uppmärksamhet
-        let weakDim = state.weakestDimensions(limit: 1).first?.0
-        let label: String
-        if let dim = weakDim {
-            label = "Djupanalys: \(dim.rawValue) behöver stärkas (nivå: \(String(format: "%.0f", state.dimensionLevel(dim) * 100))%)"
-            await state.update(dimension: dim, delta: 0.003, source: "deep_analysis")
-        } else {
-            label = "Djupanalys: II=\(String(format: "%.3f", ii)) · alla dimensioner balanserade"
+        // Find the dimension whose boost would benefit the most other dimensions
+        let weakDims = state.weakestDimensions(limit: 3)
+        var bestDim: CognitiveDimension? = nil
+        var bestBenefit: Double = 0
+        var bestLabel = ""
+
+        for (dim, level) in weakDims {
+            // Calculate total benefit: direct gain + propagated causal influence
+            let directGain = 1.0 - level // How much room to grow
+            // Estimate downstream benefit by checking how many other dims this influences
+            let downstreamCount = state.causalInfluenceCount(from: dim)
+            let totalBenefit = directGain + Double(downstreamCount) * 0.15
+
+            if totalBenefit > bestBenefit {
+                bestBenefit = totalBenefit
+                bestDim = dim
+                bestLabel = "\(dim.rawValue) (\(String(format: "%.0f", level * 100))%, påverkar \(downstreamCount) andra)"
+            }
         }
-        brain.innerMonologue.append(MonologueLine(text: "🔬 \(label)", type: .insight))
+
+        if let dim = bestDim {
+            await state.update(dimension: dim, delta: 0.003, source: "deep_analysis")
+            brain.innerMonologue.append(MonologueLine(
+                text: "🔬 Djupanalys: stärker \(bestLabel) [II=\(String(format: "%.3f", ii))]",
+                type: .insight
+            ))
+        } else {
+            brain.innerMonologue.append(MonologueLine(
+                text: "🔬 Djupanalys: II=\(String(format: "%.3f", ii)) · alla dimensioner balanserade",
+                type: .insight
+            ))
+        }
         brain.developmentalProgress = clamp(brain.developmentalProgress + 0.0005, 0.0, 1.0)
     }
 
@@ -857,41 +879,112 @@ final class EonLiveAutonomy: ObservableObject {
         // Deduplication: skip articles we've already learned from
         guard !learnedArticleIDs.contains(article.id) else { return }
         learnedArticleIDs.insert(article.id)
-        // Cap the set to prevent unbounded memory growth
         if learnedArticleIDs.count > 500 {
             learnedArticleIDs = Set(learnedArticleIDs.suffix(300))
         }
 
-        // Extrahera fakta med NLP
+        let mem = PersistentMemoryStore.shared
+
+        // Phase 1: Extract structured facts using sentence-level NLP
         let facts = NLPFactExtractor.extract(from: article.content)
-        for fact in facts.prefix(5) {
-            Task.detached(priority: .background) {
-                await PersistentMemoryStore.shared.saveFact(
-                    subject: fact.subject,
-                    predicate: fact.predicate,
-                    object: fact.object,
-                    confidence: fact.confidence,
-                    source: "article:\(article.title)"
+        var savedFactCount = 0
+        for fact in facts.prefix(10) {
+            await mem.saveFact(
+                subject: fact.subject,
+                predicate: fact.predicate,
+                object: fact.object,
+                confidence: fact.confidence,
+                source: "article:\(article.title)"
+            )
+            savedFactCount += 1
+        }
+
+        // Phase 2: Extract key concepts and link to article domain
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = article.content
+        var concepts: [String] = []
+        tagger.enumerateTags(in: article.content.startIndex..<article.content.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, range in
+            if tag == .noun {
+                let word = String(article.content[range])
+                if word.count > 4, !concepts.contains(word.lowercased()) {
+                    concepts.append(word.lowercased())
+                }
+            }
+            return true
+        }
+        // Save domain-concept links (article domain → concept)
+        for concept in concepts.prefix(8) {
+            await mem.saveFact(
+                subject: article.domain,
+                predicate: "omfattar",
+                object: concept,
+                confidence: 0.6,
+                source: "article_concept:\(article.title)"
+            )
+        }
+
+        // Phase 3: Generate BERT embedding for article content — log for semantic awareness
+        let neo = NeuralEngineOrchestrator.shared
+        if await neo.isLoaded {
+            let contentSample = String(article.content.prefix(500))
+            let embedding = await neo.embed(article.title + " " + contentSample)
+            let norm = embedding.map { $0 * $0 }.reduce(0, +)
+            if norm > 0 {
+                // Save article indexing metadata as fact
+                await mem.saveFact(
+                    subject: article.title,
+                    predicate: "indexerad_med",
+                    object: "BERT-768dim (norm=\(String(format: "%.2f", sqrt(norm))))",
+                    confidence: 0.9,
+                    source: "article_embedding"
                 )
             }
         }
 
-        // Dra paralleller med befintlig kunskap
-        if facts.count >= 3 {
-            let insight = ParallelDrawingEngine.findParallels(
-                newFacts: facts,
-                domain: article.domain,
-                knowledgeCount: brain.knowledgeNodeCount
-            )
-            if let insight {
-                brain.innerMonologue.append(MonologueLine(text: "⟳ Parallell: \(insight)", type: .insight))
+        // Phase 4: Cross-reference with existing knowledge — find contradictions and connections
+        let existingFacts = await mem.searchFacts(query: article.title, limit: 10)
+        var connections = 0
+        for existing in existingFacts {
+            let articleConcepts = Set(concepts.prefix(15))
+            let factWords = Set("\(existing.subject) \(existing.object)".lowercased()
+                .components(separatedBy: .whitespaces).filter { $0.count > 3 })
+            let overlap = articleConcepts.intersection(factWords)
+            if !overlap.isEmpty {
+                connections += 1
+                // Link article knowledge to existing fact's subject
+                await mem.saveFact(
+                    subject: article.title,
+                    predicate: "relaterar_till",
+                    object: existing.subject,
+                    confidence: min(0.8, 0.5 + Double(overlap.count) * 0.1),
+                    source: "cross_reference"
+                )
             }
         }
 
-        // Update knowledge dimension based on actual learning
-        await CognitiveState.shared.update(dimension: .knowledge, delta: 0.002, source: "article_learning")
-        await CognitiveState.shared.update(dimension: .comprehension, delta: 0.001, source: "article_learning")
-        brain.phiValue = clamp(brain.phiValue + 0.002, 0.1, 1.0)
+        // Phase 5: Update cognitive dimensions with scaled gains
+        let factQuality = Double(savedFactCount) / 10.0 // 0..1
+        let knowledgeDelta = 0.002 + factQuality * 0.003 // 0.002-0.005 based on fact richness
+        let comprehensionDelta = connections > 0 ? 0.002 : 0.001 // More if cross-referenced
+        await CognitiveState.shared.update(dimension: .knowledge, delta: knowledgeDelta, source: "article_learning")
+        await CognitiveState.shared.update(dimension: .comprehension, delta: comprehensionDelta, source: "article_learning")
+        brain.phiValue = clamp(brain.phiValue + knowledgeDelta, 0.1, 1.0)
+
+        // Phase 6: Draw parallels using actual concept overlap (not random strings)
+        let insight = ParallelDrawingEngine.findParallels(
+            newFacts: facts,
+            domain: article.domain,
+            knowledgeCount: brain.knowledgeNodeCount
+        )
+        if let insight {
+            brain.innerMonologue.append(MonologueLine(text: "⟳ Parallell: \(insight)", type: .insight))
+        }
+
+        // Log learning summary
+        brain.innerMonologue.append(MonologueLine(
+            text: "📖 Lärt från '\(article.title)': \(savedFactCount) fakta, \(concepts.prefix(5).count) begrepp, \(connections) kopplingar",
+            type: .memory
+        ))
     }
 
     // MARK: - Consolidation (called from rest phase)
@@ -1174,9 +1267,9 @@ final class EonLiveAutonomy: ObservableObject {
 
     private func readAndLearnFromArticles(brain: EonBrain) async {
         brain.autonomousProcessLabel = "Läser och analyserar artiklar..."
-        let articles = await PersistentMemoryStore.shared.randomArticles(limit: 3)
+        let mem = PersistentMemoryStore.shared
+        let articles = await mem.randomArticles(limit: 4)
 
-        // Kör alltid — om inga artiklar finns, generera en direkt
         if articles.isEmpty {
             brain.innerMonologue.append(MonologueLine(
                 text: "📚 Inga artiklar i databasen — genererar seed-artikel autonomt...",
@@ -1186,31 +1279,23 @@ final class EonLiveAutonomy: ObservableObject {
             return
         }
 
+        var allExtractedFacts: [ExtractedFact] = []
+
         for article in articles {
-            let line = MonologueLine(
-                text: "Läser: '\(article.title)' — extraherar fakta, mönster, paralleller...",
+            brain.innerMonologue.append(MonologueLine(
+                text: "📖 Läser: '\(article.title)' (\(article.domain), \(article.wordCount) ord)...",
                 type: .memory
-            )
-            brain.innerMonologue.append(line)
+            ))
             await learnFromArticle(article, brain: brain)
 
-            // BERT-embedding av artikeln för semantisk indexering
-            let neo = NeuralEngineOrchestrator.shared
-            let isLoaded = await neo.isLoaded
-            if isLoaded {
-                let embedding = await neo.embed(article.title + " " + article.summary)
-                let norm = embedding.map { $0 * $0 }.reduce(0, +)
-                if norm > 0 {
-                    brain.innerMonologue.append(MonologueLine(
-                        text: "KB-BERT: '\(article.title)' indexerad (768-dim, norm=\(String(format: "%.2f", sqrt(norm))))",
-                        type: .thought
-                    ))
-                }
-            }
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            // Collect extracted facts for cross-article analysis
+            let facts = NLPFactExtractor.extract(from: article.content)
+            allExtractedFacts.append(contentsOf: facts)
+
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
         }
 
-        // Korsanalys: dra slutsatser från flera artiklar
+        // Cross-article analysis: find shared themes using actual NLP
         if articles.count >= 2 {
             let crossInsight = CrossArticleAnalyzer.analyze(articles: articles)
             if let insight = crossInsight {
@@ -1218,8 +1303,38 @@ final class EonLiveAutonomy: ObservableObject {
                     text: "⟳ Korsanalys [\(articles.count) artiklar]: \(insight)",
                     type: .insight
                 ))
-                brain.phiValue = clamp(brain.phiValue + 0.004, 0.1, 1.0)
+                await CognitiveState.shared.update(dimension: .analogyBuilding, delta: 0.002, source: "cross_article")
+                brain.phiValue = clamp(brain.phiValue + 0.003, 0.1, 1.0)
             }
+        }
+
+        // Synthesize cross-article causal chains
+        let causalFacts = allExtractedFacts.filter { ["orsakar", "påverkar", "kräver", "möjliggör"].contains($0.predicate) }
+        if causalFacts.count >= 3 {
+            // Try to build a chain: A→B, B→C = A→B→C
+            var chains: [[String]] = []
+            for fact1 in causalFacts {
+                for fact2 in causalFacts where fact1.object.lowercased() == fact2.subject.lowercased() && fact1.subject != fact2.object {
+                    chains.append([fact1.subject, fact1.object, fact2.object])
+                }
+            }
+            if let chain = chains.first {
+                let chainStr = chain.joined(separator: " → ")
+                brain.innerMonologue.append(MonologueLine(
+                    text: "🔗 Syntetiserad kausalkedja från artiklar: \(chainStr)",
+                    type: .insight
+                ))
+                // Feed into reasoning engine's causal graph
+                await ReasoningEngine.shared.enrichCausalGraphFromFacts()
+                await CognitiveState.shared.update(dimension: .causality, delta: 0.003, source: "article_causal_synthesis")
+            }
+        }
+
+        // Feed article concepts to LearningEngine for FSRS tracking
+        for article in articles.prefix(2) {
+            let topic = article.title
+            let domain = article.domain
+            await LearningEngine.shared.addFSRSItem(topic: topic, domain: domain, initialDifficulty: 0.4)
         }
     }
 
@@ -1673,57 +1788,155 @@ struct ExtractedFact {
 }
 
 struct NLPFactExtractor {
+    /// Swedish predicate patterns for sentence-level fact extraction
+    private static let predicatePatterns: [(regex: String, predicate: String, confidence: Double)] = [
+        ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})\\s+är\\s+((?:en|ett|den|det|)\\s*[\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "är", 0.75),
+        ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})\\s+har\\s+((?:en|ett|)\\s*[\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "har", 0.68),
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})\\s+(?:orsakar|leder\\s+till|ger\\s+upphov\\s+till)\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "orsakar", 0.65),
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})\\s+(?:påverkar|förändrar|styr)\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "påverkar", 0.62),
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})\\s+kallas\\s+(?:för\\s+)?([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "kallas", 0.72),
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})\\s+(?:består\\s+av|innehåller)\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "består_av", 0.68),
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})\\s+(?:kräver|förutsätter|behöver)\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "kräver", 0.64),
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})\\s+(?:möjliggör|underlättar)\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "möjliggör", 0.62),
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})\\s+(?:tillhör|ingår\\s+i)\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "tillhör", 0.66),
+    ]
+
     static func extract(from text: String) -> [ExtractedFact] {
         var facts: [ExtractedFact] = []
-        let tagger = NLTagger(tagSchemes: [.lexicalClass, .nameType])
-        tagger.string = text
+        var seenTriples = Set<String>()
 
-        var nouns: [String] = []
-        var verbs: [String] = []
+        // Strategy 1: Sentence-level regex extraction (high quality)
+        let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.count > 10 }
 
-        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass) { tag, range in
-            let word = String(text[range]).lowercased()
-            switch tag {
-            case .noun where word.count > 3: nouns.append(word)
-            case .verb where word.count > 3: verbs.append(word)
-            default: break
+        for sentence in sentences {
+            let range = NSRange(sentence.startIndex..., in: sentence)
+            for (pattern, predicate, confidence) in predicatePatterns {
+                guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { continue }
+                let matches = regex.matches(in: sentence, range: range)
+                for match in matches.prefix(2) {
+                    guard let subjRange = Range(match.range(at: 1), in: sentence),
+                          let objRange = Range(match.range(at: 2), in: sentence) else { continue }
+                    let subject = String(sentence[subjRange]).trimmingCharacters(in: .whitespaces)
+                    let object = String(sentence[objRange]).trimmingCharacters(in: .whitespaces)
+                    guard subject.count > 2, object.count > 2, subject != object else { continue }
+
+                    let key = "\(subject.lowercased())|\(predicate)|\(object.lowercased())"
+                    guard !seenTriples.contains(key) else { continue }
+                    seenTriples.insert(key)
+
+                    facts.append(ExtractedFact(
+                        subject: subject,
+                        predicate: predicate,
+                        object: object,
+                        confidence: confidence
+                    ))
+                }
             }
-            return true
         }
 
-        // Bygg enkla SPO-tripletter
-        let uniqueNouns = Array(Set(nouns)).prefix(8)
-        let uniqueVerbs = Array(Set(verbs)).prefix(4)
-
-        guard uniqueNouns.count >= 2 else { return facts }
-        for i in 0..<min(uniqueNouns.count - 1, 5) {
-            let subject = String(uniqueNouns[i])
-            let predicate = uniqueVerbs.randomElement() ?? "relaterar till"
-            let object = String(uniqueNouns[(i + 1) % uniqueNouns.count])
-            facts.append(ExtractedFact(
-                subject: subject,
-                predicate: predicate,
-                object: object,
-                confidence: Double.random(in: 0.6...0.88)
-            ))
+        // Strategy 2: NLTagger-based concept co-occurrence (for sentences without pattern matches)
+        if facts.count < 3 {
+            let tagger = NLTagger(tagSchemes: [.lexicalClass])
+            for sentence in sentences.prefix(10) where sentence.count > 20 {
+                tagger.string = sentence
+                var sentenceNouns: [String] = []
+                tagger.enumerateTags(in: sentence.startIndex..<sentence.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, range in
+                    if tag == .noun {
+                        let word = String(sentence[range])
+                        if word.count > 3 { sentenceNouns.append(word) }
+                    }
+                    return true
+                }
+                // Co-occurring nouns in same sentence → "relaterar_till"
+                let unique = Array(Set(sentenceNouns))
+                if unique.count >= 2 {
+                    let key = "\(unique[0].lowercased())|relaterar_till|\(unique[1].lowercased())"
+                    if !seenTriples.contains(key) {
+                        seenTriples.insert(key)
+                        facts.append(ExtractedFact(
+                            subject: unique[0],
+                            predicate: "relaterar_till",
+                            object: unique[1],
+                            confidence: 0.55
+                        ))
+                    }
+                }
+                if facts.count >= 12 { break }
+            }
         }
 
-        return facts
+        // Sort by confidence, return top results
+        return Array(facts.sorted { $0.confidence > $1.confidence }.prefix(12))
     }
 }
 
 // MARK: - Parallel Drawing Engine
 
 struct ParallelDrawingEngine {
+    /// Domain relationship map — which domains share structural similarities
+    private static let domainParallels: [String: [String: String]] = [
+        "Kognitionsvetenskap": [
+            "AI & Teknik": "informationsbearbetning och representationslärande",
+            "Psykologi": "uppmärksamhet, minne och beslutsfattande",
+            "Filosofi": "medvetandeproblemet och intentionalitet",
+            "Biologi": "neurala nätverk och hjärnans arkitektur",
+        ],
+        "AI & Teknik": [
+            "Kognitionsvetenskap": "lärande algoritmer inspirerade av kognition",
+            "Språk": "naturlig språkbehandling och semantisk analys",
+            "Matematik": "optimering och statistisk inferens",
+        ],
+        "Filosofi": [
+            "Psykologi": "medvetande, fri vilja och moralisk intuition",
+            "Historia": "idéhistoria och kunskapens utveckling",
+            "Kognitionsvetenskap": "epistemologi och kunskapsrepresentation",
+        ],
+        "Historia": [
+            "Psykologi": "massbeteende och sociala mönster",
+            "Filosofi": "idéernas inverkan på samhällsförändring",
+        ],
+    ]
+
     static func findParallels(newFacts: [ExtractedFact], domain: String, knowledgeCount: Int) -> String? {
-        guard knowledgeCount > 10 else { return nil }
-        let subjects = newFacts.map { $0.subject }.prefix(3)
-        let parallels = [
-            "Strukturell likhet med \(domain)-mönster: \(subjects.joined(separator: " ↔ "))",
-            "Kausalt samband identifierat: \(subjects.first ?? "X") → \(subjects.last ?? "Y") (analogt med känd kedja)",
-            "Domänöverföring möjlig: principer från \(domain) applicerbara på relaterade fält",
-        ]
-        return parallels.randomElement()
+        guard knowledgeCount > 5, !newFacts.isEmpty else { return nil }
+
+        // Check if we have causal facts — these are most informative for parallels
+        let causalFacts = newFacts.filter { ["orsakar", "påverkar", "kräver", "möjliggör"].contains($0.predicate) }
+        let identityFacts = newFacts.filter { $0.predicate == "är" }
+
+        // Strategy 1: Causal chain detection
+        if causalFacts.count >= 2 {
+            let chain = causalFacts.prefix(3).map { "\($0.subject) → \($0.object)" }.joined(separator: " → ")
+            return "Kausalkedja i \(domain): \(chain)"
+        }
+
+        // Strategy 2: Domain cross-reference
+        if let parallelDomains = domainParallels[domain] {
+            let subjects = Set(newFacts.map { $0.subject.lowercased() })
+            for (targetDomain, connection) in parallelDomains {
+                // Check if any fact subjects relate to the parallel domain
+                let targetKeywords = targetDomain.lowercased().components(separatedBy: .whitespaces)
+                if subjects.contains(where: { s in targetKeywords.contains(where: { s.contains($0) }) }) {
+                    return "Domänparallell: \(domain) ↔ \(targetDomain) via \(connection)"
+                }
+            }
+        }
+
+        // Strategy 3: Classification facts → taxonomy insight
+        if identityFacts.count >= 2 {
+            let categories = identityFacts.prefix(3).map { "\($0.subject) = \($0.object)" }.joined(separator: ", ")
+            return "Taxonomisk struktur i \(domain): \(categories)"
+        }
+
+        // Strategy 4: Concept density — many facts about same subject → deep topic
+        let subjectCounts = Dictionary(newFacts.map { ($0.subject, 1) }, uniquingKeysWith: +)
+        if let (densestSubject, count) = subjectCounts.max(by: { $0.value < $1.value }), count >= 3 {
+            return "Kärnbegrepp i \(domain): '\(densestSubject)' (förekommer i \(count) relationer)"
+        }
+
+        return nil
     }
 }
 
@@ -1732,16 +1945,45 @@ struct ParallelDrawingEngine {
 struct CrossArticleAnalyzer {
     static func analyze(articles: [KnowledgeArticle]) -> String? {
         guard articles.count >= 2 else { return nil }
-        let domains = articles.map { $0.domain }
-        let titles = articles.map { $0.title }
 
-        let insights = [
-            "Gemensamt tema i '\(titles[0])' och '\(titles[1])': kausala strukturer återkommer",
-            "Domänöverskridande mönster: \(domains.joined(separator: " + ")) delar underliggande principer",
-            "Syntes: \(titles.count) artiklar pekar mot gemensam slutsats om systemisk komplexitet",
-            "Analogibyggande: strukturen i '\(titles[0])' speglar '\(titles.last ?? "")' — djup likhet",
-        ]
-        return insights.randomElement()
+        // Extract key concepts from each article using NLTagger
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        var articleConcepts: [[String]] = []
+        for article in articles {
+            tagger.string = article.content
+            var concepts: [String] = []
+            tagger.enumerateTags(in: article.content.startIndex..<article.content.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, range in
+                if tag == .noun {
+                    let word = String(article.content[range]).lowercased()
+                    if word.count > 4 && !concepts.contains(word) { concepts.append(word) }
+                }
+                return true
+            }
+            articleConcepts.append(concepts)
+        }
+
+        // Find shared concepts between articles
+        guard articleConcepts.count >= 2 else { return nil }
+        let shared = Set(articleConcepts[0]).intersection(Set(articleConcepts[1]))
+        let sharedConcepts = shared.filter { $0.count > 4 }.prefix(5)
+
+        if sharedConcepts.count >= 2 {
+            let conceptStr = sharedConcepts.joined(separator: ", ")
+            // Check if domains differ — cross-domain insight is more valuable
+            if articles[0].domain != articles[1].domain {
+                return "Domänöverföring: '\(articles[0].title)' och '\(articles[1].title)' delar begrepp (\(conceptStr)) — \(articles[0].domain) ↔ \(articles[1].domain) konvergens"
+            } else {
+                return "Tematisk koherens i \(articles[0].domain): gemensamma begrepp (\(conceptStr)) bekräftar domänkunskap"
+            }
+        }
+
+        // If no direct concept overlap, check domain relationship
+        let domains = Set(articles.map { $0.domain })
+        if domains.count > 1 {
+            return "Mångdomänperspektiv: \(domains.joined(separator: " + ")) — breddad förståelse utan direkt begreppsöverlapp"
+        }
+
+        return nil
     }
 }
 
