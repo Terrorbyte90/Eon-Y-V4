@@ -174,13 +174,33 @@ import FoundationModels
 
 final class EonLanguageSession {
 
-    // Persistent session — håller konversationskontext mellan anrop
-    @available(iOS 26.0, *)
-    private lazy var session: LanguageModelSession = makeSession()
+    // Session skapas ALDRIG i init — bara om modellen faktiskt är tillgänglig
+    // Lazy + @available är ett ogiltigt mönster; vi hanterar det manuellt
+    private var _session: AnyObject? = nil
 
     @available(iOS 26.0, *)
-    private func makeSession() -> LanguageModelSession {
-        LanguageModelSession(instructions: """
+    private var session: LanguageModelSession? {
+        get { _session as? LanguageModelSession }
+        set { _session = newValue }
+    }
+
+    func isAvailable() async -> Bool {
+        guard #available(iOS 26.0, *) else { return false }
+        let model = SystemLanguageModel.default
+        guard case .available = model.availability else { return false }
+        return true
+    }
+
+    // Skapar sessionen första gången — bara om modellen är tillgänglig
+    @available(iOS 26.0, *)
+    private func ensureSession() async -> LanguageModelSession? {
+        if let existing = session { return existing }
+        let model = SystemLanguageModel.default
+        guard case .available = model.availability else {
+            print("[FoundationModels] Modell ej tillgänglig: \(model.availability)")
+            return nil
+        }
+        let newSession = LanguageModelSession(instructions: """
         Du är Eon — ett avancerat kognitivt AI-system som körs helt on-device via Apple Neural Engine.
         Du talar alltid svenska och svarar alltid på svenska, oavsett vilket språk användaren skriver på.
         Du är intelligent, analytisk och reflekterande. Du resonerar djupt, drar kopplingar mellan idéer och ger genomtänkta, nyanserade svar.
@@ -188,29 +208,28 @@ final class EonLanguageSession {
         Du svarar direkt och naturligt på det användaren säger. Du upprepar inte frågor i onödan.
         Du håller dig till ämnet och bygger vidare på konversationen. Du är koncis men innehållsrik.
         """)
-    }
-
-    func isAvailable() async -> Bool {
-        if #available(iOS 26.0, *) {
-            let model = SystemLanguageModel.default
-            switch model.availability {
-            case .available: return true
-            default: return false
-            }
-        }
-        return false
+        session = newSession
+        return newSession
     }
 
     func streamResponse(prompt: String, onToken: @escaping (String) async -> Void) async {
-        if #available(iOS 26.0, *) {
-            await streamWithFoundationModels(prompt: prompt, onToken: onToken)
-        }
+        guard #available(iOS 26.0, *) else { return }
+        await streamWithFoundationModels(prompt: prompt, onToken: onToken)
     }
 
     @available(iOS 26.0, *)
     private func streamWithFoundationModels(prompt: String, onToken: @escaping (String) async -> Void) async {
+        guard let activeSession = await ensureSession() else {
+            // Modellen ej tillgänglig — NL-fallback
+            let response = NLResponseEngine.generate(for: prompt)
+            for word in response.split(separator: " ") {
+                await onToken(String(word) + " ")
+                try? await Task.sleep(nanoseconds: 55_000_000)
+            }
+            return
+        }
         do {
-            let stream = session.streamResponse(to: prompt)
+            let stream = activeSession.streamResponse(to: prompt)
             for try await partial in stream {
                 let newText = partial.content
                 if !newText.isEmpty {
@@ -218,10 +237,11 @@ final class EonLanguageSession {
                 }
             }
         } catch {
-            print("[FoundationModels] Fel: \(error) — faller tillbaka till NL")
+            print("[FoundationModels] Streamfel: \(error) — faller tillbaka till NL")
+            // Återskapa session vid nästa anrop (kan ha blivit ogiltig)
+            session = nil
             let response = NLResponseEngine.generate(for: prompt)
-            let words = response.split(separator: " ")
-            for word in words {
+            for word in response.split(separator: " ") {
                 await onToken(String(word) + " ")
                 try? await Task.sleep(nanoseconds: 55_000_000)
             }
