@@ -82,17 +82,19 @@ actor CognitiveCycleEngine {
         context.prompt = prompt
         await onStepUpdate(.globalWorkspace, .completed)
 
-        // Steg 6: Chain-of-Thought
+        // Steg 6: Intent detection + Chain-of-Thought
         await onStepUpdate(.chainOfThought, .active)
-        await onMonologue(MonologueLine(text: "Bygger tankekedja...", type: .thought))
+        let intent = detectIntent(input: input, history: context.conversationHistory)
+        let (maxTokens, temperature) = generationParams(for: intent, inputLength: input.count)
+        await onMonologue(MonologueLine(text: "Intention: \(intent.rawValue) · tokens: \(maxTokens) · temp: \(String(format: "%.2f", temperature))", type: .thought))
         await onStepUpdate(.chainOfThought, .completed)
 
-        // Steg 7: Generering (GPT-SW3)
+        // Steg 7: Generering (GPT-SW3) med adaptiva parametrar
         await onStepUpdate(.generation, .active)
-        await onMonologue(MonologueLine(text: "GPT-SW3 genererar svar med Speculative Streaming...", type: .thought))
+        await onMonologue(MonologueLine(text: "GPT-SW3 genererar svar (\(intent.rawValue))...", type: .thought))
 
         var generatedText = ""
-        let stream = await neuralEngine.generateStream(prompt: prompt, maxTokens: 250, temperature: 0.72)
+        let stream = await neuralEngine.generateStream(prompt: prompt, maxTokens: maxTokens, temperature: temperature)
         for await token in stream {
             generatedText += token
             await onToken(token)
@@ -188,22 +190,13 @@ actor CognitiveCycleEngine {
 
         await onStepUpdate(.memoryRetrieval, .active)
         await onMonologue(MonologueLine(text: "Söker djupt i minnet och kunskapsbanken...", type: .memory))
-        // Hämta mer historia och fler minnen i resonerande läge
         let memories = await memory.searchConversations(query: input, limit: 15)
         context.retrievedMemories = memories
         let recentHistory = await memory.getRecentConversation(limit: 20)
         context.conversationHistory = recentHistory
-        // Hämta artiklar från kunskapsbanken
-        let knowledgeArticles = await memory.loadAllArticles()
-        let relevantArticles = knowledgeArticles.filter { article in
-            let lower = input.lowercased()
-            return article.title.lowercased().contains(lower) ||
-                   article.domain.lowercased().contains(lower) ||
-                   article.content.lowercased().contains(lower.prefix(20))
-        }.prefix(3)
-        await onMonologue(MonologueLine(text: "Hittade \(memories.count) minnen, \(relevantArticles.count) relevanta artiklar i kunskapsbanken", type: .memory))
         await onStepUpdate(.memoryRetrieval, .completed)
 
+        // Compute BERT embedding early — used for both article ranking and fact ranking
         await onStepUpdate(.causalGraph, .active)
         let inputEmbedding = await neuralEngine.embed(input)
         context.inputEmbedding = inputEmbedding
@@ -211,22 +204,64 @@ actor CognitiveCycleEngine {
         context.entities = entities
         await onStepUpdate(.causalGraph, .completed)
 
-        // Steg 5: Bygg djup prompt med kunskapsartiklar
+        // Semantic article retrieval — rank ALL articles by BERT similarity, not substring match
         await onStepUpdate(.globalWorkspace, .active)
         await onMonologue(MonologueLine(text: "Bygger djup kontext med kunskapsbanken...", type: .thought))
-        let deepPrompt = await buildDeepPrompt(input: input, context: context, articles: Array(relevantArticles))
+        let knowledgeArticles = await memory.loadAllArticles()
+        let relevantArticles: [KnowledgeArticle]
+        if !inputEmbedding.allSatisfy({ $0 == 0 }) {
+            // Semantic ranking — embed each article title+summary and compute similarity
+            var scored: [(article: KnowledgeArticle, score: Float)] = []
+            for article in knowledgeArticles.prefix(50) {
+                let articleEmb = await neuralEngine.embed(article.title + " " + article.summary)
+                let sim = await neuralEngine.cosineSimilarity(inputEmbedding, articleEmb)
+                scored.append((article, sim))
+            }
+            // Also check content keywords for articles that might have poor titles
+            let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+            for i in scored.indices {
+                let contentWords = Set(scored[i].article.content.lowercased().prefix(300)
+                    .components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                let overlap = inputWords.intersection(contentWords)
+                if overlap.count >= 2 {
+                    scored[i].score += Float(overlap.count) * 0.05 // Keyword boost
+                }
+            }
+            relevantArticles = scored.sorted { $0.score > $1.score }
+                .filter { $0.score > 0.25 } // Lower threshold for deep mode
+                .prefix(4) // More articles in deep mode
+                .map { $0.article }
+        } else {
+            // Fallback: keyword matching
+            let lower = input.lowercased()
+            relevantArticles = Array(knowledgeArticles.filter { article in
+                article.title.lowercased().contains(lower) ||
+                article.domain.lowercased().contains(lower) ||
+                article.content.lowercased().contains(String(lower.prefix(20)))
+            }.prefix(3))
+        }
+        await onMonologue(MonologueLine(text: "Hittade \(memories.count) minnen, \(relevantArticles.count) relevanta artiklar i kunskapsbanken", type: .memory))
+
+        let deepPrompt = await buildDeepPrompt(input: input, context: context, articles: relevantArticles)
         context.prompt = deepPrompt
         await onStepUpdate(.globalWorkspace, .completed)
 
-        // Steg 6: Utökad chain-of-thought — flera resonemangssteg
+        // Chain-of-thought with actual reasoning integration
         await onStepUpdate(.chainOfThought, .active)
-        await onMonologue(MonologueLine(text: "Bygger resonemangkedja — steg 1: identifiera kärnan...", type: .thought))
-        try? await Task.sleep(nanoseconds: 800_000_000)
-        await onMonologue(MonologueLine(text: "Resonemang steg 2: söker paralleller och kopplingar...", type: .insight))
-        try? await Task.sleep(nanoseconds: 800_000_000)
-        await onMonologue(MonologueLine(text: "Resonemang steg 3: väger perspektiv mot varandra...", type: .thought))
-        try? await Task.sleep(nanoseconds: 800_000_000)
-        await onMonologue(MonologueLine(text: "Resonemang steg 4: formulerar genomtänkt svar...", type: .insight))
+        // Run actual reasoning to inform the CoT
+        let reasoningResult = await ReasoningEngine.shared.reason(about: input, strategy: .adaptive, depth: 3)
+        await onMonologue(MonologueLine(text: "Resonemang steg 1: \(reasoningResult.steps.first?.content ?? "identifiera kärnan")...", type: .thought))
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        if !reasoningResult.causalChain.isEmpty {
+            await onMonologue(MonologueLine(text: "Resonemang steg 2: kausalkedja — \(reasoningResult.causalChain.prefix(3).joined(separator: " → "))", type: .insight))
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        if !reasoningResult.alternatives.isEmpty {
+            let alt = reasoningResult.alternatives.first ?? ""
+            await onMonologue(MonologueLine(text: "Resonemang steg 3: alternativt perspektiv — \(String(alt.prefix(80)))...", type: .thought))
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        await onMonologue(MonologueLine(text: "Resonemang steg 4: slutsats (konfidens \(String(format: "%.0f%%", reasoningResult.confidence * 100))) — formulerar svar...", type: .insight))
         await onStepUpdate(.chainOfThought, .completed)
 
         // Steg 7: Generering med högre token-budget och lägre temperatur
@@ -448,6 +483,66 @@ actor CognitiveCycleEngine {
         }
         if !nouns.isEmpty { parts.append("nyckelbegrepp: \(nouns.prefix(4).joined(separator: ", "))") }
         return parts.joined(separator: ", ")
+    }
+
+    // MARK: - Intent Detection
+
+    enum ConversationIntent: String {
+        case greeting     = "hälsning"
+        case factualQuery = "faktafråga"
+        case explanation  = "förklaring"
+        case opinion      = "åsiktsfråga"
+        case creative     = "kreativ"
+        case followUp     = "uppföljning"
+        case command      = "kommando"
+        case chitchat     = "småprat"
+    }
+
+    private func detectIntent(input: String, history: [ConversationRecord]) -> ConversationIntent {
+        let lower = input.lowercased().trimmingCharacters(in: .whitespaces)
+        let wordCount = lower.split(separator: " ").count
+
+        // Greeting detection
+        let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "tjena"]
+        if greetings.contains(where: { lower.hasPrefix($0) }) && wordCount <= 4 { return .greeting }
+
+        // Short follow-up (1-3 words)
+        let followUps = ["ja", "nej", "ok", "okej", "mm", "japp", "precis", "exakt", "visst", "aha", "oh"]
+        if wordCount <= 3 && followUps.contains(where: { lower.hasPrefix($0) }) && !history.isEmpty { return .followUp }
+
+        // Command
+        if lower.hasPrefix("gör") || lower.hasPrefix("visa") || lower.hasPrefix("beräkna") || lower.hasPrefix("sök") || lower.hasPrefix("skriv") { return .command }
+
+        // Explanation request
+        if lower.contains("förklara") || lower.contains("hur fungerar") || lower.contains("vad innebär") || lower.contains("vad betyder") { return .explanation }
+
+        // Factual query
+        if lower.hasPrefix("vad") || lower.hasPrefix("vem") || lower.hasPrefix("var") || lower.hasPrefix("när") || lower.hasPrefix("hur många") { return .factualQuery }
+
+        // Why/opinion
+        if lower.hasPrefix("varför") || lower.contains("tycker du") || lower.contains("vad anser") { return .opinion }
+
+        // Creative
+        if lower.contains("hitta på") || lower.contains("dikt") || lower.contains("berättelse") || lower.contains("fantisera") { return .creative }
+
+        // Default: if has question mark → factual, otherwise chitchat
+        return lower.contains("?") ? .factualQuery : .chitchat
+    }
+
+    private func generationParams(for intent: ConversationIntent, inputLength: Int) -> (maxTokens: Int, temperature: Double) {
+        switch intent {
+        case .greeting:     return (60, 0.80)
+        case .followUp:     return (120, 0.70)
+        case .factualQuery: return (250, 0.65)
+        case .explanation:  return (400, 0.68)
+        case .opinion:      return (300, 0.75)
+        case .creative:     return (350, 0.85)
+        case .command:      return (200, 0.60)
+        case .chitchat:
+            // Scale with input length: longer inputs deserve longer responses
+            let tokens = max(100, min(300, inputLength * 3))
+            return (tokens, 0.72)
+        }
     }
 
     // MARK: - Konfidens-aggregering

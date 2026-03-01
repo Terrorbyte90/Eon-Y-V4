@@ -145,17 +145,33 @@ final class GlobalWorkspaceEngine: ObservableObject {
     private func calculateInitialActivation(_ thought: WorkspaceThought) -> Double {
         var activation = thought.baseActivation
 
-        // Boost för nyhet
+        // Novelty boost — new thoughts get attention
         let isNovel = !activeThoughts.contains { $0.content == thought.content }
         if isNovel { activation += 0.15 }
 
-        // Boost för relevans till aktuellt fokus
+        // Relevance boost — related to current focus
         if let focus = currentFocus {
             activation += calculateSimilarity(thought, focus) * 0.2
         }
 
-        // Boost baserat på emotionell valens
+        // Emotional valence boost
         activation += abs(thought.emotionalValence) * 0.1
+
+        // Complexity boost — richer thoughts are more informative
+        let words = thought.content.split(separator: " ")
+        let uniqueWords = Set(words.map { $0.lowercased() }).filter { $0.count > 3 }
+        if uniqueWords.count > 5 {
+            let complexityBonus = min(0.12, Double(uniqueWords.count) * 0.01)
+            activation += complexityBonus
+        }
+
+        // Category-specific boost — certain categories are inherently more urgent
+        switch thought.category {
+        case .reasoning: activation += 0.05
+        case .emotion:   activation += 0.08 // Emotional thoughts demand attention
+        case .memory:    activation += 0.03
+        default:         break
+        }
 
         return min(1.0, activation)
     }
@@ -208,10 +224,27 @@ final class GlobalWorkspaceEngine: ObservableObject {
     }
 
     private func updateIntegrationLevel() {
-        let avgActivation = activeThoughts.isEmpty ? 0.0 : activeThoughts.map { $0.activation }.reduce(0, +) / Double(activeThoughts.count)
-        let variance = activeThoughts.isEmpty ? 0.0 : activeThoughts.map { pow($0.activation - avgActivation, 2) }.reduce(0, +) / Double(activeThoughts.count)
-        // Hög integration = hög medelaktivering + låg varians
-        integrationLevel = avgActivation * (1.0 - variance)
+        guard !activeThoughts.isEmpty else { integrationLevel = 0; return }
+
+        let avgActivation = activeThoughts.map { $0.activation }.reduce(0, +) / Double(activeThoughts.count)
+        let variance = activeThoughts.map { pow($0.activation - avgActivation, 2) }.reduce(0, +) / Double(activeThoughts.count)
+
+        // Semantic coherence: average pairwise similarity between active thoughts
+        var coherenceSum: Double = 0
+        var pairCount: Double = 0
+        if activeThoughts.count >= 2 {
+            for i in 0..<activeThoughts.count {
+                for j in (i+1)..<activeThoughts.count {
+                    coherenceSum += calculateSimilarity(activeThoughts[i], activeThoughts[j])
+                    pairCount += 1
+                }
+            }
+        }
+        let semanticCoherence = pairCount > 0 ? coherenceSum / pairCount : 0.5
+
+        // Integration = activation × coherence × (1 - variance)
+        // High integration = thoughts are active, related, and balanced
+        integrationLevel = avgActivation * (0.6 + semanticCoherence * 0.4) * max(0.3, 1.0 - variance)
     }
 
     // MARK: - Convenience

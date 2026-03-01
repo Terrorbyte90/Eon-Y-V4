@@ -297,31 +297,50 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     private func combinedPillarWorker() async {
         try? await Task.sleep(nanoseconds: 8_000_000_000)
 
-        // The pillars to rotate through, in order of importance
-        let pillarSequence: [(CognitivePillar, () async -> Void)] = [
-            (.causality,       { await self.runCausalWork() }),
-            (.knowledge,       { await self.runKnowledgeWork() }),
-            (.hypothesis,      { await self.runHypothesisWork() }),
-            (.analogy,         { await self.runAnalogyWork() }),
-            (.worldModel,      { await self.runWorldModelWork() }),
-            (.selfDevelopment, { await self.runSelfDevelopmentWork() }),
-            (.language,        { await self.runLanguageWork() }),
-            (.globalWorkspace, { await self.runGlobalWorkspaceWork() }),
-            (.prediction,      { await self.runPredictionWork() }),
+        let pillarWork: [(CognitivePillar, CognitiveDimension, () async -> Void)] = [
+            (.causality,       .causality,           { await self.runCausalWork() }),
+            (.knowledge,       .knowledge,            { await self.runKnowledgeWork() }),
+            (.hypothesis,      .hypothesisGeneration,  { await self.runHypothesisWork() }),
+            (.analogy,         .analogyBuilding,   { await self.runAnalogyWork() }),
+            (.worldModel,      .worldModel,            { await self.runWorldModelWork() }),
+            (.selfDevelopment, .selfAwareness,         { await self.runSelfDevelopmentWork() }),
+            (.language,        .language,              { await self.runLanguageWork() }),
+            (.globalWorkspace, .reasoning,             { await self.runGlobalWorkspaceWork() }),
+            (.prediction,      .prediction,            { await self.runPredictionWork() }),
         ]
 
         while !Task.isCancelled {
             guard let brain else { try? await Task.sleep(nanoseconds: 10_000_000_000); continue }
 
-            let (pillar, work) = pillarSequence[pillarRotationIndex % pillarSequence.count]
-            pillarRotationIndex += 1
+            // Priority-based pillar selection: weaker dimensions get more attention
+            // Score = (1 - dimensionLevel) * baseWeight + recencyPenalty
+            let state = CognitiveState.shared
+            let scored = pillarWork.map { (pillar, dim, work) -> (CognitivePillar, CognitiveDimension, () async -> Void, Double) in
+                let level = state.dimensionLevel(dim)
+                let need = 1.0 - level // How much this dimension needs work
+                // Recency penalty: pillars that ran recently get lower priority
+                let lastRun = pillarActivity[pillar] ?? 0
+                let recencyBonus = lastRun < 0.3 ? 0.15 : 0 // Boost if hasn't run recently
+                let priority = need * 1.5 + recencyBonus + Double.random(in: 0...0.1) // Small random to prevent lockout
+                return (pillar, dim, work, priority)
+            }
+            let sorted = scored.sorted { $0.3 > $1.3 }
+            let (pillar, _, work, _) = sorted.first!
 
+            pillarRotationIndex += 1
             activePillars.insert(pillar)
             await work()
             activePillars.remove(pillar)
 
-            // Feedback amplification (every 9th rotation = after all pillars have run once)
-            if pillarRotationIndex % pillarSequence.count == 0 {
+            // Track pillar activity
+            pillarActivity[pillar] = 1.0
+            // Decay all pillar activity
+            for key in pillarActivity.keys {
+                pillarActivity[key] = (pillarActivity[key] ?? 0) * 0.85
+            }
+
+            // Feedback amplification every 9th rotation
+            if pillarRotationIndex % 9 == 0 {
                 await runFeedbackAmplification(brain: brain)
             }
 
