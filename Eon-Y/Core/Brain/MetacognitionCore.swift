@@ -54,8 +54,18 @@ actor MetacognitionCore {
         // 6. Uppdatera CognitiveState
         let insightText = insights.first?.content ?? ""
         await MainActor.run { state.metacognitiveInsight = insightText }
-        await state.update(dimension: .metacognition, delta: 0.008, source: "metacognition_core")
-        await state.update(dimension: .selfAwareness, delta: 0.005, source: "metacognition_core")
+        await state.update(dimension: .metacognition, delta: 0.004, source: "metacognition_core") // Reduced from 0.008
+        await state.update(dimension: .selfAwareness, delta: 0.003, source: "metacognition_core") // Reduced from 0.005
+
+        // v3 Claude Edition: When stagnation is detected, ACTUALLY intervene
+        // by boosting the weakest stagnated dimensions directly
+        if audit.stagnatedDimensions.count > 3 {
+            for dim in audit.stagnatedDimensions.prefix(3) {
+                let level = await state.dimensionLevel(dim)
+                let interventionDelta = 0.008 * (0.7 - level) // Proportional to gap
+                await state.update(dimension: dim, delta: max(0.002, interventionDelta), source: "stagnation_intervention")
+            }
+        }
 
         // 7. Uppdatera kognitiv belastning
         let load = calculateCognitiveLoad(audit: audit)

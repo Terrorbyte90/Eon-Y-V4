@@ -89,10 +89,18 @@ final class CognitiveState: ObservableObject {
     }
 
     // MARK: - Uppdatera dimension (kallas av varje pelare)
+    // v3 Claude Edition: Added diminishing returns — high dimensions get smaller boosts.
+    // This prevents runaway inflation where II reaches 0.96 while actual performance is grade F.
 
     func update(dimension: CognitiveDimension, delta: Double, source: String) {
         let old = dimensions[dimension] ?? 0.3
-        let new = max(0.01, min(0.99, old + delta))
+
+        // Diminishing returns: the higher the dimension, the less effect each boost has.
+        // At 0.3: full effect. At 0.7: 60% effect. At 0.9: 20% effect.
+        let diminishingFactor = max(0.1, 1.0 - old * 0.9)
+        let effectiveDelta = delta * diminishingFactor
+
+        let new = max(0.01, min(0.95, old + effectiveDelta)) // Cap at 0.95 instead of 0.99
         dimensions[dimension] = new
 
         // Spara historik
@@ -101,18 +109,18 @@ final class CognitiveState: ObservableObject {
             dimensionHistory[dimension]?.removeFirst(20)
         }
 
-        // Propagera kausal påverkan till relaterade dimensioner
-        propagateCausalEffect(from: dimension, delta: delta * 0.3)
+        // Propagera kausal påverkan — reduced from 0.3x to 0.15x to prevent cascading inflation
+        propagateCausalEffect(from: dimension, delta: effectiveDelta * 0.15)
 
         // Uppdatera integrerat intelligensindex
         recalculateIntegratedIntelligence()
     }
 
     func setDimension(_ dimension: CognitiveDimension, value: Double, source: String) {
-        let clamped = max(0.01, min(0.99, value))
+        let clamped = max(0.01, min(0.95, value))
         let old = dimensions[dimension] ?? 0.3
         dimensions[dimension] = clamped
-        propagateCausalEffect(from: dimension, delta: (clamped - old) * 0.3)
+        propagateCausalEffect(from: dimension, delta: (clamped - old) * 0.15)
         recalculateIntegratedIntelligence()
     }
 
@@ -148,95 +156,100 @@ final class CognitiveState: ObservableObject {
     // MARK: - Bygg kausal nätverksstruktur
 
     private func buildCausalInfluences() {
+        // v3 Claude Edition: Reduced ALL causal strengths by ~50% to prevent cascading inflation.
+        // Combined with reduced propagation factor (0.15x instead of 0.3x), this prevents
+        // the II=0.96 "Exceptional" while Eval gives grade F problem.
+
         // Resonemang → förstärker kausalitet, metakognition, kreativitet
         causalInfluences += [
-            CausalInfluence(from: .reasoning, to: .causality, strength: 0.4),
-            CausalInfluence(from: .reasoning, to: .metacognition, strength: 0.3),
-            CausalInfluence(from: .reasoning, to: .creativity, strength: 0.2),
+            CausalInfluence(from: .reasoning, to: .causality, strength: 0.20),
+            CausalInfluence(from: .reasoning, to: .metacognition, strength: 0.15),
+            CausalInfluence(from: .reasoning, to: .creativity, strength: 0.10),
         ]
         // Inlärning → förstärker kunskap, språk, resonemang
         causalInfluences += [
-            CausalInfluence(from: .learning, to: .knowledge, strength: 0.5),
-            CausalInfluence(from: .learning, to: .language, strength: 0.3),
-            CausalInfluence(from: .learning, to: .reasoning, strength: 0.25),
+            CausalInfluence(from: .learning, to: .knowledge, strength: 0.25),
+            CausalInfluence(from: .learning, to: .language, strength: 0.15),
+            CausalInfluence(from: .learning, to: .reasoning, strength: 0.12),
         ]
-        // Metakognition → förstärker ALLT (den viktigaste pelaren)
+        // Metakognition → förstärker resonemang, inlärning, självmedvetenhet
         causalInfluences += [
-            CausalInfluence(from: .metacognition, to: .reasoning, strength: 0.35),
-            CausalInfluence(from: .metacognition, to: .learning, strength: 0.4),
-            CausalInfluence(from: .metacognition, to: .selfAwareness, strength: 0.5),
-            CausalInfluence(from: .metacognition, to: .adaptivity, strength: 0.3),
+            CausalInfluence(from: .metacognition, to: .reasoning, strength: 0.18),
+            CausalInfluence(from: .metacognition, to: .learning, strength: 0.20),
+            CausalInfluence(from: .metacognition, to: .selfAwareness, strength: 0.25),
+            CausalInfluence(from: .metacognition, to: .adaptivity, strength: 0.15),
         ]
         // Kausalitet → förstärker resonemang, världsmodell
         causalInfluences += [
-            CausalInfluence(from: .causality, to: .reasoning, strength: 0.35),
-            CausalInfluence(from: .causality, to: .worldModel, strength: 0.4),
-            CausalInfluence(from: .causality, to: .prediction, strength: 0.45),
+            CausalInfluence(from: .causality, to: .reasoning, strength: 0.18),
+            CausalInfluence(from: .causality, to: .worldModel, strength: 0.20),
+            CausalInfluence(from: .causality, to: .prediction, strength: 0.22),
         ]
-        // Kunskap → förstärker alla kognitiva förmågor
+        // Kunskap → förstärker kognitiva förmågor
         causalInfluences += [
-            CausalInfluence(from: .knowledge, to: .reasoning, strength: 0.3),
-            CausalInfluence(from: .knowledge, to: .language, strength: 0.25),
-            CausalInfluence(from: .knowledge, to: .creativity, strength: 0.2),
-            CausalInfluence(from: .knowledge, to: .worldModel, strength: 0.35),
+            CausalInfluence(from: .knowledge, to: .reasoning, strength: 0.15),
+            CausalInfluence(from: .knowledge, to: .language, strength: 0.12),
+            CausalInfluence(from: .knowledge, to: .creativity, strength: 0.10),
+            CausalInfluence(from: .knowledge, to: .worldModel, strength: 0.18),
         ]
         // Självmedvetenhet → förstärker metakognition, adaptivitet
         causalInfluences += [
-            CausalInfluence(from: .selfAwareness, to: .metacognition, strength: 0.4),
-            CausalInfluence(from: .selfAwareness, to: .adaptivity, strength: 0.35),
+            CausalInfluence(from: .selfAwareness, to: .metacognition, strength: 0.20),
+            CausalInfluence(from: .selfAwareness, to: .adaptivity, strength: 0.18),
         ]
         // Kreativitet → förstärker hypotesgenerering, analogier
         causalInfluences += [
-            CausalInfluence(from: .creativity, to: .hypothesisGeneration, strength: 0.45),
-            CausalInfluence(from: .creativity, to: .analogyBuilding, strength: 0.4),
+            CausalInfluence(from: .creativity, to: .hypothesisGeneration, strength: 0.22),
+            CausalInfluence(from: .creativity, to: .analogyBuilding, strength: 0.20),
         ]
         // Analogier → förstärker resonemang, kreativitet
         causalInfluences += [
-            CausalInfluence(from: .analogyBuilding, to: .reasoning, strength: 0.3),
-            CausalInfluence(from: .analogyBuilding, to: .creativity, strength: 0.25),
+            CausalInfluence(from: .analogyBuilding, to: .reasoning, strength: 0.15),
+            CausalInfluence(from: .analogyBuilding, to: .creativity, strength: 0.12),
         ]
         // Språk → förstärker kommunikation, förståelse
         causalInfluences += [
-            CausalInfluence(from: .language, to: .comprehension, strength: 0.45),
-            CausalInfluence(from: .language, to: .communication, strength: 0.5),
+            CausalInfluence(from: .language, to: .comprehension, strength: 0.22),
+            CausalInfluence(from: .language, to: .communication, strength: 0.25),
         ]
         // Världsmodell → förstärker prediktion, kausalitet
         causalInfluences += [
-            CausalInfluence(from: .worldModel, to: .prediction, strength: 0.4),
-            CausalInfluence(from: .worldModel, to: .causality, strength: 0.3),
+            CausalInfluence(from: .worldModel, to: .prediction, strength: 0.20),
+            CausalInfluence(from: .worldModel, to: .causality, strength: 0.15),
         ]
     }
 
     private func buildFeedbackLoops() {
-        // Positiva återkopplingsloopar (förstärkande)
+        // v3 Claude Edition: Reduced feedback loop strengths by ~40%
+        // to prevent runaway metric inflation.
         feedbackLoops = [
             FeedbackLoop(
                 name: "Inlärnings-resonemang-spiral",
                 dimensions: [.learning, .reasoning, .knowledge],
                 type: .positive,
-                strength: 0.6,
+                strength: 0.35,  // Was 0.6
                 description: "Mer inlärning → bättre resonemang → djupare kunskap → ännu mer inlärning"
             ),
             FeedbackLoop(
                 name: "Metakognitiv acceleration",
                 dimensions: [.metacognition, .selfAwareness, .adaptivity],
                 type: .positive,
-                strength: 0.7,
-                description: "Bättre självkännedom → bättre metakognition → snabbare adaptation → ännu bättre självkännedom"
+                strength: 0.40,  // Was 0.7
+                description: "Bättre självkännedom → bättre metakognition → snabbare adaptation"
             ),
             FeedbackLoop(
                 name: "Kausal djupspiral",
                 dimensions: [.causality, .worldModel, .prediction],
                 type: .positive,
-                strength: 0.65,
-                description: "Kausalförståelse → rikare världsmodell → bättre prediktion → stärker kausalförståelse"
+                strength: 0.35,  // Was 0.65
+                description: "Kausalförståelse → rikare världsmodell → bättre prediktion"
             ),
             FeedbackLoop(
                 name: "Kreativ hypotes-loop",
                 dimensions: [.creativity, .hypothesisGeneration, .analogyBuilding],
                 type: .positive,
-                strength: 0.55,
-                description: "Kreativitet genererar hypoteser → analogier bekräftar/avvisar → stärker kreativiteten"
+                strength: 0.30,  // Was 0.55
+                description: "Kreativitet genererar hypoteser → analogier bekräftar/avvisar"
             ),
             // Negativ återkoppling (stabiliserande)
             FeedbackLoop(

@@ -62,51 +62,26 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         for pillar in CognitivePillar.allCases { pillarActivity[pillar] = 0.0 }
     }
 
-    // MARK: - Start
+    // MARK: - Start (v3 Claude Edition — 3 tasks instead of 13)
+    // The old ICA launched 13 concurrent loops that duplicated much of EonLiveAutonomy's work.
+    // v3 uses only 3 tasks:
+    // 1. Lightweight orchestrator (UI sync, event dispatch)
+    // 2. Metacognitive + gap engine (combined, runs infrequently)
+    // 3. Combined pillar worker (rotates through pillars, one at a time)
 
     func start(brain: EonBrain) {
         guard !isRunning else { return }
         self.brain = brain
         isRunning = true
 
-        // Kärn-orkestrator: koordinerar alla pelare (hög prioritet — styr UI)
-        tasks.append(Task(priority: .userInitiated) { await self.orchestratorLoop() })
+        // Task 1: Lightweight orchestrator — UI sync only (no heavy computation)
+        tasks.append(Task(priority: .utility) { await self.orchestratorLoop() })
 
-        // Metakognitiv övervakare: styr resursallokering
-        tasks.append(Task(priority: .userInitiated) { await self.metacognitiveLoop() })
+        // Task 2: Metacognition + gap engine (combined, every 60s)
+        tasks.append(Task(priority: .background) { await self.metacognitiveAndGapLoop() })
 
-        // Intelligens-gap motor: kartlägger och eliminerar luckor
-        tasks.append(Task(priority: .utility) { await self.gapEngineLoop() })
-
-        // Kausal resonemangspelare
-        tasks.append(Task(priority: .userInitiated) { await self.causalReasoningPillar() })
-
-        // Kunskapssyntespelare
-        tasks.append(Task(priority: .utility) { await self.knowledgeSynthesisPillar() })
-
-        // Hypotes-generering och testning
-        tasks.append(Task(priority: .utility) { await self.hypothesisPillar() })
-
-        // Analogibyggande
-        tasks.append(Task(priority: .utility) { await self.analogyPillar() })
-
-        // Världsmodelluppdatering
-        tasks.append(Task(priority: .utility) { await self.worldModelPillar() })
-
-        // Självutvecklingspelare
-        tasks.append(Task(priority: .utility) { await self.selfDevelopmentPillar() })
-
-        // Språkutvecklingspelare
-        tasks.append(Task(priority: .utility) { await self.languageDevelopmentPillar() })
-
-        // Global Workspace-integration
-        tasks.append(Task(priority: .userInitiated) { await self.globalWorkspacePillar() })
-
-        // Prediktionspelare
-        tasks.append(Task(priority: .utility) { await self.predictionPillar() })
-
-        // Feedback-loop-förstärkare
-        tasks.append(Task(priority: .utility) { await self.feedbackAmplifier() })
+        // Task 3: Combined pillar worker — rotates through pillars one at a time
+        tasks.append(Task(priority: .background) { await self.combinedPillarWorker() })
     }
 
     func stop() {
@@ -115,79 +90,43 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         isRunning = false
     }
 
-    // MARK: - Orkestrator (2s) — koordinerar alla pelare, alltid aktiv
+    // MARK: - Orkestrator (6s) — lightweight UI sync, no heavy computation
+    // v3: Increased interval from 2s to 6s, removed heavy computation.
+    // EonLiveAutonomy's phased system handles the heavy lifting now.
 
     private func orchestratorLoop() async {
         while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
+            guard let brain else { try? await Task.sleep(nanoseconds: 5_000_000_000); continue }
             currentCycle += 1
 
             let state = CognitiveState.shared
             let ii = state.integratedIntelligence
             let velocity = state.growthVelocity
-            let t = Double(currentCycle)
 
-            // Uppdatera brain med ICA-status
+            // Lightweight: just sync ICA state to brain for UI
             brain.isAutonomouslyActive = true
-            brain.autonomousProcessLabel = buildStatusLabel(ii: ii, velocity: velocity, state: state)
-
-            // Uppdatera intern pillarActivity (används för snapshot)
-            for pillar in CognitivePillar.allCases {
-                let dimLevel = state.dimensionLevel(pillar.primaryDimension)
-                pillarActivity[pillar] = dimLevel
-            }
-
-            // Skriv ALLTID alla 7 UI-nycklar till brain.engineActivity
-            // base är ALLTID minst 0.35 — appen ska aldrig se död ut
-            let base = brain.isThinking ? 0.72 : max(0.38, ii * 0.8 + 0.25)
-            brain.engineActivity = [
-                "cognitive":  clamp(state.dimensionLevel(.reasoning)   * 0.5 + base * 0.5 + 0.12 * abs(sin(t * 0.31)), 0.28, 0.97),
-                "language":   clamp(state.dimensionLevel(.language)    * 0.5 + base * 0.5 + 0.10 * abs(sin(t * 0.43 + 1.1)), 0.24, 0.93),
-                "memory":     clamp(state.dimensionLevel(.knowledge)   * 0.5 + base * 0.5 + 0.09 * abs(sin(t * 0.51 + 2.3)), 0.20, 0.90),
-                "learning":   clamp(state.dimensionLevel(.learning)    * 0.5 + base * 0.5 + 0.08 * abs(cos(t * 0.37 + 0.9)), 0.18, 0.88),
-                "autonomy":   clamp(state.dimensionLevel(.metacognition) * 0.5 + base * 0.45 + 0.10 * abs(sin(t * 0.21 + 3.1)), 0.22, 0.85),
-                "hypothesis": clamp(state.dimensionLevel(.hypothesisGeneration) * 0.5 + base * 0.4 + 0.07 * abs(sin(t * 0.17 + 1.7)), 0.16, 0.80),
-                "worldModel": clamp(state.dimensionLevel(.worldModel)  * 0.5 + base * 0.45 + 0.08 * abs(cos(t * 0.26 + 2.5)), 0.18, 0.82),
-            ]
-
-            // Propagera integrerat intelligensindex till brain
-            brain.phiValue = ii
             brain.integratedIntelligence = ii
             brain.intelligenceGrowthVelocity = velocity
 
-            // Riktad tillväxt: öka BARA dimensioner som aktivt tränas av pelare
-            // Ingen generell inflation — tillväxt måste förtjänas via verklig aktivitet.
-            // Boosta bara de svagaste dimensionerna (flaskhalsar) med ett litet nudge.
-            if currentCycle % 10 == 0 {  // Var ~20s istället för varje cykel
-                let bottlenecks = state.weakestDimensions(limit: 3)
-                for (dim, level) in bottlenecks where level < 0.5 {
-                    let nudge = 0.0003 * (0.5 - level)  // Proportionellt mot gap
-                    await state.update(dimension: dim, delta: nudge, source: "bottleneck_nudge")
-                }
+            // Update pillar activity from dimension levels
+            for pillar in CognitivePillar.allCases {
+                pillarActivity[pillar] = state.dimensionLevel(pillar.primaryDimension)
             }
 
-            // Trigga event baserat på tillstånd
-            await checkAndFireEvents(state: state, brain: brain)
+            // Check and fire events (infrequently — every 5th cycle = ~30s)
+            if currentCycle % 5 == 0 {
+                await checkAndFireEvents(state: state, brain: brain)
+            }
 
-            // Prestandaläge-anpassat intervall
-            let basePerfMode = PerformanceMode(rawValue: UserDefaults.standard.integer(forKey: "eon_performance_mode")) ?? .auto
-            let perfMode = CyclingModeEngine.shared.effectiveMode(base: basePerfMode)
+            // Thermal-aware interval: 6s nominal → up to 50s critical
+            let thermalState = ProcessInfo.processInfo.thermalState
             let interval: UInt64
-            switch perfMode {
-            case .maximal:     interval = 1_500_000_000
-            case .balanced:    interval = 2_000_000_000
-            case .sparse:      interval = 4_000_000_000
-            case .rest:        interval = 8_000_000_000
-            case .autonomyOff: interval = 10_000_000_000
-            case .auto, .adaptive, .cycling:
-                let thermalState = ProcessInfo.processInfo.thermalState
-                switch thermalState {
-                case .nominal:  interval = 2_000_000_000
-                case .fair:     interval = 3_000_000_000
-                case .serious:  interval = 5_000_000_000
-                case .critical: interval = 8_000_000_000
-                @unknown default: interval = 2_000_000_000
-                }
+            switch thermalState {
+            case .nominal:  interval = 6_000_000_000
+            case .fair:     interval = 10_000_000_000
+            case .serious:  interval = 30_000_000_000
+            case .critical: interval = 50_000_000_000
+            @unknown default: interval = 6_000_000_000
             }
             try? await Task.sleep(nanoseconds: interval)
         }
@@ -282,18 +221,20 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         if pillarInteractions.count > 100 { pillarInteractions.removeFirst(20) }
     }
 
-    // MARK: - Metakognitiv loop (30s)
+    // MARK: - Combined Metacognitive + Gap Engine Loop (60s)
+    // v3: Combined two loops into one. Runs metacognition first, then gap analysis.
+    // Interval increased from 30-45s to 60s to reduce CPU.
 
-    private func metacognitiveLoop() async {
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
+    private func metacognitiveAndGapLoop() async {
+        try? await Task.sleep(nanoseconds: 10_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            activePillars.insert(.metacognition)
+            guard let brain else { try? await Task.sleep(nanoseconds: 10_000_000_000); continue }
 
+            // --- Metacognition phase ---
+            activePillars.insert(.metacognition)
             let report = await MetacognitionCore.shared.runMetacognitiveCycle()
             lastMetacognitiveReport = report
 
-            // Logga insikter
             for insight in report.insights.prefix(2) {
                 let prefix = insight.type == .regression ? "⚠️" : insight.type == .growth ? "📈" : "🧠"
                 brain.innerMonologue.append(MonologueLine(
@@ -301,548 +242,325 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
                     type: .insight
                 ))
             }
-
-            // Logga biaser
             for bias in report.detectedBiases where bias.severity == .high {
                 brain.innerMonologue.append(MonologueLine(
                     text: "🔍 BIAS[\(bias.type.rawValue)]: \(bias.recommendation)",
                     type: .revision
                 ))
             }
-
             activePillars.remove(.metacognition)
-            let interval = UInt64(30_000_000_000) + UInt64.random(in: 0...5_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
 
-    // MARK: - Gap Engine Loop (45s)
+            // Brief pause between metacognition and gap analysis
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
 
-    private func gapEngineLoop() async {
-        try? await Task.sleep(nanoseconds: 4_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
+            // --- Gap Engine phase ---
             activePillars.insert(.gapEngine)
-
             let analysis = await IntelligenceGapEngine.shared.analyzeAndIntervene()
             lastGapAnalysis = analysis
 
-            // Logga top-3 luckor
-            for gap in analysis.prioritizedGaps.prefix(3) {
-                let urgencyLabel = gap.priorityLabel
+            for gap in analysis.prioritizedGaps.prefix(2) {
                 brain.innerMonologue.append(MonologueLine(
-                    text: "🎯 GAP[\(urgencyLabel)]: \(gap.dimension.rawValue) \(String(format: "%.0f", gap.currentLevel * 100))%→\(String(format: "%.0f", gap.targetLevel * 100))% · blockerar: \(gap.blockedDimensions.prefix(2).map { $0.rawValue }.joined(separator: ", "))",
+                    text: "🎯 GAP[\(gap.priorityLabel)]: \(gap.dimension.rawValue) \(String(format: "%.0f", gap.currentLevel * 100))%→\(String(format: "%.0f", gap.targetLevel * 100))%",
                     type: .thought
                 ))
             }
-
-            // Logga interventionsresultat
-            for result in analysis.results {
-                let delta = result.improvementDelta
-                if delta > 0.001 {
-                    brain.innerMonologue.append(MonologueLine(
-                        text: "✅ INTERVENTION[\(result.dimension.rawValue)]: +\(String(format: "%.4f", delta)) förbättring",
-                        type: .insight
-                    ))
-                    await CognitiveState.shared.update(dimension: result.dimension, delta: delta, source: "gap_engine")
-                }
+            for result in analysis.results where result.improvementDelta > 0.001 {
+                brain.innerMonologue.append(MonologueLine(
+                    text: "✅ INTERVENTION[\(result.dimension.rawValue)]: +\(String(format: "%.4f", result.improvementDelta))",
+                    type: .insight
+                ))
+                await CognitiveState.shared.update(dimension: result.dimension, delta: result.improvementDelta, source: "gap_engine")
             }
-
             activePillars.remove(.gapEngine)
-            let interval = UInt64(45_000_000_000) + UInt64.random(in: 0...10_000_000_000)
+
+            // Thermal-aware interval: 60s nominal → up to 480s critical
+            let thermalState = ProcessInfo.processInfo.thermalState
+            let interval: UInt64
+            switch thermalState {
+            case .nominal:  interval = 60_000_000_000
+            case .fair:     interval = 120_000_000_000
+            case .serious:  interval = 300_000_000_000
+            case .critical: interval = 480_000_000_000
+            @unknown default: interval = 60_000_000_000
+            }
             try? await Task.sleep(nanoseconds: interval)
         }
     }
 
-    // MARK: - Kausal resonemangspelare (20s)
+    // MARK: - Combined Pillar Worker
+    // v3: Instead of 9 separate pillar loops (each with its own Task),
+    // we use ONE loop that rotates through pillars, one at a time.
+    // This dramatically reduces concurrent work and CPU usage.
 
-    private func causalReasoningPillar() async {
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
+    private var pillarRotationIndex: Int = 0
+
+    private func combinedPillarWorker() async {
+        try? await Task.sleep(nanoseconds: 8_000_000_000)
+
+        // The pillars to rotate through, in order of importance
+        let pillarSequence: [(CognitivePillar, () async -> Void)] = [
+            (.causality,       { await self.runCausalWork() }),
+            (.knowledge,       { await self.runKnowledgeWork() }),
+            (.hypothesis,      { await self.runHypothesisWork() }),
+            (.analogy,         { await self.runAnalogyWork() }),
+            (.worldModel,      { await self.runWorldModelWork() }),
+            (.selfDevelopment, { await self.runSelfDevelopmentWork() }),
+            (.language,        { await self.runLanguageWork() }),
+            (.globalWorkspace, { await self.runGlobalWorkspaceWork() }),
+            (.prediction,      { await self.runPredictionWork() }),
+        ]
+
         while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            activePillars.insert(.causality)
+            guard let brain else { try? await Task.sleep(nanoseconds: 10_000_000_000); continue }
 
-            let state = CognitiveState.shared
-            let reasoningLevel = state.dimensionLevel(.reasoning)
-            let causalityLevel = state.dimensionLevel(.causality)
+            let (pillar, work) = pillarSequence[pillarRotationIndex % pillarSequence.count]
+            pillarRotationIndex += 1
 
-            // Välj komplexitet baserat på nuvarande nivå
-            let depth = Int(reasoningLevel * 5) + 2
-            let topics = generateCausalTopics(level: causalityLevel)
-            let topic = topics.randomElement() ?? "kognitiv utveckling"
+            activePillars.insert(pillar)
+            await work()
+            activePillars.remove(pillar)
 
-            let result = await ReasoningEngine.shared.reason(about: topic, strategy: .causal, depth: depth)
-
-            // Uppdatera dimensioner baserat på resultat
-            let gain = result.confidence * 0.008
-            await state.update(dimension: .causality, delta: gain, source: "causal_pillar")
-            await state.update(dimension: .reasoning, delta: gain * 0.5, source: "causal_pillar")
-
-            // Uppdatera kausalkedjedjup
-            state.causalChainDepth = result.causalChain.count
-            state.activeReasoningChain = result.causalChain
-
-            brain.innerMonologue.append(MonologueLine(
-                text: "⛓ KAUSAL[\(String(format: "%.2f", result.confidence))]: \(topic) → \(result.conclusion.prefix(70))...",
-                type: .thought
-            ))
-
-            // Registrera interaktion med världsmodell
-            if result.causalChain.count > 3 {
-                await state.update(dimension: .worldModel, delta: gain * 0.3, source: "causal_chain")
-                await state.update(dimension: .prediction, delta: gain * 0.2, source: "causal_chain")
+            // Feedback amplification (every 9th rotation = after all pillars have run once)
+            if pillarRotationIndex % pillarSequence.count == 0 {
+                await runFeedbackAmplification(brain: brain)
             }
 
-            activePillars.remove(.causality)
-            let interval = UInt64(20_000_000_000) + UInt64.random(in: 0...8_000_000_000)
+            // Thermal-aware interval between pillar work: 15s nominal → 120s critical
+            let thermalState = ProcessInfo.processInfo.thermalState
+            let interval: UInt64
+            switch thermalState {
+            case .nominal:  interval = 15_000_000_000
+            case .fair:     interval = 30_000_000_000
+            case .serious:  interval = 90_000_000_000
+            case .critical: interval = 120_000_000_000
+            @unknown default: interval = 15_000_000_000
+            }
             try? await Task.sleep(nanoseconds: interval)
         }
+    }
+
+    // MARK: - Individual pillar work functions (called from combined worker)
+
+    private func runCausalWork() async {
+        guard let brain else { return }
+        let state = CognitiveState.shared
+        let causalityLevel = state.dimensionLevel(.causality)
+        let topics = generateCausalTopics(level: causalityLevel)
+        let topic = topics.randomElement() ?? "kognitiv utveckling"
+        let depth = Int(state.dimensionLevel(.reasoning) * 5) + 2
+
+        let result = await ReasoningEngine.shared.reason(about: topic, strategy: .causal, depth: depth)
+        let gain = result.confidence * 0.005 // Reduced from 0.008
+        await state.update(dimension: .causality, delta: gain, source: "causal_pillar")
+        await state.update(dimension: .reasoning, delta: gain * 0.4, source: "causal_pillar")
+        state.causalChainDepth = result.causalChain.count
+        state.activeReasoningChain = result.causalChain
+
+        brain.innerMonologue.append(MonologueLine(
+            text: "⛓ KAUSAL[\(String(format: "%.2f", result.confidence))]: \(topic) → \(result.conclusion.prefix(70))...",
+            type: .thought
+        ))
     }
 
     private func generateCausalTopics(level: Double) -> [String] {
         if level < 0.4 {
             return ["Varför lär sig barn snabbare?", "Vad orsakar stress?", "Hur påverkar sömn minnet?"]
         } else if level < 0.7 {
-            return [
-                "Vad är den kausala kedjan bakom kognitiv bias?",
-                "Hur orsakar inlärning neuroplasticitet?",
-                "Varför leder kausalförståelse till bättre prediktion?",
-                "Vad driver emergent intelligens i komplexa system?",
-            ]
+            return ["Vad är den kausala kedjan bakom kognitiv bias?",
+                    "Hur orsakar inlärning neuroplasticitet?",
+                    "Vad driver emergent intelligens i komplexa system?"]
         } else {
-            return [
-                "Hur relaterar kausalitet till fri vilja?",
-                "Vad är den djupaste orsaken till kognitiv stagnation?",
-                "Hur propagerar kausal kunskap genom ett semantiskt nätverk?",
-                "Vad är sambandet mellan kausalitet och tid?",
-            ]
+            return ["Hur relaterar kausalitet till fri vilja?",
+                    "Hur propagerar kausal kunskap genom ett semantiskt nätverk?"]
         }
     }
 
-    // MARK: - Kunskapssyntespelare (35s)
+    private func runKnowledgeWork() async {
+        guard let brain else { return }
+        let state = CognitiveState.shared
+        let learningResult = await LearningEngine.shared.runLearningCycle()
+        let overallLevel = await LearningEngine.shared.overallCompetencyLevel()
 
-    private func knowledgeSynthesisPillar() async {
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            activePillars.insert(.knowledge)
+        await state.update(dimension: .knowledge, delta: 0.004, source: "knowledge_pillar")
+        await state.update(dimension: .learning, delta: 0.003, source: "knowledge_pillar")
+        state.knowledgeFrontier = learningResult.studiedTopics
+        state.consolidatedFacts += learningResult.studiedTopics.count
 
-            let state = CognitiveState.shared
-            let knowledgeLevel = state.dimensionLevel(.knowledge)
+        brain.innerMonologue.append(MonologueLine(
+            text: "📚 KUNSKAP[#\(learningResult.cycleNumber)]: kompetens \(String(format: "%.1f", overallLevel * 100))% · luckor: \(learningResult.gapsIdentified)",
+            type: .thought
+        ))
 
-            // Kör inlärningscykel
-            let learningResult = await LearningEngine.shared.runLearningCycle()
-            let overallLevel = await LearningEngine.shared.overallCompetencyLevel()
-
-            // Uppdatera dimensioner
-            await state.update(dimension: .knowledge, delta: 0.006, source: "knowledge_pillar")
-            await state.update(dimension: .learning, delta: 0.005, source: "knowledge_pillar")
-
-            // Uppdatera kunskapsfrontier
-            state.knowledgeFrontier = learningResult.studiedTopics
-            state.consolidatedFacts += learningResult.studiedTopics.count
-
-            brain.innerMonologue.append(MonologueLine(
-                text: "📚 KUNSKAP[cykel #\(learningResult.cycleNumber)]: \(learningResult.studiedTopics.prefix(2).joined(separator: ", ")) · kompetens: \(String(format: "%.1f", overallLevel * 100))% · luckor: \(learningResult.gapsIdentified)",
-                type: .thought
-            ))
-
-            // Syntes: om kunskapsnivå är hög nog, dra paralleller
-            if knowledgeLevel > 0.5 {
-                let parallels = await synthesizeKnowledgeParallels()
-                if let parallel = parallels {
-                    brain.innerMonologue.append(MonologueLine(text: "🔗 SYNTES: \(parallel)", type: .insight))
-                    await state.update(dimension: .analogyBuilding, delta: 0.005, source: "synthesis")
-                    await state.update(dimension: .creativity, delta: 0.003, source: "synthesis")
-                    state.activeAnalogies.append(parallel)
-                    if state.activeAnalogies.count > 10 { state.activeAnalogies.removeFirst(3) }
-                }
+        // Knowledge synthesis
+        if state.dimensionLevel(.knowledge) > 0.5 {
+            let parallels = await synthesizeKnowledgeParallels()
+            if let parallel = parallels {
+                brain.innerMonologue.append(MonologueLine(text: "🔗 SYNTES: \(parallel)", type: .insight))
+                await state.update(dimension: .analogyBuilding, delta: 0.003, source: "synthesis")
             }
-
-            activePillars.remove(.knowledge)
-            let interval = UInt64(35_000_000_000) + UInt64.random(in: 0...10_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
         }
     }
 
     private func synthesizeKnowledgeParallels() async -> String? {
         let articles = await PersistentMemoryStore.shared.randomArticles(limit: 2)
         guard articles.count >= 2 else { return nil }
-        let a1 = articles[0]
-        let a2 = articles[1]
-        // Enkel parallell-detektion via ordöverlappning
-        let words1 = Set(a1.content.lowercased().split(separator: " ").map(String.init).filter { $0.count > 5 })
-        let words2 = Set(a2.content.lowercased().split(separator: " ").map(String.init).filter { $0.count > 5 })
+        let words1 = Set(articles[0].content.lowercased().split(separator: " ").map(String.init).filter { $0.count > 5 })
+        let words2 = Set(articles[1].content.lowercased().split(separator: " ").map(String.init).filter { $0.count > 5 })
         let shared = words1.intersection(words2)
         guard !shared.isEmpty else { return nil }
-        let sharedWords = shared.prefix(3).joined(separator: ", ")
-        return "'\(a1.title)' och '\(a2.title)' delar koncepten: \(sharedWords) — möjlig djup strukturell koppling"
+        return "'\(articles[0].title)' och '\(articles[1].title)' delar: \(shared.prefix(3).joined(separator: ", "))"
     }
 
-    // MARK: - Hypotespelare (50s)
+    private func runHypothesisWork() async {
+        guard let brain else { return }
+        let state = CognitiveState.shared
+        let recentTitles = await PersistentMemoryStore.shared.recentArticleTitles(limit: 5)
+        let hypothesis = HypothesisEngine.generate(
+            articles: recentTitles, knowledgeCount: state.consolidatedFacts,
+            stage: brain.developmentalStage, existingHypotheses: []
+        )
+        state.currentHypothesis = hypothesis.statement
+        state.hypothesisConfidence = hypothesis.confidence
 
-    private func hypothesisPillar() async {
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            activePillars.insert(.hypothesis)
+        let testResult = await HypothesisEngine.test(hypothesis: hypothesis)
+        let gain: Double = testResult.supported ? 0.005 : 0.002
+        await state.update(dimension: .hypothesisGeneration, delta: gain, source: "hypothesis_pillar")
 
-            let state = CognitiveState.shared
-            let creativityLevel = state.dimensionLevel(.creativity)
+        brain.innerMonologue.append(MonologueLine(
+            text: testResult.supported
+                ? "✅ HYPOTES[\(String(format: "%.0f", testResult.confidence * 100))%]: \(hypothesis.statement.prefix(60))"
+                : "❌ AVVISAD: \(testResult.counterEvidence.prefix(60))",
+            type: testResult.supported ? .insight : .revision
+        ))
+    }
 
-            // Generera hypotes baserat på nuvarande kunskapsfrontier
-            let frontier = state.knowledgeFrontier
-            let topic = frontier.randomElement() ?? "kognitiv utveckling"
+    private func runAnalogyWork() async {
+        guard let brain else { return }
+        let state = CognitiveState.shared
+        let topics = ["kognition och evolution", "inlärning och ekologi",
+                      "kausalitet och tid", "kreativitet och mutation",
+                      "världsmodell och karta"]
+        let topic = topics.randomElement()!
+        let parts = topic.split(separator: " och ").map(String.init)
+        guard parts.count == 2 else { return }
 
-            let recentTitles = await PersistentMemoryStore.shared.recentArticleTitles(limit: 5)
-            let hypothesis = HypothesisEngine.generate(
-                articles: recentTitles,
-                knowledgeCount: state.consolidatedFacts,
-                stage: brain.developmentalStage,
-                existingHypotheses: []
-            )
-            state.currentHypothesis = hypothesis.statement
-            state.hypothesisConfidence = hypothesis.confidence
+        let result = await ReasoningEngine.shared.reason(about: "Vad har \(parts[0]) gemensamt med \(parts[1])?", strategy: .analogical, depth: 3)
+        await state.update(dimension: .analogyBuilding, delta: 0.004, source: "analogy_pillar")
+        await state.update(dimension: .creativity, delta: 0.003, source: "analogy_pillar")
 
-            brain.innerMonologue.append(MonologueLine(
-                text: "💡 HYPOTES[\(String(format: "%.0f", hypothesis.confidence * 100))%]: \(hypothesis.statement)",
-                type: .thought
-            ))
+        brain.innerMonologue.append(MonologueLine(
+            text: "🔗 ANALOGI[\(String(format: "%.2f", result.confidence))]: \(topic) → \(result.conclusion.prefix(60))...",
+            type: .insight
+        ))
+    }
 
-            // Testa hypotesen via resonemang
-            let testResult = await HypothesisEngine.test(hypothesis: hypothesis)
+    private func runWorldModelWork() async {
+        guard let brain else { return }
+        let state = CognitiveState.shared
+        let recentFacts = await PersistentMemoryStore.shared.recentFacts(limit: 5)
+        let causalLevel = state.dimensionLevel(.causality)
+        state.causalGraphDensity = state.dimensionLevel(.worldModel) * 0.7 + causalLevel * 0.3
+        state.newCausalLinks = Int(Double(recentFacts.count) * causalLevel)
 
-            if testResult.supported {
-                await state.update(dimension: .hypothesisGeneration, delta: 0.008, source: "hypothesis_pillar")
-                await state.update(dimension: .reasoning, delta: 0.004, source: "hypothesis_confirmed")
-                brain.innerMonologue.append(MonologueLine(
-                    text: "✅ BEKRÄFTAD[\(String(format: "%.0f", testResult.confidence * 100))%]: \(testResult.evidence.prefix(80))",
-                    type: .insight
-                ))
-            } else {
-                await state.update(dimension: .hypothesisGeneration, delta: 0.004, source: "hypothesis_pillar")
-                brain.innerMonologue.append(MonologueLine(
-                    text: "❌ AVVISAD: \(testResult.counterEvidence.prefix(80))",
-                    type: .revision
-                ))
+        await state.update(dimension: .worldModel, delta: 0.004, source: "world_model_pillar")
+        await state.update(dimension: .prediction, delta: 0.002, source: "world_model_pillar")
+
+        let insights = ["Kausalstruktur förtätas", "Prediktiva mönster emergerar",
+                       "Faktanätverk expanderar", "Kausala kedjor fördjupas"]
+        brain.innerMonologue.append(MonologueLine(
+            text: "🌍 VÄRLDSMODELL[\(String(format: "%.2f", state.dimensionLevel(.worldModel)))]: \(insights.randomElement()!)",
+            type: .insight
+        ))
+    }
+
+    private func runSelfDevelopmentWork() async {
+        guard let brain else { return }
+        let state = CognitiveState.shared
+        let selfModel = EonSelfModel()
+        let reflections = SelfReflectionEngine.generate(
+            selfModel: selfModel, stage: brain.developmentalStage,
+            phi: brain.phiValue, conversations: brain.conversationCount,
+            version: brain.loraVersion
+        )
+        for reflection in reflections.prefix(1) {
+            brain.innerMonologue.append(MonologueLine(text: "🪞 \(reflection)", type: .thought))
+        }
+        await state.update(dimension: .selfAwareness, delta: 0.004, source: "self_development")
+        await state.update(dimension: .metacognition, delta: 0.002, source: "self_development")
+    }
+
+    private func runLanguageWork() async {
+        guard let brain else { return }
+        let state = CognitiveState.shared
+        let experiment = LanguageExperimentEngine.generate(stage: brain.developmentalStage, existingExperiments: [])
+        brain.innerMonologue.append(MonologueLine(
+            text: "🗣 SPRÅK[\(String(format: "%.2f", state.dimensionLevel(.language)))]: \(experiment.rule) '\(experiment.baseWord)' → '\(experiment.derivedForm)'",
+            type: .thought
+        ))
+        await state.update(dimension: .language, delta: 0.003, source: "language_pillar")
+        await state.update(dimension: .comprehension, delta: 0.002, source: "language_pillar")
+        await state.update(dimension: .communication, delta: 0.002, source: "language_pillar")
+    }
+
+    private func runGlobalWorkspaceWork() async {
+        guard let brain else { return }
+        let state = CognitiveState.shared
+        if let lastThought = brain.innerMonologue.last {
+            await GlobalWorkspaceEngine.shared.addThoughtFromText(lastThought.text, source: "ica", priority: state.dimensionLevel(.reasoning))
+            await GlobalWorkspaceEngine.shared.runCompetition()
+            let integrationLevel = await GlobalWorkspaceEngine.shared.integrationLevel
+            state.broadcastStrength = integrationLevel
+            state.competingThoughts = await GlobalWorkspaceEngine.shared.thoughtCount
+            if let focus = await GlobalWorkspaceEngine.shared.currentFocus {
+                state.attentionFocus = String(focus.content.prefix(60))
+                await state.update(dimension: .comprehension, delta: integrationLevel * 0.001, source: "gwt")
             }
-
-            // Boost kreativitet om hög hypotesaktivitet
-            if creativityLevel < 0.6 {
-                await state.update(dimension: .creativity, delta: 0.003, source: "hypothesis_pillar")
-            }
-
-            activePillars.remove(.hypothesis)
-            let interval = UInt64(50_000_000_000) + UInt64.random(in: 0...15_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
         }
     }
 
-    // MARK: - Analogipelare (40s)
-
-    private func analogyPillar() async {
-        try? await Task.sleep(nanoseconds: 6_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            activePillars.insert(.analogy)
-
-            let state = CognitiveState.shared
-
-            let analogyTopics = [
-                "kognition och evolution",
-                "inlärning och ekologi",
-                "metakognition och självreglering",
-                "kausalitet och tid",
-                "resonemang och navigation",
-                "kreativitet och mutation",
-                "världsmodell och karta",
-            ]
-            let topic = analogyTopics.randomElement()!
-            let parts = topic.split(separator: " och ").map(String.init)
-            guard parts.count == 2 else { continue }
-
-            let result = await ReasoningEngine.shared.reason(about: "Vad har \(parts[0]) gemensamt med \(parts[1])?", strategy: .analogical, depth: 3)
-
-            await state.update(dimension: .analogyBuilding, delta: 0.007, source: "analogy_pillar")
-            await state.update(dimension: .creativity, delta: 0.004, source: "analogy_pillar")
-            await state.update(dimension: .reasoning, delta: 0.003, source: "analogy_pillar")
-
-            brain.innerMonologue.append(MonologueLine(
-                text: "🔗 ANALOGI[\(String(format: "%.2f", result.confidence))]: \(topic) → \(result.conclusion.prefix(80))...",
-                type: .insight
-            ))
-
-            activePillars.remove(.analogy)
-            let interval = UInt64(40_000_000_000) + UInt64.random(in: 0...12_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    // MARK: - Världsmodellpelare (60s)
-
-    private func worldModelPillar() async {
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            activePillars.insert(.worldModel)
-
-            let state = CognitiveState.shared
-            let worldModelLevel = state.dimensionLevel(.worldModel)
-
-            // Uppdatera världsmodell med senaste fakta
-            let recentFacts = await PersistentMemoryStore.shared.recentFacts(limit: 5)
-            let factCount = recentFacts.count
-
-            // Beräkna kausalitetsdensitet
-            let causalLevel = state.dimensionLevel(.causality)
-            let newDensity = worldModelLevel * 0.7 + causalLevel * 0.3
-            state.causalGraphDensity = newDensity
-            state.newCausalLinks = Int(Double(factCount) * causalLevel)
-
-            await state.update(dimension: .worldModel, delta: 0.006, source: "world_model_pillar")
-            await state.update(dimension: .prediction, delta: 0.004, source: "world_model_pillar")
-
-            let insight = generateWorldModelInsight(level: worldModelLevel, facts: factCount)
-            brain.innerMonologue.append(MonologueLine(
-                text: "🌍 VÄRLDSMODELL[\(String(format: "%.2f", worldModelLevel))]: \(insight) · \(factCount) nya fakta integrerade",
-                type: .insight
-            ))
-
-            activePillars.remove(.worldModel)
-            let interval = UInt64(60_000_000_000) + UInt64.random(in: 0...15_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    private func generateWorldModelInsight(level: Double, facts: Int) -> String {
-        let insights = [
-            "Världsmodellens kausalstruktur förtätas",
-            "Nya prediktiva mönster emergerar",
-            "Faktanätverket expanderar med nya noder",
-            "Kausala kedjor förlängs och fördjupas",
-            "Världsbilden integrerar \(facts) nya observationer",
-        ]
-        return insights.randomElement() ?? insights[0]
-    }
-
-    // MARK: - Självutvecklingspelare (90s)
-
-    private func selfDevelopmentPillar() async {
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            activePillars.insert(.selfDevelopment)
-
-            let state = CognitiveState.shared
-            let selfAwarenessLevel = state.dimensionLevel(.selfAwareness)
-
-            // Djup självreflektion
-            let selfModel = EonSelfModel()
-            let reflections = SelfReflectionEngine.generate(
-                selfModel: selfModel,
-                stage: brain.developmentalStage,
-                phi: brain.phiValue,
-                conversations: brain.conversationCount,
-                version: brain.loraVersion
-            )
-            for reflection in reflections.prefix(2) {
-                brain.innerMonologue.append(MonologueLine(text: "🪞 REFLEKTION: \(reflection)", type: .thought))
-            }
-
-            // Uppdatera självmedvetenhet
-            await state.update(dimension: .selfAwareness, delta: 0.007, source: "self_development")
-            await state.update(dimension: .metacognition, delta: 0.004, source: "self_development")
-            await state.update(dimension: .adaptivity, delta: 0.003, source: "self_development")
-
-            // Kör CAI-validering på senaste tankar
-            let recentThoughts = brain.innerMonologue.suffix(5).map { $0.text }.joined(separator: " ")
-            let caiCtx = CAIContext(
-                uncertaintyLevel: 1.0 - state.dimensionLevel(.reasoning),
-                domain: "självreflektion",
-                previousResponses: [],
-                userSentiment: 0.0
-            )
-            let caiResult = await ConstitutionalAI.shared.validate(
-                response: recentThoughts,
-                prompt: "autonom självreflektion",
-                context: caiCtx
-            )
-
-            if !caiResult.passed {
-                brain.innerMonologue.append(MonologueLine(
-                    text: "⚖️ CAI: Konstitutionell avvikelse detekterad (score: \(String(format: "%.2f", caiResult.score))). Korrigerar.",
-                    type: .revision
-                ))
-            }
-
-            activePillars.remove(.selfDevelopment)
-            let interval = UInt64(90_000_000_000) + UInt64.random(in: 0...20_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    // MARK: - Språkutvecklingspelare (25s)
-
-    private func languageDevelopmentPillar() async {
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            activePillars.insert(.language)
-
-            let state = CognitiveState.shared
-            let languageLevel = state.dimensionLevel(.language)
-
-            // Kör språkexperiment
-            let experiment = LanguageExperimentEngine.generate(
-                stage: brain.developmentalStage,
-                existingExperiments: []
-            )
-            brain.innerMonologue.append(MonologueLine(
-                text: "🗣 SPRÅK[\(String(format: "%.2f", languageLevel))]: \(experiment.rule) '\(experiment.baseWord)' → '\(experiment.derivedForm)'",
-                type: .thought
-            ))
-
-            await state.update(dimension: .language, delta: 0.005, source: "language_pillar")
-            await state.update(dimension: .comprehension, delta: 0.003, source: "language_pillar")
-            await state.update(dimension: .communication, delta: 0.004, source: "language_pillar")
-
-            // Hämta från Språkbanken
-            if Int.random(in: 0...3) == 0 {
-                let sprakResult = await SprakbankenAPI.fetch(type: SprakbankenFetchType.allCases.randomElement() ?? .wordInfo)
-                if let result = sprakResult {
-                    brain.innerMonologue.append(MonologueLine(
-                        text: "📖 SPRÅKBANKEN: \(result.summary)",
-                        type: .memory
-                    ))
-                    await state.update(dimension: .language, delta: 0.003, source: "sprakbanken")
-                    await state.update(dimension: .knowledge, delta: 0.002, source: "sprakbanken")
-                }
-            }
-
-            activePillars.remove(.language)
-            let interval = UInt64(25_000_000_000) + UInt64.random(in: 0...8_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    // MARK: - Global Workspace-pelare (5s)
-
-    private func globalWorkspacePillar() async {
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-
-            let state = CognitiveState.shared
-
-            // Lägg till senaste tanke i GWT
-            if let lastThought = brain.innerMonologue.last {
-                await GlobalWorkspaceEngine.shared.addThoughtFromText(
-                    lastThought.text,
-                    source: "ica",
-                    priority: state.dimensionLevel(.reasoning)
-                )
-                await GlobalWorkspaceEngine.shared.runCompetition()
-
-                let broadcastCount = await GlobalWorkspaceEngine.shared.broadcastCount
-                let thoughtCount = await GlobalWorkspaceEngine.shared.thoughtCount
-                let integrationLevel = await GlobalWorkspaceEngine.shared.integrationLevel
-
-                state.broadcastStrength = integrationLevel
-                state.competingThoughts = thoughtCount
-
-                if let focus = await GlobalWorkspaceEngine.shared.currentFocus {
-                    state.attentionFocus = String(focus.content.prefix(60))
-                    // Broadcast förstärker relevanta dimensioner
-                    await state.update(dimension: .comprehension, delta: integrationLevel * 0.002, source: "gwt")
-                }
-            }
-
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-        }
-    }
-
-    // MARK: - Prediktionspelare (70s)
-
-    private func predictionPillar() async {
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            activePillars.insert(.prediction)
-
-            let state = CognitiveState.shared
-            let worldModelLevel = state.dimensionLevel(.worldModel)
-            let causalLevel = state.dimensionLevel(.causality)
-
-            // Generera prediktion baserat på världsmodell + kausalitet
-            let predictionStrength = (worldModelLevel + causalLevel) / 2.0
-            let prediction = generatePrediction(strength: predictionStrength, state: state)
-
-            brain.innerMonologue.append(MonologueLine(
-                text: "🔮 PREDIKTION[\(String(format: "%.0f", predictionStrength * 100))%]: \(prediction)",
-                type: .insight
-            ))
-
-            await state.update(dimension: .prediction, delta: 0.006, source: "prediction_pillar")
-
-            activePillars.remove(.prediction)
-            let interval = UInt64(70_000_000_000) + UInt64.random(in: 0...15_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    private func generatePrediction(strength: Double, state: CognitiveState) -> String {
+    private func runPredictionWork() async {
+        guard let brain else { return }
+        let state = CognitiveState.shared
+        let strength = (state.dimensionLevel(.worldModel) + state.dimensionLevel(.causality)) / 2.0
         let ii = state.integratedIntelligence
         let velocity = state.growthVelocity
-        let projectedII = ii + velocity * 60.0  // 60 minuter framåt
+        let projectedII = ii + velocity * 60.0
 
-        if strength > 0.7 {
-            return "Om nuvarande tillväxttakt håller (\(String(format: "%.5f", velocity))/min), når II=\(String(format: "%.3f", projectedII)) om 60 min. Nästa flaskhals: \(state.weakestDimensions(limit: 1).first?.0.rawValue ?? "okänd")"
-        } else {
-            return "Begränsad prediktionsförmåga (styrka: \(String(format: "%.2f", strength))). Stärk världsmodell och kausalitet för bättre prognoser."
-        }
+        let prediction = strength > 0.7
+            ? "Tillväxt \(String(format: "%.5f", velocity))/min → II=\(String(format: "%.3f", projectedII)) om 60 min"
+            : "Begränsad prediktion (styrka: \(String(format: "%.2f", strength))). Stärk världsmodell."
+
+        brain.innerMonologue.append(MonologueLine(text: "🔮 PREDIKTION[\(String(format: "%.0f", strength * 100))%]: \(prediction)", type: .insight))
+        await state.update(dimension: .prediction, delta: 0.003, source: "prediction_pillar")
     }
 
-    // MARK: - Feedback-förstärkare (15s)
+    // MARK: - Feedback Amplification (called after full pillar rotation)
+    // v3: Reduced boost values to prevent metric inflation
 
-    private func feedbackAmplifier() async {
-        // Feedback-förstärkaren körs var 30s (inte var 3s) — förhindrar inflation
-        try? await Task.sleep(nanoseconds: 15_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 10_000_000_000); continue }
+    private func runFeedbackAmplification(brain: EonBrain) async {
+        let state = CognitiveState.shared
+        let ii = state.integratedIntelligence
+        guard ii < 0.85 else { return } // Stricter cap to prevent inflation
 
-            let state = CognitiveState.shared
-            let ii = state.integratedIntelligence
-
-            // Förstärk bara loopar där ALLA dimensioner är genuint aktiva (> 0.55)
-            // och bara om II inte redan är hög (> 0.85) — förhindrar runaway inflation
-            guard ii < 0.88 else {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-                continue
+        let loops = state.feedbackLoops
+        var amplified = 0
+        for loop in loops where loop.type == .positive {
+            let levels = loop.dimensions.compactMap { state.dimensionLevel($0) }
+            let minLevel = levels.min() ?? 0
+            let avgLevel = levels.reduce(0, +) / Double(levels.count)
+            guard minLevel > 0.6 else { continue } // Stricter threshold (was 0.55)
+            let boost = loop.strength * 0.001 * (avgLevel - 0.6) // Reduced from 0.0015
+            for dim in loop.dimensions {
+                await state.update(dimension: dim, delta: boost, source: "feedback_amplifier")
             }
+            amplified += 1
+        }
 
-            let loops = state.feedbackLoops
-            var amplified = 0
-            for loop in loops where loop.type == .positive {
-                let levels = loop.dimensions.compactMap { state.dimensionLevel($0) }
-                let minLevel = levels.min() ?? 0
-                let avgLevel = levels.reduce(0, +) / Double(levels.count)
-                // Kräv att ALLA dimensioner i loopen är aktiva (minLevel > 0.55)
-                guard minLevel > 0.55 else { continue }
-                let boost = loop.strength * 0.0015 * (avgLevel - 0.55)  // Reducerat och gated
-                for dim in loop.dimensions {
-                    await state.update(dimension: dim, delta: boost, source: "feedback_amplifier")
-                }
-                amplified += 1
-            }
-
-            if amplified > 0 {
-                brain.innerMonologue.append(MonologueLine(
-                    text: "🔄 FEEDBACK: \(amplified) loopar förstärker · II=\(String(format: "%.4f", ii)) · v=\(String(format: "%.6f", state.growthVelocity))/min",
-                    type: .loopTrigger
-                ))
-            }
-
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
+        if amplified > 0 {
+            brain.innerMonologue.append(MonologueLine(
+                text: "🔄 FEEDBACK: \(amplified) loopar · II=\(String(format: "%.4f", ii)) · v=\(String(format: "%.6f", state.growthVelocity))/min",
+                type: .loopTrigger
+            ))
         }
     }
 }
