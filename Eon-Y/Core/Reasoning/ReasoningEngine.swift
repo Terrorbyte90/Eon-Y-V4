@@ -53,6 +53,9 @@ actor ReasoningEngine {
 
         // Tillämpa modus ponens
         var conclusions: [String] = []
+        guard premises.count >= 2 else {
+            return ReasoningResult(strategy: .deductive, steps: steps, conclusion: premises.first ?? input, confidence: 0.5, alternatives: [], causalChain: [])
+        }
         for i in 0..<min(premises.count - 1, depth) {
             let nextPremise = (i + 1 < premises.count) ? premises[i + 1] : premises[i]
             let conclusion = deriveConclusion(from: premises[i], and: nextPremise)
