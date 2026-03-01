@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import NaturalLanguage
+import Combine
 
 // MARK: - EonLiveAutonomy v2
 // Eon är ALDRIG tyst. Alltid aktiv. Alltid lärande.
@@ -1149,7 +1150,7 @@ final class EonLiveAutonomy: ObservableObject {
         let mem = PersistentMemoryStore.shared
 
         // Phase 1: Identify redundant facts and consolidate them
-        let recentFacts = await mem.recentFacts(limit: 30)
+        let recentFacts = await mem.recentFactsWithConfidence(limit: 30)
         var consolidatedCount = 0
 
         // Find facts with overlapping subjects — consolidate knowledge
@@ -2182,7 +2183,7 @@ struct ParallelDrawingEngine {
         }
 
         // Strategy 4: Concept density — many facts about same subject → deep topic
-        let subjectCounts = Dictionary(newFacts.map { ($0.subject, 1) }, uniquingKeysWith: +)
+        let subjectCounts: [String: Int] = Dictionary(newFacts.map { ($0.subject, 1) }, uniquingKeysWith: +)
         if let (densestSubject, count) = subjectCounts.max(by: { $0.value < $1.value }), count >= 3 {
             return "Kärnbegrepp i \(domain): '\(densestSubject)' (förekommer i \(count) relationer)"
         }

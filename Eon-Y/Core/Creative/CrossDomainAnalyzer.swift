@@ -20,7 +20,7 @@ actor CrossDomainAnalyzer {
         let concepts = extractKeyConcepts(from: content)
 
         // Extract causal relationships
-        let causalRelations = extractCausalRelations(from: content)
+        let causalRelations = extractCrossDomainCausalRelations(from: content)
 
         // Find potential cross-domain connections by searching other articles
         let allArticles = await memory.loadAllArticles(limit: 200)
@@ -85,11 +85,11 @@ actor CrossDomainAnalyzer {
 
         // Phase 3: Find causal chains across articles
         for article in articles.prefix(50) {
-            let causes = extractCausalRelations(from: article.content)
+            let causes = extractCrossDomainCausalRelations(from: article.content)
             for cause in causes {
                 // Check if effects appear as causes in other articles
                 for otherArticle in articles where otherArticle.id != article.id {
-                    let otherCauses = extractCausalRelations(from: otherArticle.content)
+                    let otherCauses = extractCrossDomainCausalRelations(from: otherArticle.content)
                     for otherCause in otherCauses {
                         if cause.effect.lowercased().contains(otherCause.cause.lowercased()) ||
                            otherCause.cause.lowercased().contains(cause.effect.lowercased()) {
@@ -143,8 +143,8 @@ actor CrossDomainAnalyzer {
     // MARK: - Public helpers for use by other systems
 
     /// Public version of causal relation extraction
-    func extractCausalRelationsPublic(from text: String) -> [CausalRelation] {
-        return extractCausalRelations(from: text)
+    func extractCrossDomainCausalRelationsPublic(from text: String) -> [CrossDomainCausalRelation] {
+        return extractCrossDomainCausalRelations(from: text)
     }
 
     /// Public version of key concept extraction
@@ -194,8 +194,8 @@ actor CrossDomainAnalyzer {
         return Array(concepts).sorted()
     }
 
-    private func extractCausalRelations(from text: String) -> [CausalRelation] {
-        var relations: [CausalRelation] = []
+    private func extractCrossDomainCausalRelations(from text: String) -> [CrossDomainCausalRelation] {
+        var relations: [CrossDomainCausalRelation] = []
         let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?"))
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -225,7 +225,7 @@ actor CrossDomainAnalyzer {
                         .trimmingCharacters(in: .whitespaces)
 
                     if cause.count > 3 && effect.count > 3 && cause.count < 100 && effect.count < 100 {
-                        relations.append(CausalRelation(
+                        relations.append(CrossDomainCausalRelation(
                             cause: cause,
                             effect: effect,
                             type: type,
@@ -326,12 +326,12 @@ actor CrossDomainAnalyzer {
 struct ArticleComprehension {
     let article: KnowledgeArticle
     let keyConcepts: [String]
-    let causalRelations: [CausalRelation]
+    let causalRelations: [CrossDomainCausalRelation]
     let crossDomainLinks: [CrossDomainLink]
     let extractedFacts: [ExtractedFact]
 }
 
-struct CausalRelation: Identifiable {
+struct CrossDomainCausalRelation: Identifiable {
     let id = UUID()
     let cause: String
     let effect: String
@@ -365,9 +365,3 @@ struct CrossDomainInsight: Identifiable {
     }
 }
 
-struct ExtractedFact {
-    let subject: String
-    let predicate: String
-    let object: String
-    let confidence: Double
-}
