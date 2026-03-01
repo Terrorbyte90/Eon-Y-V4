@@ -260,16 +260,42 @@ actor IntelligenceGapEngine {
     }
 
     private func runExercise(_ exercise: CognitiveExercise, dimension: CognitiveDimension) async -> Double {
-        // Simulerar kognitiv träning med NLP-analys
+        // Run cognitive exercise and measure quality via NLP analysis
         let prompt = exercise.description
         let response = NLResponseEngine.generate(for: prompt)
 
-        // Beräkna kvalitet på "träningssvar"
-        let wordCount = response.split(separator: " ").count
-        let qualityScore = min(1.0, Double(wordCount) / 50.0)
+        // Multi-factor quality assessment instead of just word count
+        let words = response.split(separator: " ")
+        let wordCount = words.count
 
-        // Gain är proportionell mot kvalitet och förväntad vinst
-        return exercise.expectedGain * qualityScore
+        // Factor 1: Response substantiveness (not too short, not too long)
+        let lengthScore: Double
+        if wordCount < 5 { lengthScore = 0.1 }
+        else if wordCount < 15 { lengthScore = 0.4 }
+        else if wordCount < 60 { lengthScore = 0.8 }
+        else { lengthScore = 0.9 }
+
+        // Factor 2: Lexical diversity — unique words / total words
+        let uniqueWords = Set(words.map { $0.lowercased() })
+        let diversity = words.isEmpty ? 0 : Double(uniqueWords.count) / Double(wordCount)
+
+        // Factor 3: Information density — content words (nouns, verbs, adj) vs total
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = response
+        var contentWordCount = 0
+        tagger.enumerateTags(in: response.startIndex..<response.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, _ in
+            if tag == .noun || tag == .verb || tag == .adjective { contentWordCount += 1 }
+            return true
+        }
+        let density = wordCount > 0 ? Double(contentWordCount) / Double(wordCount) : 0.3
+
+        // Weighted quality score
+        let qualityScore = lengthScore * 0.3 + diversity * 0.35 + density * 0.35
+
+        // Gain is proportional to quality and expected gain, with diminishing returns
+        let currentLevel = CognitiveState.shared.dimensionLevel(dimension)
+        let diminishingFactor = max(0.3, 1.0 - currentLevel) // Harder to improve at higher levels
+        return exercise.expectedGain * qualityScore * diminishingFactor
     }
 
     // MARK: - Statistik

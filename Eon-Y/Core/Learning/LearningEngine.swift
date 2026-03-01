@@ -241,6 +241,21 @@ actor LearningEngine {
                 ["Avledning", "Prefixer", "Suffixer"],
                 ["Produktiva mönster", "Oregelbundna former", "Historisk morfologi"]
             ],
+            "Syntax": [
+                ["Ordföljd i svenska", "Huvudsats vs bisats", "Satsdelar"],
+                ["Frasstruktur", "Topikalisering", "Passivkonstruktioner"],
+                ["X-bar-teori", "Dependensgrammatik", "Syntaktisk komplexitet"]
+            ],
+            "Semantik": [
+                ["Ordklass och betydelse", "Synonymer och antonymer", "Polysemi"],
+                ["Semantiska fält", "Komposition", "Metonymi och metafor"],
+                ["Formell semantik", "Lambdakalkyl", "Diskursrepresentation"]
+            ],
+            "Pragmatik": [
+                ["Talakter", "Implikatur", "Konversationsmaximer"],
+                ["Presupposition", "Deixis", "Artighet"],
+                ["Relevanceteori", "Konversationsanalys", "Pragmatisk inferens"]
+            ],
             "Kausalitet": [
                 ["Orsak-verkan", "Korrelation vs kausalitet"],
                 ["Kausala kedjor", "Kontrafaktisk analys"],
@@ -251,10 +266,55 @@ actor LearningEngine {
                 ["Transformers", "Attention", "BERT/GPT"],
                 ["RLHF", "Constitutional AI", "Alignment"]
             ],
+            "Kognitionsvetenskap": [
+                ["Perception", "Arbetsminne", "Uppmärksamhet"],
+                ["Kognitiva scheman", "Dual-process-teori", "Kognitiv belastning"],
+                ["Embodied cognition", "Situerat lärande", "Kognitiv arkitektur"]
+            ],
+            "Metakognition": [
+                ["Självmedvetenhet", "Strategival", "Övervakningsprocesser"],
+                ["Kalibrering", "Metaminnesteknik", "Reflektion"],
+                ["Metakognitiv styrning", "Epistemic feelings", "FOK-omdömen"]
+            ],
+            "Filosofi": [
+                ["Logik", "Argumentation", "Grundläggande etik"],
+                ["Epistemologi", "Medvetandefilosofi", "Fri vilja"],
+                ["Fenomenologi", "Analytisk filosofi", "Filosofisk logik"]
+            ],
+            "Epistemologi": [
+                ["Kunskap och tro", "Sanning", "Rättfärdigande"],
+                ["Skepticism", "Empirism vs rationalism", "Reliabilism"],
+                ["Social epistemologi", "Vetenskapsteori", "Bayesiansk epistemologi"]
+            ],
+            "Historia": [
+                ["Antiken", "Medeltiden", "Renässansen"],
+                ["Upplysningen", "Industriella revolutionen", "Världskrigen"],
+                ["Historiografi", "Historisk metod", "Kontrafaktisk historia"]
+            ],
+            "Psykologi": [
+                ["Grundläggande emotion", "Motivation", "Perception"],
+                ["Kognitiv psykologi", "Social psykologi", "Utvecklingspsykologi"],
+                ["Neuropsykologi", "Klinisk psykologi", "Psykologisk forskning"]
+            ],
+            "Naturvetenskap": [
+                ["Grundläggande fysik", "Cellbiologi", "Kemi"],
+                ["Kvantfysik", "Genetik", "Organisk kemi"],
+                ["Kosmologi", "Evolutionsbiologi", "Materialvetenskap"]
+            ],
+            "Analogibyggande": [
+                ["Grundläggande liknelser", "Strukturell mappning"],
+                ["Gentners analogiteori", "Fjärranalogier"],
+                ["Analogisk transfer", "Kreativ analogianvändning"]
+            ],
+            "Diskurs": [
+                ["Textstruktur", "Koherens", "Referens"],
+                ["Diskursmarkörer", "Tema-rema", "Informationsstruktur"],
+                ["Kritisk diskursanalys", "Retorisk analys", "Genreteori"]
+            ],
         ]
 
         let levelIdx = level < 0.33 ? 0 : level < 0.66 ? 1 : 2
-        return topicMap[domain]?[safe: levelIdx] ?? ["Grundläggande \(domain)", "Avancerad \(domain)"]
+        return topicMap[domain]?[safe: levelIdx] ?? ["Grundläggande \(domain)", "Fördjupning i \(domain)", "Avancerad \(domain)"]
     }
 
     private func generateKnowledgeForGaps(_ gaps: [KnowledgeGap]) async -> [String] {
@@ -324,27 +384,30 @@ actor LearningEngine {
 
     private func detectDomain(from text: String) -> String {
         let lower = text.lowercased()
-        // Poängsätt varje domän baserat på nyckelordsträffar — välj den med högst poäng
-        let domainKeywords: [(String, [String])] = [
-            ("Morfologi",          ["morfologi", "böjning", "ordklass", "avledning", "suffix", "prefix", "sammansättning"]),
-            ("Syntax",             ["syntax", "sats", "mening", "ordföljd", "fras", "grammatik", "bisats"]),
-            ("Semantik",           ["semantik", "betydelse", "definition", "begrepp", "ord", "lexikon"]),
-            ("Pragmatik",          ["pragmatik", "talakt", "kontext", "implikatur", "kommunikation"]),
-            ("Kausalitet",         ["orsak", "kausal", "kausalitet", "verkan", "slutsats", "konsekvens"]),
-            ("AI & Maskininlärning", ["ai", "neural", "modell", "transformer", "bert", "gpt", "maskininlärning", "algoritm"]),
-            ("Kognitionsvetenskap", ["kognition", "medvetande", "perception", "uppmärksamhet", "minne", "tänkande"]),
-            ("Metakognition",      ["metakognition", "självreflektion", "självmedvetenhet", "strategi", "lärande"]),
-            ("Filosofi",           ["filosofi", "epistemologi", "ontologi", "etik", "moral", "existens"]),
-            ("Historia",           ["historia", "historisk", "krig", "revolution", "civilisation", "antiken"]),
-            ("Psykologi",          ["psykologi", "känsla", "beteende", "emotion", "trauma", "personlighet"]),
-            ("Naturvetenskap",     ["naturvetenskap", "fysik", "kemi", "biologi", "evolution", "astronomi"]),
-            ("Analogibyggande",    ["analogi", "liknelse", "metafor", "parallell", "jämförelse"]),
-            ("Epistemologi",       ["epistemologi", "kunskap", "sanning", "bevis", "rättfärdigande"]),
+        // Score each domain based on keyword hits — weighted by specificity
+        let domainKeywords: [(String, [(keyword: String, weight: Int)])] = [
+            ("Morfologi",          [("morfologi", 3), ("böjning", 2), ("ordklass", 2), ("avledning", 2), ("suffix", 2), ("prefix", 2), ("sammansättning", 2), ("lemma", 2)]),
+            ("Syntax",             [("syntax", 3), ("sats", 1), ("ordföljd", 2), ("fras", 1), ("grammatik", 2), ("bisats", 2), ("subjekt", 1), ("predikat", 1)]),
+            ("Semantik",           [("semantik", 3), ("betydelse", 2), ("definition", 1), ("begrepp", 1), ("lexikon", 2), ("polysemi", 3), ("synonym", 2)]),
+            ("Pragmatik",          [("pragmatik", 3), ("talakt", 3), ("implikatur", 3), ("kommunikation", 1), ("konversation", 1), ("artighet", 2)]),
+            ("Diskurs",            [("diskurs", 3), ("koherens", 2), ("retori", 2), ("textstruktur", 2), ("genr", 2), ("narrativ", 2)]),
+            ("Kausalitet",         [("orsak", 2), ("kausal", 3), ("kausalitet", 3), ("verkan", 2), ("konsekvens", 2), ("korrelation", 2)]),
+            ("AI & Maskininlärning", [("ai", 2), ("neural", 2), ("transformer", 3), ("bert", 3), ("gpt", 3), ("maskininlärning", 3), ("algoritm", 2), ("modell", 1)]),
+            ("Kognitionsvetenskap", [("kognition", 3), ("medvetande", 2), ("perception", 2), ("uppmärksamhet", 2), ("arbetsminne", 3), ("tänkande", 1)]),
+            ("Metakognition",      [("metakognition", 3), ("självreflektion", 3), ("självmedvetenhet", 3), ("strategi", 1), ("lärande", 1), ("kalibrering", 2)]),
+            ("Filosofi",           [("filosofi", 3), ("ontologi", 3), ("etik", 2), ("moral", 2), ("existens", 2), ("fenomenologi", 3)]),
+            ("Epistemologi",       [("epistemologi", 3), ("kunskap", 1), ("sanning", 2), ("bevis", 1), ("rättfärdigande", 3), ("skepticism", 3)]),
+            ("Historia",           [("historia", 2), ("historisk", 2), ("krig", 1), ("revolution", 2), ("civilisation", 2), ("antiken", 2), ("medeltid", 2)]),
+            ("Psykologi",          [("psykologi", 3), ("känsla", 1), ("beteende", 2), ("emotion", 2), ("trauma", 2), ("personlighet", 2), ("motivation", 2)]),
+            ("Naturvetenskap",     [("naturvetenskap", 3), ("fysik", 2), ("kemi", 2), ("biologi", 2), ("evolution", 2), ("astronomi", 2), ("kvant", 2)]),
+            ("Analogibyggande",    [("analogi", 3), ("liknelse", 2), ("metafor", 2), ("parallell", 1), ("jämförelse", 1), ("mappning", 2)]),
         ]
         var bestDomain = "Kognitionsvetenskap"
         var bestScore = 0
         for (domain, keywords) in domainKeywords {
-            let score = keywords.filter { lower.contains($0) }.count
+            let score = keywords.reduce(0) { sum, kw in
+                lower.contains(kw.keyword) ? sum + kw.weight : sum
+            }
             if score > bestScore {
                 bestScore = score
                 bestDomain = domain
@@ -354,8 +417,18 @@ actor LearningEngine {
     }
 
     private func extractMainTopic(from text: String) -> String {
-        let words = text.split(separator: " ").map(String.init).filter { $0.count > 4 }
-        return words.first ?? "okänt ämne"
+        // Use NLTagger to find the most significant noun
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = text
+        var nouns: [String] = []
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, range in
+            if tag == .noun {
+                let word = String(text[range])
+                if word.count > 3 { nouns.append(word) }
+            }
+            return true
+        }
+        return nouns.first ?? String(text.prefix(30).split(separator: " ").filter { $0.count > 4 }.first ?? "okänt ämne")
     }
 }
 

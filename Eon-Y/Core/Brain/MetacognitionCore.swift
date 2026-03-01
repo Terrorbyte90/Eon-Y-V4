@@ -119,7 +119,11 @@ actor MetacognitionCore {
         let values = Array(dimensions.values)
         let mean = values.reduce(0, +) / Double(values.count)
         let variance = values.map { pow($0 - mean, 2) }.reduce(0, +) / Double(values.count)
-        let coherence = 1.0 - min(1.0, variance * 4.0)
+        // Coherence = 1 - normalized standard deviation (coefficient of variation capped at 1.0)
+        // A proper statistical measure: CV = stdev/mean. Low CV = dimensions are well-balanced.
+        let stdev = sqrt(variance)
+        let cv = mean > 0 ? stdev / mean : 1.0
+        let coherence = max(0, 1.0 - min(1.0, cv))
 
         return CognitiveAudit(
             integratedIntelligence: ii,
@@ -137,9 +141,9 @@ actor MetacognitionCore {
     private func detectBiases(state: CognitiveState) async -> [DetectedBias] {
         var biases: [DetectedBias] = []
         let dimensions = await state.dimensions
-        let monologue = await EonBrain.shared.innerMonologue.suffix(20).map { $0.text }
+        let monologue = await EonBrain.shared.innerMonologue.suffix(30).map { $0.text }
 
-        // Bekräftelsebias: om Eon konsekvent förstärker samma dimensioner
+        // 1. Confirmation bias: resources concentrated on already-strong dimensions
         let topDims = dimensions.sorted { $0.value > $1.value }.prefix(3).map { $0.key }
         let bottomDims = dimensions.sorted { $0.value < $1.value }.prefix(3).map { $0.key }
         if topDims.allSatisfy({ resourceAllocation[$0] ?? 0 > 0.1 }) {
@@ -151,7 +155,7 @@ actor MetacognitionCore {
             ))
         }
 
-        // Stagnationsbias: om tillväxten är noll
+        // 2. Stagnation bias: zero growth
         let velocity = await state.growthVelocity
         if abs(velocity) < 0.0001 && totalReflections > 10 {
             biases.append(DetectedBias(
@@ -162,16 +166,46 @@ actor MetacognitionCore {
             ))
         }
 
-        // Övergeneralisering: om monologen innehåller för många absoluta påståenden
+        // 3. Overgeneralization: too many absolute statements
+        let absoluteWords = ["alltid", "aldrig", "alla", "ingen", "omöjligt", "perfekt", "helt säkert"]
         let absoluteCount = monologue.filter { line in
-            ["alltid", "aldrig", "alla", "ingen"].contains(where: { line.lowercased().contains($0) })
+            absoluteWords.contains(where: { line.lowercased().contains($0) })
         }.count
         if absoluteCount > 5 {
             biases.append(DetectedBias(
                 type: .overgeneralization,
-                description: "Hög frekvens av absoluta påståenden (\(absoluteCount)/20 rader) — risk för övergeneralisering",
+                description: "Hög frekvens av absoluta påståenden (\(absoluteCount)/30 rader)",
                 severity: .low,
                 recommendation: "Öka epistemisk ödmjukhet — lägg till hedging och osäkerhetsmarkeringar"
+            ))
+        }
+
+        // 4. Recency bias: recent topics dominate thinking disproportionately
+        let recentTopics = monologue.suffix(10).flatMap { $0.lowercased().split(separator: " ").map(String.init) }
+        let olderTopics = monologue.prefix(20).flatMap { $0.lowercased().split(separator: " ").map(String.init) }
+        let recentUnique = Set(recentTopics.filter { $0.count > 5 })
+        let olderUnique = Set(olderTopics.filter { $0.count > 5 })
+        let newTopics = recentUnique.subtracting(olderUnique)
+        if newTopics.count > recentUnique.count / 2 && recentUnique.count > 5 {
+            biases.append(DetectedBias(
+                type: .recencyBias,
+                description: "Senaste tankar domineras av nya ämnen (\(newTopics.count) nya av \(recentUnique.count) unika) — äldre kunskap ignoreras",
+                severity: .low,
+                recommendation: "Integrera äldre insikter med nya — kör cross-domain analys"
+            ))
+        }
+
+        // 5. Anchoring bias: same value repeated across dimensions suggests anchoring
+        let dimValues = Array(dimensions.values)
+        let anchorCandidates = dimValues.filter { v in
+            dimValues.filter { abs($0 - v) < 0.02 }.count >= 4
+        }
+        if !anchorCandidates.isEmpty {
+            biases.append(DetectedBias(
+                type: .anchoringBias,
+                description: "Flera dimensioner klustrar kring samma värde (\(String(format: "%.2f", anchorCandidates.first ?? 0))) — möjlig förankring",
+                severity: .low,
+                recommendation: "Variera interventionsstrategier för att bryta förankringseffekten"
             ))
         }
 
@@ -369,6 +403,8 @@ struct DetectedBias: Identifiable {
         case stagnationBias   = "Stagnationsbias"
         case overgeneralization = "Övergeneralisering"
         case anchoring        = "Förankringseffekt"
+        case anchoringBias    = "Förankringsbias"
+        case recencyBias      = "Recencybias"
         case availabilityHeuristic = "Tillgänglighetsheuristik"
     }
 

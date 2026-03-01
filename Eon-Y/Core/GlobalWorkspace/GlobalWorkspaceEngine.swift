@@ -69,13 +69,27 @@ final class GlobalWorkspaceEngine: ObservableObject {
     func runCompetition() {
         competitionRound += 1
 
-        // Applicera förfall
+        // Phase 1: Decay + resonance boost
         for i in activeThoughts.indices {
             activeThoughts[i].activation *= (1.0 - decayRate)
             activeThoughts[i].activation += calculateResonance(activeThoughts[i])
         }
 
-        // Ta bort döda tankar
+        // Phase 2: Lateral inhibition — competing thoughts suppress each other
+        // This prevents too many similar thoughts from dominating the workspace
+        for i in activeThoughts.indices {
+            var inhibition: Double = 0
+            for j in activeThoughts.indices where i != j {
+                let similarity = calculateSimilarity(activeThoughts[i], activeThoughts[j])
+                // High similarity + lower activation = gets suppressed
+                if similarity > 0.4 && activeThoughts[j].activation > activeThoughts[i].activation {
+                    inhibition += similarity * 0.03
+                }
+            }
+            activeThoughts[i].activation = max(0, activeThoughts[i].activation - inhibition)
+        }
+
+        // Phase 3: Remove dead thoughts
         activeThoughts.removeAll { $0.activation < 0.1 }
 
         // Hitta vinnaren
@@ -155,13 +169,42 @@ final class GlobalWorkspaceEngine: ObservableObject {
         return min(0.2, resonance)
     }
 
+    /// Stopwords that should be ignored in similarity computation
+    private static let stopwords: Set<String> = [
+        "och", "i", "att", "det", "en", "ett", "är", "av", "för", "med", "på", "som",
+        "den", "till", "har", "de", "inte", "om", "var", "jag", "man", "kan", "ska",
+        "vi", "från", "alla", "vara", "sig", "vad", "så", "men", "hur", "eller",
+        "nu", "sin", "här", "där", "när", "han", "hon", "under", "efter", "vid",
+        "the", "is", "a", "an", "of", "to", "in", "and", "was", "that",
+    ]
+
     private func calculateSimilarity(_ a: WorkspaceThought, _ b: WorkspaceThought) -> Double {
-        // Enkel ordöverlappning (i produktion: BERT-embeddings)
-        let wordsA = Set(a.content.lowercased().split(separator: " ").map(String.init))
-        let wordsB = Set(b.content.lowercased().split(separator: " ").map(String.init))
+        // Weighted word overlap — filters stopwords and weights longer (more specific) words higher
+        let wordsA = Set(a.content.lowercased().split(separator: " ")
+            .map(String.init)
+            .filter { $0.count > 2 && !Self.stopwords.contains($0) })
+        let wordsB = Set(b.content.lowercased().split(separator: " ")
+            .map(String.init)
+            .filter { $0.count > 2 && !Self.stopwords.contains($0) })
+
+        guard !wordsA.isEmpty && !wordsB.isEmpty else { return 0 }
+
         let intersection = wordsA.intersection(wordsB)
-        let union = wordsA.union(wordsB)
-        return union.isEmpty ? 0 : Double(intersection.count) / Double(union.count)
+        guard !intersection.isEmpty else { return 0 }
+
+        // Weight longer words more heavily (more semantically specific)
+        let weightedOverlap = intersection.reduce(0.0) { sum, word in
+            sum + min(Double(word.count) / 6.0, 1.5)
+        }
+        let maxPossible = max(
+            wordsA.reduce(0.0) { $0 + min(Double($1.count) / 6.0, 1.5) },
+            wordsB.reduce(0.0) { $0 + min(Double($1.count) / 6.0, 1.5) }
+        )
+
+        // Category bonus: same-category thoughts are more similar
+        let categoryBonus: Double = a.category == b.category ? 0.1 : 0.0
+
+        return min(1.0, (weightedOverlap / max(maxPossible, 1.0)) + categoryBonus)
     }
 
     private func updateIntegrationLevel() {
@@ -197,7 +240,7 @@ final class GlobalWorkspaceEngine: ObservableObject {
 
 // MARK: - Data Models
 
-enum WorkspaceThoughtCategory {
+enum WorkspaceThoughtCategory: Equatable {
     case perception, memory, reasoning, language, emotion, general
 }
 

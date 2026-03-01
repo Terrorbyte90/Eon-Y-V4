@@ -8,7 +8,7 @@ import NaturalLanguage
 // Systemet går autonomt från sten till professor — inom språk, kunskap och resonemang.
 
 @MainActor
-final class EonLiveAutonomy {
+final class EonLiveAutonomy: ObservableObject {
     static let shared = EonLiveAutonomy()
 
     // Stark referens — EonBrain är singleton och lever hela appens livstid
@@ -34,28 +34,74 @@ final class EonLiveAutonomy {
         case language  = "Språkutveckling"
         case rest      = "Vila & konsolidering"
 
-        var duration: UInt64 {
+        /// UserDefaults key for this phase's duration in seconds
+        var durationKey: String {
+            "eon_phase_duration_\(rawValue.prefix(4).lowercased())"
+        }
+
+        /// Default duration in seconds
+        var defaultDurationSeconds: Int {
             switch self {
-            case .intensive: return 40_000_000_000  // 40s
-            case .learning:  return 30_000_000_000  // 30s
-            case .language:  return 25_000_000_000  // 25s
-            case .rest:      return 25_000_000_000  // 25s
+            case .intensive: return 40
+            case .learning:  return 30
+            case .language:  return 25
+            case .rest:      return 25
             }
         }
 
+        /// Configurable duration in nanoseconds — reads from UserDefaults, falls back to default
+        var duration: UInt64 {
+            let stored = UserDefaults.standard.integer(forKey: durationKey)
+            let seconds = stored > 0 ? stored : defaultDurationSeconds
+            return UInt64(seconds) * 1_000_000_000
+        }
+
+        /// Duration in seconds for display
+        var durationSeconds: Int {
+            let stored = UserDefaults.standard.integer(forKey: durationKey)
+            return stored > 0 ? stored : defaultDurationSeconds
+        }
+
         var next: CognitivePhase {
+            let order = CognitivePhase.phaseOrder
+            guard let idx = order.firstIndex(of: self) else { return .intensive }
+            return order[(idx + 1) % order.count]
+        }
+
+        /// Configurable phase order — stored as comma-separated rawValues in UserDefaults
+        static var phaseOrder: [CognitivePhase] {
+            if let stored = UserDefaults.standard.string(forKey: "eon_phase_order"),
+               !stored.isEmpty {
+                let phases = stored.components(separatedBy: ",").compactMap { name in
+                    CognitivePhase.allCases.first { $0.rawValue == name }
+                }
+                if phases.count >= 2 { return phases }
+            }
+            return [.intensive, .learning, .language, .rest]
+        }
+
+        var icon: String {
             switch self {
-            case .intensive: return .learning
-            case .learning:  return .language
-            case .language:  return .rest
-            case .rest:      return .intensive
+            case .intensive: return "bolt.fill"
+            case .learning:  return "book.fill"
+            case .language:  return "textformat.abc"
+            case .rest:      return "moon.fill"
+            }
+        }
+
+        var color: String {
+            switch self {
+            case .intensive: return "#EF4444"
+            case .learning:  return "#3B82F6"
+            case .language:  return "#14B8A6"
+            case .rest:      return "#A78BFA"
             }
         }
     }
 
-    private var currentPhase: CognitivePhase = .intensive
-    private var phaseStartTime: Date = Date()
-    private var phaseCycleCount: Int = 0
+    @Published private(set) var currentPhase: CognitivePhase = .intensive
+    @Published private(set) var phaseStartTime: Date = Date()
+    @Published private(set) var phaseCycleCount: Int = 0
 
     // MARK: - Deduplication & Caching
     // Prevents repeating identical work — a major source of CPU waste
@@ -245,21 +291,31 @@ final class EonLiveAutonomy {
 
     // MARK: - Phase Work Functions
 
+    // MARK: - Task toggle helpers (read from UserDefaults, set by AutomationSettingsView)
+    private var isHypothesisEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_hypothesis") as? Bool ?? true }
+    private var isReasoningEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_reasoning") as? Bool ?? true }
+    private var isWorldModelEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_worldmodel") as? Bool ?? true }
+    private var isLanguageExpEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_language_exp") as? Bool ?? true }
+    private var isSprakbankenEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_sprakbanken") as? Bool ?? true }
+    private var isConsolidationEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_consolidation") as? Bool ?? true }
+    private var isSelfReflectEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_selfreflect") as? Bool ?? true }
+    private var isArticlesEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_articles") as? Bool ?? true }
+
     private func runIntensivePhaseWork(brain: EonBrain) async {
         let workDone = phaseWorkDone[.intensive] ?? 0
         phaseWorkDone[.intensive] = workDone + 1
 
         // Rotate through intensive operations, one per cycle
+        // Respects task toggles from AutomationSettingsView
         switch workDone % 7 {
         case 0:
             await generateDeepThought()
         case 1:
             await runDeepCognitiveAnalysis()
         case 2:
-            if !brain.isThinking { await generateAndTestHypothesis(brain: brain) }
+            if isHypothesisEnabled && !brain.isThinking { await generateAndTestHypothesis(brain: brain) }
         case 3:
-            // Reasoning cycle
-            await runReasoningCycleWork(brain: brain)
+            if isReasoningEnabled { await runReasoningCycleWork(brain: brain) }
         case 4:
             // Global Workspace competition
             await runGlobalWorkspaceWork(brain: brain)
@@ -267,8 +323,7 @@ final class EonLiveAutonomy {
             // Autonomy boost — self-improvement
             await runAutonomyBoostWork(brain: brain)
         case 6:
-            // World model update
-            if !brain.isThinking { await updateWorldModel(brain: brain) }
+            if isWorldModelEnabled && !brain.isThinking { await updateWorldModel(brain: brain) }
         default:
             break
         }
@@ -283,16 +338,12 @@ final class EonLiveAutonomy {
 
         switch workDone % 4 {
         case 0:
-            // Learn from articles (with dedup)
             if !brain.isThinking { await readAndLearnFromArticles(brain: brain) }
         case 1:
-            // FSRS learning cycle
             await runLearningCycleWork(brain: brain)
         case 2:
-            // Self-reflection
-            if !brain.isThinking { await runDeepSelfReflection(brain: brain) }
+            if isSelfReflectEnabled && !brain.isThinking { await runDeepSelfReflection(brain: brain) }
         case 3:
-            // Constitutional AI validation
             await runConstitutionalWork(brain: brain)
         default:
             break
@@ -305,13 +356,10 @@ final class EonLiveAutonomy {
 
         switch workDone % 3 {
         case 0:
-            // Language experiment (with dedup)
-            if !brain.isThinking { await runLanguageExperiment(brain: brain) }
+            if isLanguageExpEnabled && !brain.isThinking { await runLanguageExperiment(brain: brain) }
         case 1:
-            // Språkbanken fetch (with dedup)
-            await fetchFromSprakbanken()
+            if isSprakbankenEnabled { await fetchFromSprakbanken() }
         case 2:
-            // Cross-domain language analysis
             await runLanguageIntegration(brain: brain)
         default:
             break
@@ -324,8 +372,7 @@ final class EonLiveAutonomy {
 
         // During rest: only lightweight consolidation + state sync
         if workDone == 0 {
-            // One consolidation per rest phase
-            if !brain.isThinking { await runConsolidation(brain: brain) }
+            if isConsolidationEnabled && !brain.isThinking { await runConsolidation(brain: brain) }
         }
 
         // Sync cognitive integration (lightweight)
@@ -361,7 +408,7 @@ final class EonLiveAutonomy {
             maintenanceCycle += 1
 
             // Article generation (every ~5 cycles = ~25 min)
-            if maintenanceCycle % 5 == 1 {
+            if maintenanceCycle % 5 == 1 && isArticlesEnabled {
                 await generateArticleIfNeeded(brain: brain)
             }
 

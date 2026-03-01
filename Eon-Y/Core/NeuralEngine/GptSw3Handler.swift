@@ -1,5 +1,6 @@
 import Foundation
 import CoreML
+import NaturalLanguage
 
 // MARK: - GptSw3Handler
 // Primär motor: Apple Foundation Models (LanguageModelSession, iOS 26)
@@ -295,11 +296,30 @@ struct NLResponseEngine {
         let state = CognitiveState.shared
         let memory = PersistentMemoryStore.shared
 
-        // Hämta relevanta fakta från kunskapsgrafen
-        let facts = memory.searchFacts(query: input, limit: 6)
+        // Hämta relevanta fakta — search by input + extracted nouns for broader coverage
+        var allFacts = memory.searchFacts(query: input, limit: 8)
 
-        // Hämta senaste konversationsminnen
-        let recentMessages = memory.recentUserMessages(limit: 5)
+        // Also search for key nouns individually to find more relevant facts
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = input
+        var keyNouns: [String] = []
+        tagger.enumerateTags(in: input.startIndex..<input.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, range in
+            if tag == .noun {
+                let word = String(input[range])
+                if word.count > 3 { keyNouns.append(word) }
+            }
+            return true
+        }
+        for noun in keyNouns.prefix(3) {
+            let nounFacts = memory.searchFacts(query: noun, limit: 3)
+            for fact in nounFacts {
+                if !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate && $0.object == fact.object }) {
+                    allFacts.append(fact)
+                }
+            }
+        }
+
+        let recentMessages = memory.recentUserMessages(limit: 8)
 
         // ICA-tillstånd
         let ii = state.integratedIntelligence
@@ -310,11 +330,10 @@ struct NLResponseEngine {
         let metacogInsight = state.metacognitiveInsight
         let causalChain = state.activeReasoningChain
 
-        // Kör snabb resonemang via ReasoningEngine (synkront via cached state)
-        let reasoningHint = buildReasoningHint(input: input, state: state)
+        let reasoningHint = buildReasoningHint(input: input, history: history, state: state)
 
         return CognitiveResponseContext(
-            facts: facts,
+            facts: allFacts,
             recentMessages: recentMessages,
             integratedIntelligence: ii,
             topDimensions: topDims,
@@ -327,31 +346,56 @@ struct NLResponseEngine {
         )
     }
 
-    private static func buildReasoningHint(input: String, state: CognitiveState) -> String {
+    private static func buildReasoningHint(input: String, history: [(role: String, text: String)], state: CognitiveState) -> String {
         let lower = input.lowercased()
         var hints: [String] = []
 
-        // Kausal fråga → använd kausalkedja
-        if lower.contains("varför") || lower.contains("orsak") || lower.contains("beror") {
+        // Causal question → use causal chain
+        if lower.contains("varför") || lower.contains("orsak") || lower.contains("beror") || lower.contains("anledning") {
             let chain = state.activeReasoningChain
             if !chain.isEmpty {
-                hints.append("Kausalkedja: \(chain.joined(separator: "→"))")
+                hints.append("Kausalkedja: \(chain.joined(separator: " → "))")
             }
         }
 
-        // Hypotetisk fråga → använd aktiv hypotes
-        if lower.contains("om") && (lower.contains("hade") || lower.contains("skulle")) {
+        // Hypothetical question → use active hypothesis
+        if lower.contains("om") && (lower.contains("hade") || lower.contains("skulle") || lower.contains("tänk")) {
             let hyp = state.currentHypothesis
             if !hyp.isEmpty { hints.append("Relevant hypotes: \(hyp)") }
         }
 
-        // Kunskapsfråga → använd frontier
-        if lower.contains("vad") || lower.contains("berätta") || lower.contains("förklara") {
+        // Knowledge question → use frontier
+        if lower.contains("vad") || lower.contains("berätta") || lower.contains("förklara") || lower.contains("hur") {
             let frontier = state.knowledgeFrontier.prefix(2).joined(separator: ", ")
-            if !frontier.isEmpty { hints.append("Aktuell kunskapsfrontier: \(frontier)") }
+            if !frontier.isEmpty { hints.append("Kunskapsfrontier: \(frontier)") }
+        }
+
+        // Comparison question → note strongest and weakest dimensions
+        if lower.contains("jämför") || lower.contains("skillnad") || lower.contains("likhet") {
+            let top = state.topDimensions(limit: 2).map { $0.0.rawValue }.joined(separator: ", ")
+            hints.append("Starkaste förmågor: \(top)")
+        }
+
+        // Follow-up context — if the user is continuing a thread, reference last exchange
+        if history.count > 2, let lastEon = history.filter({ $0.role == "eon" }).last {
+            let lastTopic = extractMainTopic(from: lastEon.text)
+            if !lastTopic.isEmpty && !hints.isEmpty {
+                hints.append("Senaste ämne: \(lastTopic)")
+            }
         }
 
         return hints.joined(separator: " | ")
+    }
+
+    private static func extractMainTopic(from text: String) -> String {
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = text
+        var nouns: [String] = []
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace]) { tag, range in
+            if tag == .noun { nouns.append(String(text[range])) }
+            return true
+        }
+        return nouns.filter { $0.count > 3 }.prefix(2).joined(separator: " ")
     }
 }
 
@@ -670,11 +714,17 @@ struct ResponseComposer {
     // MARK: - Hälsning
 
     private static func buildGreetResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
+        let cc = ctx.cognitiveContext
         if a.conversationDepth > 0, let last = a.lastUserInput {
             let lastTopic = extractCoreTopic(from: last)
-            return "Välkommen tillbaka! Vi pratade om \(lastTopic) senast. Vill du fortsätta där, eller är det något nytt du vill ta upp?"
+            return "Hej igen! Vi pratade om \(lastTopic) senast. Vill du fortsätta, eller ska vi ta upp något nytt?"
         }
-        return "Hej! Vad vill du prata om?"
+        // First-time greeting with personality
+        if cc.integratedIntelligence > 0.5 {
+            let frontier = cc.knowledgeFrontier.first ?? "kognition"
+            return "Hej! Jag är Eon. Jag har tänkt på \(frontier) senast — vad vill du prata om?"
+        }
+        return "Hej! Jag är Eon. Vad kan jag hjälpa dig med?"
     }
 
     // MARK: - Direkt uppföljning ("ja", "nej", "okej")
@@ -685,30 +735,30 @@ struct ResponseComposer {
             return "Okej, berätta mer."
         }
         let lastTopic = extractCoreTopic(from: lastEon)
+        let body = buildKnowledgeBody(topic: lastTopic, ctx: ctx)
 
         if input.hasPrefix("ja") || input == "japp" || input == "mm" || input == "precis" || input == "exakt" || input == "absolut" || input == "visst" {
-            let followUps = [
-                "Bra. Vad är det du vill förstå bättre om \(lastTopic)?",
-                "Okej. Vill du att jag ska gå djupare in på något specifikt?",
-                "Perfekt. Hur vill du att vi ska fortsätta?",
-                "Bra, då är vi överens. Vad är nästa fråga?"
-            ]
-            return followUps.randomElement()!
+            // Positive continuation — try to actually expand on the topic
+            if !body.isEmpty {
+                return "Bra. \(body)"
+            }
+            return "Bra. Vill du att jag fördjupar mig i \(lastTopic), eller tar vi upp något nytt?"
         }
 
         if input.hasPrefix("nej") || input == "nope" {
-            let alternatives = [
-                "Okej, vad vill du prata om istället?",
-                "Förstår. Vad är det du egentligen undrar över?",
-                "Inga problem — vad är du mer intresserad av?"
-            ]
-            return alternatives.randomElement()!
+            return "Okej, vad vill du prata om istället?"
         }
 
         if input == "okej" || input == "ok" || input == "ah" || input == "aha" {
-            return "Vad tänker du på nu?"
+            // Acknowledgment — offer to continue or expand
+            if !body.isEmpty && body.count > 30 {
+                return body
+            }
+            return "Vill du veta mer om \(lastTopic), eller något annat?"
         }
 
+        // Generic follow-up — try to provide substance
+        if !body.isEmpty { return body }
         return "Okej. Vad vill du veta mer om?"
     }
 
@@ -1033,32 +1083,71 @@ struct ResponseComposer {
         let t = topic.lowercased()
         var parts: [String] = []
 
-        // 1. Fakta från kunskapsgrafen
-        let relevantFacts = cc.facts.filter {
-            $0.subject.lowercased().contains(t) ||
-            $0.object.lowercased().contains(t) ||
-            $0.predicate.lowercased().contains(t)
-        }.prefix(3)
+        // 1. Facts from knowledge graph — fuzzy matching with word-level overlap
+        let topicWords = Set(t.components(separatedBy: .whitespaces).filter { $0.count > 2 })
+        let scoredFacts = cc.facts.map { fact -> (fact: (subject: String, predicate: String, object: String), score: Int) in
+            let factWords = Set("\(fact.subject) \(fact.predicate) \(fact.object)".lowercased()
+                .components(separatedBy: .whitespaces).filter { $0.count > 2 })
+            // Score by word overlap + direct substring match
+            var score = topicWords.intersection(factWords).count * 2
+            if fact.subject.lowercased().contains(t) || fact.object.lowercased().contains(t) { score += 3 }
+            if fact.subject.lowercased().hasPrefix(t) || fact.object.lowercased().hasPrefix(t) { score += 2 }
+            return (fact, score)
+        }
+        .filter { $0.score > 0 }
+        .sorted { $0.score > $1.score }
+        .prefix(4)
 
-        if !relevantFacts.isEmpty {
-            let factStr = relevantFacts.map { "\($0.subject) \($0.predicate) \($0.object)" }.joined(separator: ". ")
-            parts.append(factStr + ".")
+        if !scoredFacts.isEmpty {
+            // Build natural language from facts instead of raw triples
+            let factSentences = scoredFacts.map { item in
+                let f = item.fact
+                if f.predicate == "är" { return "\(f.subject) är \(f.object)" }
+                if f.predicate == "har" { return "\(f.subject) har \(f.object)" }
+                if f.predicate == "orsakar" || f.predicate == "påverkar" {
+                    return "\(f.subject) \(f.predicate) \(f.object)"
+                }
+                return "\(f.subject) \(f.predicate) \(f.object)"
+            }
+            parts.append(factSentences.joined(separator: ". ") + ".")
         }
 
-        // 2. Kausalkedja om relevant för ämnet
+        // 2. Causal chain — include if relevant to topic OR if few facts found
         if !cc.causalChain.isEmpty && cc.causalChain.count > 1 {
-            let chainRelevant = cc.causalChain.contains { $0.lowercased().contains(t) }
-            if chainRelevant {
-                parts.append("Kausalkedjan: \(cc.causalChain.joined(separator: " → ")).")
+            let chainRelevant = cc.causalChain.contains { chain in
+                let chainLower = chain.lowercased()
+                return chainLower.contains(t) || topicWords.contains(where: { chainLower.contains($0) })
+            }
+            if chainRelevant || parts.isEmpty {
+                parts.append("Orsakskedjan visar: \(cc.causalChain.prefix(4).joined(separator: " → ")).")
             }
         }
 
-        // 3. Aktiv hypotes om relevant
-        if !cc.activeHypothesis.isEmpty && cc.activeHypothesis.lowercased().contains(t) {
-            parts.append("Min aktuella hypotes: \(cc.activeHypothesis).")
+        // 3. Active hypothesis — include if relevant
+        if !cc.activeHypothesis.isEmpty {
+            let hypLower = cc.activeHypothesis.lowercased()
+            let relevant = hypLower.contains(t) || topicWords.contains(where: { hypLower.contains($0) })
+            if relevant { parts.append("Min hypotes: \(cc.activeHypothesis).") }
         }
 
-        // 4. Resonemangsledtråd (utan att upprepa)
+        // 4. Metacognitive insight if relevant and parts are sparse
+        if !cc.metacognitiveInsight.isEmpty && parts.count < 2 {
+            let insightLower = cc.metacognitiveInsight.lowercased()
+            if insightLower.contains(t) || topicWords.contains(where: { insightLower.contains($0) }) {
+                parts.append(cc.metacognitiveInsight)
+            }
+        }
+
+        // 5. Recent messages context — if user mentioned topic before, reference it
+        let previousMentions = cc.recentMessages.filter { msg in
+            let msgLower = msg.lowercased()
+            return topicWords.contains(where: { msgLower.contains($0) })
+        }
+        if !previousMentions.isEmpty && parts.count < 2 {
+            parts.append("Du har nämnt detta tidigare — jag bygger vidare på det.")
+        }
+
+        // 6. Reasoning hint as last resort
         if !cc.reasoningHint.isEmpty && parts.isEmpty {
             parts.append(cc.reasoningHint)
         }

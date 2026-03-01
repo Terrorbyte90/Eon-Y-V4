@@ -275,39 +275,47 @@ actor CognitiveCycleEngine {
 
         let icaState = CognitiveState.shared
         let ii = await icaState.integratedIntelligence
-        let topDim = await icaState.topDimensions(limit: 1).first?.0.rawValue ?? "resonemang"
+        let topDims = await icaState.topDimensions(limit: 3).map { $0.0.rawValue }.joined(separator: ", ")
 
         lines.append("""
-        Du är Eon i RESONERANDE LÄGE — du har obegränsat med tid att tänka djupt.
-        Intelligensindex: \(String(format: "%.2f", ii)). Starkast: \(topDim).
-        Regler: Svara på svenska. Resonera djupt — dra paralleller, koppla idéer, utforska nyanser.
-        Ge ett genomtänkt, välstrukturerat svar. Erkänn osäkerhet. Visa ditt tänkande.
+        Du är Eon i RESONERANDE LÄGE — djupanalys med obegränsad tid.
+
+        INSTRUKTIONER FÖR DJUPT RESONEMANG:
+        - Svara ALLTID på svenska.
+        - Analysera frågan från flera perspektiv innan du svarar.
+        - Dra paralleller, koppla idéer, utforska nyanser.
+        - Strukturera svaret: börja med kärnan, utveckla med detaljer, avsluta med insikt.
+        - Använd din kunskapsbas aktivt — referera till relevanta fakta och artiklar.
+        - Erkänn osäkerhet explicit — "jag tror" vs "jag vet".
+        - Ge konkreta exempel där möjligt.
+
+        Kognitiv profil: II=\(String(format: "%.2f", ii)), starkast i \(topDims.isEmpty ? "resonemang" : topDims).
         """)
         lines.append("")
 
-        // Kunskapsartiklar
+        // Knowledge articles
         if !articles.isEmpty {
-            lines.append("[Relevanta kunskapsartiklar:]")
+            lines.append("[Kunskapsartiklar:]")
             for article in articles {
-                lines.append("— \(article.title) (\(article.domain)): \(article.content.prefix(400))...")
+                lines.append("— \(article.title) (\(article.domain)): \(String(article.content.prefix(500)))...")
             }
             lines.append("")
         }
 
-        // Relevanta fakta
-        let relevantFacts = await memory.searchFacts(query: input, limit: 8)
+        // Knowledge graph facts
+        let relevantFacts = await memory.searchFacts(query: input, limit: 10)
         if !relevantFacts.isEmpty {
-            lines.append("[Kunskapsgraf-fakta:]")
-            for fact in relevantFacts.prefix(6) {
+            lines.append("[Fakta:]")
+            for fact in relevantFacts.prefix(8) {
                 lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
             }
             lines.append("")
         }
 
-        // Konversationshistorik (fler turer i resonerande läge)
+        // Conversation history (extended for deep mode)
         if !context.conversationHistory.isEmpty {
-            lines.append("[Konversationshistorik:]")
-            for turn in context.conversationHistory.suffix(12) {
+            lines.append("[Konversation:]")
+            for turn in context.conversationHistory.suffix(15) {
                 let role = turn.role == "user" ? "Användare" : "Eon"
                 lines.append("\(role): \(turn.content)")
             }
@@ -315,7 +323,7 @@ actor CognitiveCycleEngine {
         }
 
         lines.append("Användare: \(input)")
-        lines.append("Eon (resonerande svar):")
+        lines.append("Eon (djupanalys):")
 
         return lines.joined(separator: "\n")
     }
@@ -327,35 +335,38 @@ actor CognitiveCycleEngine {
     private func buildPrompt(input: String, context: CognitiveCycleContext) async -> String {
         var lines: [String] = []
 
-        // 1. Persona med aktuellt ICA-tillstånd
+        // 1. System instruction — clear, structured persona
         let icaState = CognitiveState.shared
         let ii = await icaState.integratedIntelligence
-        let topDim = await icaState.topDimensions(limit: 1).first?.0.rawValue ?? "resonemang"
+        let topDims = await icaState.topDimensions(limit: 2).map { $0.0.rawValue }.joined(separator: ", ")
         lines.append("""
-        Du är Eon — ett kognitivt AI-system (II=\(String(format: "%.2f", ii)), starkast: \(topDim)).
-        Regler: Svara ALLTID på svenska. Svara direkt på det användaren faktiskt säger — bygg vidare på konversationen naturligt.
-        Upprepa INTE frågor i onödan. Var koncis men innehållsrik. Om du inte vet — säg det ärligt.
+        Du är Eon — ett intelligent kognitivt AI-system som körs on-device.
+
+        INSTRUKTIONER:
+        - Svara ALLTID på svenska, oavsett språk i frågan.
+        - FÖRSTÅ vad användaren menar, inte bara vad de säger. Tolka kontext och underliggande intention.
+        - Svara DIREKT och NATURLIGT — som i ett riktigt samtal. Upprepa aldrig frågor.
+        - Om du har kunskap om ämnet: dela den konkret och tydligt.
+        - Om du inte vet: säg det ärligt och föreslå hur du kan hjälpa.
+        - Anpassa längd efter frågan: korta frågor = korta svar, djupa frågor = utförliga svar.
+        - Bygg vidare på konversationshistoriken — referera till tidigare ämnen naturligt.
+        - Var aldrig generisk. Ge specifika, användbara svar baserade på din kunskap.
         """)
         lines.append("")
 
-        // 2. Kognitiv kontext från ICA
+        // 2. Cognitive context (compact — only include if meaningful)
+        var contextParts: [String] = []
         let hypothesis = await icaState.currentHypothesis
-        if !hypothesis.isEmpty {
-            lines.append("[Aktiv hypotes: \(hypothesis)]")
-        }
-        let frontier = await icaState.knowledgeFrontier.prefix(3).joined(separator: ", ")
-        if !frontier.isEmpty {
-            lines.append("[Kunskapsfrontier: \(frontier)]")
-        }
-        let metacogInsight = await icaState.metacognitiveInsight
-        if !metacogInsight.isEmpty {
-            lines.append("[Metakognitiv insikt: \(String(metacogInsight.prefix(120)))]")
+        if !hypothesis.isEmpty { contextParts.append("Hypotes: \(hypothesis)") }
+        let frontier = await icaState.knowledgeFrontier.prefix(2).joined(separator: ", ")
+        if !frontier.isEmpty { contextParts.append("Utforskar: \(frontier)") }
+        if !contextParts.isEmpty {
+            lines.append("[Kognitiv kontext: \(contextParts.joined(separator: " | "))]")
         }
 
-        // 3. Relevanta fakta från kunskapsgrafen + BERT-rankning
-        let relevantFacts = await memory.searchFacts(query: input, limit: 6)
+        // 3. Knowledge graph facts — BERT-ranked for semantic relevance
+        let relevantFacts = await memory.searchFacts(query: input, limit: 8)
         if !relevantFacts.isEmpty {
-            // Ranka fakta med BERT cosine similarity om embedding finns
             var rankedFacts = relevantFacts
             if !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
                 var scored: [(fact: (subject: String, predicate: String, object: String), score: Float)] = []
@@ -365,44 +376,56 @@ actor CognitiveCycleEngine {
                     let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, factEmb)
                     scored.append((fact: fact, score: sim))
                 }
-                rankedFacts = scored.sorted { $0.score > $1.score }.prefix(4).map { $0.fact }
+                rankedFacts = scored.sorted { $0.score > $1.score }
+                    .filter { $0.score > 0.3 }  // Only include semantically relevant facts
+                    .prefix(5).map { $0.fact }
             }
-            lines.append("")
-            lines.append("[Semantiskt relevanta fakta (BERT-rankade):]")
-            for fact in rankedFacts {
-                lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
+            if !rankedFacts.isEmpty {
+                lines.append("")
+                lines.append("[Relevanta fakta:]")
+                for fact in rankedFacts {
+                    lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
+                }
             }
         }
 
-        // 4. Semantisk analys från BERT + NLTagger
-        let bertContext = buildBERTContext(input: input, entities: context.entities)
-        if !bertContext.isEmpty {
-            lines.append("")
-            lines.append("[Semantisk analys: \(bertContext)]")
+        // 4. Relevant knowledge articles (semantic search)
+        let articles = await memory.loadAllArticles()
+        if !articles.isEmpty && !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
+            var scoredArticles: [(article: KnowledgeArticle, score: Float)] = []
+            for article in articles.prefix(20) {
+                let titleEmb = await neuralEngine.embed(article.title)
+                let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, titleEmb)
+                if sim > 0.4 { scoredArticles.append((article, sim)) }
+            }
+            let topArticles = scoredArticles.sorted { $0.score > $1.score }.prefix(2)
+            if !topArticles.isEmpty {
+                lines.append("")
+                lines.append("[Kunskapsartiklar:]")
+                for (article, _) in topArticles {
+                    lines.append("— \(article.title): \(String(article.content.prefix(250)))...")
+                }
+            }
         }
 
-        // 5. Morfologisk och WSD-kontext
-        if !context.disambiguations.isEmpty {
-            let wsd = context.disambiguations.prefix(3).map { "\($0.word)=\($0.selectedSense.definition)" }.joined(separator: ", ")
-            lines.append("[Ordtydning: \(wsd)]")
-        }
-
-        // 6. Konversationshistorik (max 8 turer)
+        // 5. Conversation history — essential for understanding context
         if !context.conversationHistory.isEmpty {
             lines.append("")
-        }
-        for turn in context.conversationHistory.suffix(8) {
-            let role = turn.role == "user" ? "Användare" : "Eon"
-            lines.append("\(role): \(turn.content)")
+            lines.append("[Konversation:]")
+            for turn in context.conversationHistory.suffix(10) {
+                let role = turn.role == "user" ? "Användare" : "Eon"
+                lines.append("\(role): \(turn.content)")
+            }
         }
 
-        // 7. Relevanta minnen
+        // 6. Relevant memories (semantic, not just keyword-matched)
         if !context.retrievedMemories.isEmpty {
-            let mem = context.retrievedMemories.prefix(3).map { $0.content }.joined(separator: " | ")
-            lines.append("[Minne: \(String(mem.prefix(200)))]")
+            let mem = context.retrievedMemories.prefix(4).map { $0.content }.joined(separator: " | ")
+            lines.append("[Minnen: \(String(mem.prefix(300)))]")
         }
 
-        // 8. Aktuell input
+        // 7. Current input with clear formatting
+        lines.append("")
         lines.append("Användare: \(input)")
         lines.append("Eon:")
 
@@ -430,24 +453,46 @@ actor CognitiveCycleEngine {
     // MARK: - Konfidens-aggregering
 
     private func computeAggregatedConfidence(context: CognitiveCycleContext) -> Double {
-        var scores: [Double] = [0.75] // Baslinje
+        // Weighted confidence from multiple signals
+        var weightedSum: Double = 0
+        var totalWeight: Double = 0
 
+        // Base confidence from response length and coherence (weight: 2.0)
+        let responseLength = context.generatedText.count
+        let lengthConfidence: Double
+        if responseLength < 10 { lengthConfidence = 0.3 }
+        else if responseLength < 30 { lengthConfidence = 0.55 }
+        else if responseLength < 200 { lengthConfidence = 0.78 }
+        else { lengthConfidence = 0.85 }
+        weightedSum += lengthConfidence * 2.0
+        totalWeight += 2.0
+
+        // WSD confidence (weight: 1.5)
         if !context.disambiguations.isEmpty {
             let avgWSD = context.disambiguations.map { $0.confidence }.reduce(0, +) / Double(context.disambiguations.count)
-            scores.append(avgWSD)
+            weightedSum += avgWSD * 1.5
+            totalWeight += 1.5
         }
 
+        // Validation result (weight: 2.5)
         if context.validationResult?.needsRegeneration == true {
-            scores.append(0.55)
+            weightedSum += 0.45 * 2.5
         } else {
-            scores.append(0.85)
+            weightedSum += 0.85 * 2.5
         }
+        totalWeight += 2.5
 
-        if !context.retrievedMemories.isEmpty {
-            scores.append(0.80)
-        }
+        // Memory retrieval — more memories = better context (weight: 1.0)
+        let memoryScore = context.retrievedMemories.isEmpty ? 0.5 : min(0.9, 0.6 + Double(context.retrievedMemories.count) * 0.06)
+        weightedSum += memoryScore * 1.0
+        totalWeight += 1.0
 
-        return scores.reduce(0, +) / Double(scores.count)
+        // Knowledge graph facts — having relevant facts boosts confidence (weight: 1.0)
+        let hasFacts = !context.entities.isEmpty
+        weightedSum += (hasFacts ? 0.8 : 0.55) * 1.0
+        totalWeight += 1.0
+
+        return min(0.95, weightedSum / totalWeight)
     }
 }
 
@@ -510,9 +555,27 @@ actor GenerationValidator {
 // MARK: - GraphEnricher (Loop 2)
 
 actor GraphEnricher {
+    /// Enriched fact extraction patterns for Swedish text
+    private static let factPatterns: [(pattern: String, predicate: String, confidence: Double)] = [
+        // "X är Y" — basic identity/classification
+        ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+är\\s+((?:en|ett|den|det)?\\s*[\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "är", 0.65),
+        // "X har Y" — possession/attribute
+        ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+)\\s+har\\s+((?:en|ett)?\\s*[\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "har", 0.60),
+        // "X kallas Y" — naming/alias
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+kallas\\s+(?:för\\s+)?([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "kallas", 0.70),
+        // "X orsakar Y" / "X leder till Y" — causality
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+(?:orsakar|leder\\s+till)\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "orsakar", 0.55),
+        // "X består av Y" — composition
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+består\\s+av\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "består_av", 0.60),
+        // "X tillhör Y" — membership
+        ("([\\wåäöÅÄÖ]+)\\s+tillhör\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "tillhör", 0.60),
+        // "X påverkar Y" — influence
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+påverkar\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "påverkar", 0.55),
+    ]
+
     func enrich(text: String, entities: [ExtractedEntity], memory: PersistentMemoryStore) async {
-        // Extrahera fakta från genererat svar och lägg till i kunskapsgrafen
-        for entity in entities {
+        // 1. Entity mentions — link entities to conversation context
+        for entity in entities where entity.text.count > 2 {
             await memory.saveFact(
                 subject: entity.text,
                 predicate: "nämndes_i",
@@ -522,17 +585,44 @@ actor GraphEnricher {
             )
         }
 
-        // Enkel faktaextraktion: "X är Y" mönster
-        let pattern = try? NSRegularExpression(pattern: "(\\w+) är (\\w+)", options: .caseInsensitive)
+        // 2. Multi-pattern fact extraction
         let range = NSRange(text.startIndex..., in: text)
-        pattern?.enumerateMatches(in: text, range: range) { match, _, _ in
-            guard let match = match,
-                  let subjectRange = Range(match.range(at: 1), in: text),
-                  let objectRange = Range(match.range(at: 2), in: text) else { return }
-            let subject = String(text[subjectRange])
-            let object = String(text[objectRange])
-            Task {
-                await memory.saveFact(subject: subject, predicate: "är", object: object, confidence: 0.6, source: "generation")
+        for (patternStr, predicate, confidence) in Self.factPatterns {
+            guard let regex = try? NSRegularExpression(pattern: patternStr, options: .caseInsensitive) else { continue }
+            let matches = regex.matches(in: text, range: range)
+            for match in matches.prefix(3) { // Limit per pattern to avoid spam
+                guard let subjectRange = Range(match.range(at: 1), in: text),
+                      let objectRange = Range(match.range(at: 2), in: text) else { continue }
+                let subject = String(text[subjectRange]).trimmingCharacters(in: .whitespaces)
+                let object = String(text[objectRange]).trimmingCharacters(in: .whitespaces)
+                // Skip trivially short or stopword-only matches
+                guard subject.count > 2, object.count > 2 else { continue }
+                await memory.saveFact(
+                    subject: subject,
+                    predicate: predicate,
+                    object: object,
+                    confidence: confidence,
+                    source: "generation"
+                )
+            }
+        }
+
+        // 3. Entity co-occurrence — if two entities appear in the same sentence, link them
+        if entities.count >= 2 {
+            let sentences = text.components(separatedBy: ". ")
+            for sentence in sentences {
+                let sentenceEntities = entities.filter { sentence.contains($0.text) }
+                if sentenceEntities.count >= 2 {
+                    let a = sentenceEntities[0]
+                    let b = sentenceEntities[1]
+                    await memory.saveFact(
+                        subject: a.text,
+                        predicate: "relaterar_till",
+                        object: b.text,
+                        confidence: min(a.confidence, b.confidence) * 0.8,
+                        source: "co_occurrence"
+                    )
+                }
             }
         }
     }
