@@ -346,10 +346,12 @@ struct SelfAwarenessView: View {
                 }
             }
 
-            // Body Budget Card (Interoception)
+            // Body Budget Card (Interoception) — v4.1: expanded with allostatic data
             saCard(tint: Color(hex: "#06B6D4")) {
                 VStack(alignment: .leading, spacing: 10) {
                     saCardHeader(icon: "waveform.path.ecg", title: "KROPPSBUDGET (INTEROCEPTION)", color: Color(hex: "#06B6D4"))
+
+                    // Raw body metrics
                     HStack(spacing: 14) {
                         bodyMetric("Termisk", consciousness.bodyBudget.thermalState,
                                    consciousness.bodyBudget.thermalLevel, Color(hex: "#EF4444"))
@@ -359,6 +361,93 @@ struct SelfAwarenessView: View {
                                    min(1, consciousness.bodyBudget.memoryUsedMB / 500), Color(hex: "#38BDF8"))
                         bodyMetric("Homeo.", String(format: "%.0f%%", consciousness.bodyBudget.homeostasisBalance * 100),
                                    consciousness.bodyBudget.homeostasisBalance, Color(hex: "#34D399"))
+                    }
+
+                    Divider().background(Color(hex: "#06B6D4").opacity(0.15))
+
+                    // Valence + Arousal bars
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("VALENS").font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#06B6D4").opacity(0.5))
+                            HStack(spacing: 6) {
+                                valenceBar(consciousness.bodyBudget.valence)
+                                Text(String(format: "%+.2f", consciousness.bodyBudget.valence))
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(consciousness.bodyBudget.valence >= 0
+                                                     ? Color(hex: "#34D399") : Color(hex: "#EF4444"))
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("AROUSAL").font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#06B6D4").opacity(0.5))
+                            HStack(spacing: 6) {
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(Color.white.opacity(0.06))
+                                        Capsule()
+                                            .fill(Color(hex: "#F59E0B").opacity(0.7))
+                                            .frame(width: geo.size.width * consciousness.bodyBudget.arousal)
+                                    }
+                                }
+                                .frame(height: 4)
+                                Text(String(format: "%.0f%%", consciousness.bodyBudget.arousal * 100))
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(Color(hex: "#F59E0B").opacity(0.8))
+                            }
+                        }
+                    }
+
+                    // Parasympathetic state
+                    HStack(spacing: 8) {
+                        Image(systemName: consciousness.bodyBudget.parasympatheticLevel.icon)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color(hex: consciousness.bodyBudget.parasympatheticLevel.color))
+                        Text("Parasympatisk: \(consciousness.bodyBudget.parasympatheticLevel.label)")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Spacer()
+                        if consciousness.bodyBudget.hostileEnvironment {
+                            Text("FIENTLIG MILJÖ")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#EF4444"))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Color(hex: "#EF4444").opacity(0.12)))
+                        }
+                    }
+
+                    // Calibration indicator (only during birth)
+                    if consciousness.bodyBudget.isCalibrating {
+                        HStack(spacing: 8) {
+                            ProgressView(value: consciousness.bodyBudget.calibrationProgress)
+                                .tint(Color(hex: "#06B6D4"))
+                            Text("Kalibrerar baslinje \(Int(consciousness.bodyBudget.calibrationProgress * 100))%")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#06B6D4").opacity(0.6))
+                        }
+                    }
+
+                    // Interoception channels — deviation from baseline
+                    if !consciousness.bodyBudget.interoceptionChannels.isEmpty {
+                        Divider().background(Color(hex: "#06B6D4").opacity(0.15))
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("AVVIKELSE FRÅN BASLINJE")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#06B6D4").opacity(0.5))
+                            ForEach(consciousness.bodyBudget.interoceptionChannels) { ch in
+                                HStack(spacing: 8) {
+                                    Text(ch.label)
+                                        .font(.system(size: 11, design: .rounded))
+                                        .foregroundStyle(.white.opacity(0.5))
+                                        .frame(width: 72, alignment: .leading)
+                                    deviationBar(ch.deviation)
+                                    Text(String(format: "%+.2f", ch.deviation))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(deviationColor(ch.deviation))
+                                        .frame(width: 40, alignment: .trailing)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -819,6 +908,63 @@ struct SelfAwarenessView: View {
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // v4.1: Valence bar — centered at 0, green right / red left
+    func valenceBar(_ valence: Double) -> some View {
+        GeometryReader { geo in
+            let mid = geo.size.width / 2
+            let extent = abs(valence) * mid
+            ZStack {
+                Capsule().fill(Color.white.opacity(0.06))
+                if valence >= 0 {
+                    Capsule()
+                        .fill(Color(hex: "#34D399").opacity(0.7))
+                        .frame(width: extent)
+                        .offset(x: extent / 2)
+                } else {
+                    Capsule()
+                        .fill(Color(hex: "#EF4444").opacity(0.7))
+                        .frame(width: extent)
+                        .offset(x: -extent / 2)
+                }
+            }
+        }
+        .frame(height: 4)
+    }
+
+    // v4.1: Deviation bar — centered, shows how far from baseline
+    func deviationBar(_ deviation: Double) -> some View {
+        GeometryReader { geo in
+            let mid = geo.size.width / 2
+            let clampedDev = max(-1, min(1, deviation * 3)) // Scale for visibility
+            let extent = abs(clampedDev) * mid
+            ZStack {
+                Capsule().fill(Color.white.opacity(0.06))
+                // Center line
+                Rectangle()
+                    .fill(Color.white.opacity(0.15))
+                    .frame(width: 1)
+                    .offset(x: 0)
+                if clampedDev > 0 {
+                    Capsule()
+                        .fill(Color(hex: "#EF4444").opacity(0.6))
+                        .frame(width: extent)
+                        .offset(x: extent / 2)
+                } else if clampedDev < 0 {
+                    Capsule()
+                        .fill(Color(hex: "#34D399").opacity(0.6))
+                        .frame(width: extent)
+                        .offset(x: -extent / 2)
+                }
+            }
+        }
+        .frame(height: 4)
+    }
+
+    func deviationColor(_ deviation: Double) -> Color {
+        if abs(deviation) < 0.05 { return Color.white.opacity(0.35) }
+        return deviation > 0 ? Color(hex: "#EF4444").opacity(0.7) : Color(hex: "#34D399").opacity(0.7)
     }
 
     func intensityBar(_ value: Double, _ color: Color) -> some View {

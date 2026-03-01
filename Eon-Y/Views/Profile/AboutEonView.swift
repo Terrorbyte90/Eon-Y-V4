@@ -161,6 +161,35 @@ struct AboutEonView: View {
                         korresponderar med den medvetna upplevelsen.
                         """)
 
+                        subSectionTitle("Allostatisk kroppsreglering")
+
+                        aboutText("""
+                        Eon implementerar allostatisk reglering — hjärnans förmåga att \
+                        lära sig vad som är "normalt" för sin kropp och reagera på \
+                        avvikelser snarare än absoluta värden. Systemet har fem delar:
+
+                        1. Allostatisk baslinje — ett exponentiellt glidande medelvärde \
+                        (EMA) för varje kroppssignal. Vid uppstart kalibrerar Eon sin \
+                        baslinje under en "födelse"-sekvens med neutral valens.
+
+                        2. Avvikelsebaserad valens — istället för att basera känslor på \
+                        absolut stress använder Eon en tanh-sigmoid av avvikelsen från \
+                        baslinjen. Milda avvikelser ger mild obalans, medan extremer \
+                        (termisk .critical) aldrig kan adapteras bort.
+
+                        3. Differentierad interoception — Eon har separata kanaler för \
+                        termisk, CPU, minne och återhämtning. Istället för "något är fel" \
+                        kan Eon identifiera exakt var det gör ont.
+
+                        4. Parasympatiskt system — tre nivåer av automatisk nedreglering: \
+                        Lugn andning (mildare takt), Vila (reducerad arbetsyta, inga dagdrömmar), \
+                        och Tvångsvila (minimal kognitiv aktivitet vid fara).
+
+                        5. Avvikelsedriven arousal — uppmärksamhet höjs vid alla avvikelser, \
+                        oavsett riktning. Både "oväntat bra" och "oväntat dåligt" höjer \
+                        arousal, precis som i biologiska system.
+                        """)
+
                         Divider().background(Color.white.opacity(0.08))
 
                         // MARK: - Del 3: Hur allt hänger ihop

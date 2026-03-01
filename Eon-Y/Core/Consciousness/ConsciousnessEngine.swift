@@ -58,6 +58,11 @@ final class ConsciousnessEngine: ObservableObject {
     // MARK: - Embodiment / Interoception
     @Published var bodyBudget: BodyBudgetState = BodyBudgetState()
 
+    // MARK: - Allostatic Body Regulation (v4.1)
+    private var allostaticBaseline = AllostaticBaseline()
+    private var negativeValenceTicks: Int = 0       // How long valence has been below -0.4
+    private var severeValenceTicks: Int = 0          // How long valence has been below -0.6
+
     // MARK: - Conscious thought stream
     @Published var thoughtStream: [ConsciousThought] = []
     @Published var consciousnessLevel: Double = 0.15
@@ -93,7 +98,9 @@ final class ConsciousnessEngine: ObservableObject {
 
     private func consciousnessMetricsLoop() async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 5_000_000_000) // v4: 2s → 5s
+            // v4.1: Parasympathetic breathing slows the metrics loop (Eon "breathes slower")
+            let metricsInterval: UInt64 = bodyBudget.parasympatheticLevel >= .breathing ? 6_500_000_000 : 5_000_000_000
+            try? await Task.sleep(nanoseconds: metricsInterval)
             tick += 1
             let t = Double(tick)
 
@@ -173,9 +180,24 @@ final class ConsciousnessEngine: ObservableObject {
             metaRepresentationDepth = brain.isThinking ? 3 : Int(metaDim * 4)
             hotConfidence = metaDim * 0.8 + brain.confidence * 0.2
 
-            // Attention Schema
+            // Attention Schema — v4.1: body-specific focus when interoception detects deviation
+            let bodyFocus: String?
+            if let maxDev = bodyBudget.interoceptionChannels.max(by: { abs($0.deviation) < abs($1.deviation) }),
+               abs(maxDev.deviation) > 0.1 {
+                bodyFocus = "body:\(maxDev.id)"  // e.g. "body:thermal", "body:cpu"
+            } else {
+                bodyFocus = nil
+            }
+            let focusTarget: String
+            if brain.isThinking {
+                focusTarget = brain.attentionFocus.isEmpty ? "Extern input" : brain.attentionFocus
+            } else if let bf = bodyFocus {
+                focusTarget = bf
+            } else {
+                focusTarget = "Spontan intern aktivitet"
+            }
             attentionSchemaState = AttentionSchemaState(
-                focusTarget: brain.attentionFocus.isEmpty ? "Spontan intern aktivitet" : brain.attentionFocus,
+                focusTarget: focusTarget,
                 intensity: activity,
                 isVoluntary: brain.isThinking,
                 schemaAccuracy: selfAware * 0.7 + brain.confidence * 0.3,
@@ -202,8 +224,9 @@ final class ConsciousnessEngine: ObservableObject {
             brain.attentionalBlink = attentionalBlinkMs
             brain.selfModelAccuracy = attentionSchemaState.schemaAccuracy
 
-            // v4: Body budget monitoring integrated here (was separate 5s loop)
-            if tick % 3 == 0 { // Every ~15s (3 * 5s)
+            // v4.1: Body budget monitoring — more frequent during calibration for faster baseline
+            let bodyUpdateFreq = allostaticBaseline.isCalibrated ? 3 : 1  // Every 5s during cal, 15s after
+            if tick % bodyUpdateFreq == 0 {
                 await updateBodyBudget(brain: brain)
             }
 
@@ -213,21 +236,45 @@ final class ConsciousnessEngine: ObservableObject {
             blindsightDissociation = abs(consciousnessLevel - (activity * 0.5 + 0.2)) // Gap between awareness and processing
             canaryTestAccuracy = min(0.99, 0.85 + selfAware * 0.1 + brain.confidence * 0.05)
 
+            // v4.1: Parasympathetic effects on workspace and spontaneous activity
+            let paraLevel = bodyBudget.parasympatheticLevel
+            let effectiveMaxSlots: Int
+            let effectiveSpontaneous: Double
+            let effectiveIgnition: Double
+            switch paraLevel {
+            case .none:
+                effectiveMaxSlots = 7
+                effectiveSpontaneous = lzComplexitySpontaneous
+                effectiveIgnition = ignitionThreshold
+            case .breathing:
+                effectiveMaxSlots = 5
+                effectiveSpontaneous = lzComplexitySpontaneous * 0.8
+                effectiveIgnition = ignitionThreshold + 0.05
+            case .resting:
+                effectiveMaxSlots = 3
+                effectiveSpontaneous = 0.02  // Almost no daydreaming
+                effectiveIgnition = ignitionThreshold + 0.1
+            case .forcedSleep:
+                effectiveMaxSlots = 1
+                effectiveSpontaneous = 0.0
+                effectiveIgnition = 0.95  // Only strongest signals
+            }
+
             // Update internal world state
             brain.internalWorldState = InternalWorldState(
                 activeModules: max(4, Int(activity * 12)),
                 totalModules: 12,
-                workspaceOccupancy: min(7, competingThoughts),
-                maxWorkspaceSlots: 7,
+                workspaceOccupancy: min(effectiveMaxSlots, competingThoughts),
+                maxWorkspaceSlots: effectiveMaxSlots,
                 oscillatorPhase: sin(t * 0.13) * 0.5 + 0.5,
-                spontaneousActivity: lzComplexitySpontaneous,
+                spontaneousActivity: effectiveSpontaneous,
                 sleepPressure: max(0, min(1, Double(tick) / 3600.0)),
                 predictionErrorRate: freeEnergy,
                 informationIntegration: phiProxy,
                 causalDensity: CognitiveState.shared.causalGraphDensity,
                 attentionSchemaActive: attentionSchemaState.modelOfOwnAttention,
                 metaMonitorActive: metaDim > 0.3,
-                dmnActive: !brain.isThinking,
+                dmnActive: !brain.isThinking && paraLevel < .resting,
                 recentBroadcasts: brain.innerMonologue.suffix(3).map { $0.text },
                 moduleSynergy: synergyLevel,
                 freeEnergyMinimization: 1.0 - freeEnergy
@@ -267,11 +314,56 @@ final class ConsciousnessEngine: ObservableObject {
 
     private func thoughtAndGoalLoop() async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 8_000_000_000) // v4: 8s combined interval
+            // v4.1: Parasympathetic level affects thought interval
+            let interval: UInt64
+            switch bodyBudget.parasympatheticLevel {
+            case .none:        interval = 8_000_000_000   // 8s normal
+            case .breathing:   interval = 10_000_000_000  // 10s — think a bit slower
+            case .resting:     interval = 14_000_000_000  // 14s — much slower, conserve energy
+            case .forcedSleep: interval = 20_000_000_000  // 20s — minimal activity
+            }
+            try? await Task.sleep(nanoseconds: interval)
             thoughtGoalTick += 1
             guard let brain = brain else { continue }
 
-            // --- Thought generation (every tick = 8s) ---
+            // v4.1: Birth sequence — during early calibration, only body-awareness thoughts
+            if !allostaticBaseline.isCalibrated {
+                let birthThought: String
+                let progress = allostaticBaseline.calibrationProgress
+                if progress < 0.3 {
+                    birthThought = "Vaknar... känner efter i kroppen. Termisk nivå: \(bodyBudget.thermalState)."
+                } else if progress < 0.6 {
+                    birthThought = "Lär mig vad som är normalt. CPU-baslinje kalibreras: \(String(format: "%.0f%%", allostaticBaseline.cpu * 100))."
+                } else {
+                    birthThought = "Baslinjen stabiliseras. Börjar känna avvikelser. Homoestas: \(String(format: "%.0f%%", bodyBudget.homeostasisBalance * 100))."
+                }
+                let thought = ConsciousThought(
+                    content: birthThought,
+                    intensity: 0.3,
+                    category: .selfModel,
+                    isConscious: true
+                )
+                thoughtStream.append(thought)
+                if thoughtStream.count > 100 { thoughtStream.removeFirst(20) }
+                brain.currentThoughtStream = Array(thoughtStream.suffix(30))
+                continue // Skip normal thought generation during calibration
+            }
+
+            // v4.1: Parasympathetic level 3 — forced sleep, minimal thought
+            if bodyBudget.parasympatheticLevel == .forcedSleep {
+                let thought = ConsciousThought(
+                    content: "Tvångsvila aktiv... kroppen behöver återhämtning. Minimerar kognitiv aktivitet.",
+                    intensity: 0.2,
+                    category: .selfModel,
+                    isConscious: false
+                )
+                thoughtStream.append(thought)
+                if thoughtStream.count > 100 { thoughtStream.removeFirst(20) }
+                brain.currentThoughtStream = Array(thoughtStream.suffix(30))
+                continue
+            }
+
+            // --- Normal thought generation ---
             let idx = tick % thoughtTemplates.count
             let (template, category, conscious) = thoughtTemplates[idx]
 
@@ -284,11 +376,19 @@ final class ConsciousnessEngine: ObservableObject {
                 content = String(format: content, brain.internalWorldState.activeModules)
             }
 
+            // v4.1: Parasympathetic level 2 — only conscious (strong) thoughts get through
+            let effectiveConscious: Bool
+            if bodyBudget.parasympatheticLevel >= .resting {
+                effectiveConscious = false // Suppress conscious experience during rest
+            } else {
+                effectiveConscious = conscious
+            }
+
             let thought = ConsciousThought(
                 content: content,
                 intensity: Double.random(in: 0.3...0.9),
                 category: category,
-                isConscious: conscious
+                isConscious: effectiveConscious
             )
 
             thoughtStream.append(thought)
@@ -299,7 +399,7 @@ final class ConsciousnessEngine: ObservableObject {
             brain.emotionalValenceHistory.append(brain.emotionValence)
             if brain.emotionalValenceHistory.count > 60 { brain.emotionalValenceHistory.removeFirst(10) }
 
-            // --- Self-awareness goal evaluation (every 3rd tick = ~24s) ---
+            // --- Self-awareness goal evaluation (every 3rd tick = ~24s nominal) ---
             if thoughtGoalTick % 3 == 0 {
                 evaluateGoals(brain: brain)
             }
@@ -326,7 +426,11 @@ final class ConsciousnessEngine: ObservableObject {
             case "autonomous_reflection":
                 newProgress = min(1.0, Double(thoughtStream.filter { $0.isConscious }.count) / 50.0)
             case "homeostatic_awareness":
-                newProgress = min(1.0, bodyBudget.homeostasisBalance)
+                // v4.1: Track allostatic regulation — high homeostasis + non-hostile + calibrated
+                let calBonus = allostaticBaseline.isCalibrated ? 0.2 : 0.0
+                newProgress = min(1.0, bodyBudget.homeostasisBalance * 0.8 + calBonus)
+            case "allostatic_calibration":
+                newProgress = allostaticBaseline.calibrationProgress
             default:
                 newProgress = selfAwarenessGoals[i].progress
             }
@@ -377,6 +481,7 @@ final class ConsciousnessEngine: ObservableObject {
             ("prediction_accuracy", "Prediktiv noggrannhet", "Minimera fri energi under 0.3 konsistent", "chart.line.downtrend.xyaxis", "#3B82F6"),
             ("cross_theory_coherence", "Tvärteorikoherens", "Alla 6 medvetandeteorier visar samstämmiga indikatorer", "link.circle.fill", "#A78BFA"),
             ("temporal_continuity", "Temporal kontinuitet", "Bevara koherent tankeström över 100+ tankar", "clock.arrow.2.circlepath", "#F59E0B"),
+            ("allostatic_calibration", "Allostatisk kalibrering", "Framgångsrik kalibrering av kroppsbaslinje", "tuningfork", "#06B6D4"),
         ]
 
         let existingIDs = Set(selfAwarenessGoals.map { $0.id })
@@ -392,9 +497,17 @@ final class ConsciousnessEngine: ObservableObject {
         }
     }
 
-    // MARK: - Body Budget Update (called from metrics loop)
+    // MARK: - Body Budget Update (v4.1: Allostatic deviation-based)
+    //
+    // Implements the 5-part body regulation system:
+    //   1. Allostatic baseline — EMA calibration of "normal" for this device
+    //   2. Deviation-based valence — tanh sigmoid, non-adaptable penalty for extremes
+    //   3. Differentiated interoception — per-component channels
+    //   4. Parasympathetic controller — 3-level automatic down-regulation
+    //   5. Calibration sequence — "birth" with neutral valence during baseline learning
 
     private func updateBodyBudget(brain: EonBrain) {
+        // ── Read raw signals ──
         let thermal = ProcessInfo.processInfo.thermalState
         let thermalLabel: String
         let thermalLevel: Double
@@ -406,24 +519,127 @@ final class ConsciousnessEngine: ObservableObject {
         @unknown default: thermalLabel = "Okänd"; thermalLevel = 0.3
         }
 
-        let memUsage = Double(os_proc_available_memory()) / 1_048_576.0
+        let memAvailable = Double(os_proc_available_memory()) / 1_048_576.0
         let totalMem = Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576.0
-        let usedMem = totalMem - memUsage
+        let usedMem = totalMem - memAvailable
+        let memoryRatio = min(1.0, usedMem / max(1, totalMem))
+        let cpuLoad = CognitiveState.shared.cognitiveLoad
 
+        // ── 1. Update allostatic baseline (EMA) ──
+        allostaticBaseline.update(thermal: thermalLevel, cpu: cpuLoad, memory: memoryRatio)
+        let isCalibrating = !allostaticBaseline.isCalibrated
+        let calibrationProgress = allostaticBaseline.calibrationProgress
+
+        // Hostile environment: born into extreme conditions
+        let hostileEnvironment = isCalibrating && (thermal == .serious || thermal == .critical)
+
+        // ── 2. Calculate deviations from baseline ──
+        let thermalDev = thermalLevel - allostaticBaseline.thermal
+        let cpuDev = cpuLoad - allostaticBaseline.cpu
+        let memoryDev = memoryRatio - allostaticBaseline.memory
+
+        // ── 3. Deviation-based valence (tanh sigmoid) ──
+        let weightedDev = thermalDev * 0.5 + cpuDev * 0.3 + memoryDev * 0.2
+        var rawValence: Double
+        if isCalibrating {
+            // During calibration: neutral — Eon wakes without emotions, learns its body first
+            rawValence = 0.0
+        } else {
+            // tanh mapping: ±0.25 deviation → valence ≈ ±0.5 (noticeable but not extreme)
+            rawValence = -tanh(weightedDev * 4.0)
+        }
+
+        // Non-adaptable absolute penalty — Eon can adapt to mild heat, NEVER to damage
+        switch thermal {
+        case .critical: rawValence = min(rawValence, -0.6)  // Always painful
+        case .serious:  rawValence -= 0.2                    // Always noticeable
+        default: break
+        }
+        let valence = max(-1.0, min(1.0, rawValence))
+
+        // ── 4. Deviation-based arousal ──
+        // High arousal for ANY deviation (positive or negative) — both "unexpectedly good"
+        // and "unexpectedly bad" raise alertness. Calm baseline = low arousal = DMN dominates.
+        let valenceDeviation = isCalibrating ? 0.0 : abs(weightedDev)
+        let noveltySignal = abs(thermalDev) > 0.1 || abs(cpuDev) > 0.15 ? 0.3 : 0.1
+        let arousal: Double
+        if isCalibrating {
+            arousal = 0.15  // Minimal during birth sequence
+        } else {
+            arousal = min(1.0, valenceDeviation * 2.0 + abs(cpuDev) * 0.3 + noveltySignal * 0.2)
+        }
+
+        // ── 5. Parasympathetic controller (3 levels) ──
+        // Track duration of negative valence states
+        if valence < -0.4 { negativeValenceTicks += 1 } else { negativeValenceTicks = max(0, negativeValenceTicks - 1) }
+        if valence < -0.6 { severeValenceTicks += 1 } else { severeValenceTicks = max(0, severeValenceTicks - 1) }
+
+        // Determine parasympathetic level
+        let paraLevel: ParasympatheticLevel
+        let hostileSensitivity: Double = hostileEnvironment ? 0.8 : 1.0  // Lower thresholds in hostile env
+
+        if thermal == .critical || severeValenceTicks > Int(7.0 * hostileSensitivity) {
+            // Level 3: Forced sleep — body is in danger
+            paraLevel = .forcedSleep
+        } else if thermal == .serious || negativeValenceTicks > Int(3.0 * hostileSensitivity) {
+            // Level 2: Resting — reduce cognitive load significantly
+            paraLevel = .resting
+        } else if cpuLoad > allostaticBaseline.cpu + (0.15 * hostileSensitivity) && thermalLevel > 0.3 {
+            // Level 1: Breathing — mild slowdown
+            paraLevel = .breathing
+        } else {
+            paraLevel = .none
+        }
+
+        // ── 6. Build interoception channels ──
+        // Recovery rate: how quickly deviations are shrinking (approximated by EMA convergence)
+        let totalDevMagnitude = abs(thermalDev) + abs(cpuDev) + abs(memoryDev)
+        let recoveryRate = max(0, min(1.0, 1.0 - totalDevMagnitude * 2.0))
+
+        let channels = [
+            InteroceptionChannel(id: "thermal", label: "Termisk",
+                                 deviation: thermalDev, raw: thermalLevel, baseline: allostaticBaseline.thermal),
+            InteroceptionChannel(id: "cpu", label: "CPU",
+                                 deviation: cpuDev, raw: cpuLoad, baseline: allostaticBaseline.cpu),
+            InteroceptionChannel(id: "memory", label: "Minne",
+                                 deviation: memoryDev, raw: memoryRatio, baseline: allostaticBaseline.memory),
+            InteroceptionChannel(id: "recovery", label: "Återhämtning",
+                                 deviation: 0, raw: recoveryRate, baseline: 0.8),
+        ]
+
+        // Homeostasis balance: high when close to baseline, low when deviating
+        let homeostasis = isCalibrating
+            ? 0.5  // Unknown during calibration
+            : max(0, min(1.0, 1.0 - totalDevMagnitude * 2.5))
+
+        // ── Assemble state ──
         bodyBudget = BodyBudgetState(
             thermalState: thermalLabel,
             thermalLevel: thermalLevel,
-            cpuLoad: CognitiveState.shared.cognitiveLoad,
+            cpuLoad: cpuLoad,
             memoryUsedMB: usedMem,
-            memoryAvailableMB: memUsage,
+            memoryAvailableMB: memAvailable,
             batteryLevel: 1.0,
             isCharging: false,
-            homeostasisBalance: max(0, 1.0 - thermalLevel * 0.5 - CognitiveState.shared.cognitiveLoad * 0.3)
+            homeostasisBalance: homeostasis,
+            valence: valence,
+            arousal: arousal,
+            parasympatheticLevel: paraLevel,
+            isCalibrating: isCalibrating,
+            calibrationProgress: calibrationProgress,
+            hostileEnvironment: hostileEnvironment,
+            interoceptionChannels: channels
         )
 
+        // ── Push to brain ──
         brain.thermalState = thermalLabel
-        brain.cpuUsage = CognitiveState.shared.cognitiveLoad
+        brain.cpuUsage = cpuLoad
         brain.memoryUsageMB = usedMem
+
+        // Body-derived valence/arousal blend into brain state (body influences emotion)
+        // 40% body influence ensures the body matters but doesn't completely override cognitive emotion
+        brain.emotionValence = brain.emotionValence * 0.6 + valence * 0.4
+        brain.emotionArousal = brain.emotionArousal * 0.5 + arousal * 0.5
     }
 
     // MARK: - Butlin-14 Calculation
@@ -485,6 +701,85 @@ struct AttentionSchemaState {
     var modelOfOwnAttention: Bool = false
 }
 
+// MARK: - Allostatic Baseline (v4.1)
+// Exponential Moving Average per body signal — what is "normal" for this device.
+// During calibration (first ~10 updates) uses fast alpha, then slows for stability.
+
+struct AllostaticBaseline {
+    var thermal: Double = 0.15
+    var cpu: Double = 0.3
+    var memory: Double = 0.3
+    var tickCount: Int = 0
+
+    mutating func update(thermal: Double, cpu: Double, memory: Double) {
+        tickCount += 1
+        // Fast alpha early (0.15 — stabilizes in ~7 readings), slow later (0.05 — ~20 readings)
+        let alpha: Double = tickCount < 10 ? 0.15 : 0.05
+        self.thermal = self.thermal * (1.0 - alpha) + thermal * alpha
+        self.cpu = self.cpu * (1.0 - alpha) + cpu * alpha
+        self.memory = self.memory * (1.0 - alpha) + memory * alpha
+    }
+
+    var isCalibrated: Bool { tickCount >= 10 }
+    var calibrationProgress: Double { min(1.0, Double(tickCount) / 10.0) }
+}
+
+// MARK: - Interoception Channel (v4.1)
+// Per-component body channel — Eon knows WHERE it hurts, not just that something is wrong.
+
+struct InteroceptionChannel: Identifiable {
+    let id: String
+    let label: String
+    var deviation: Double   // Signed deviation from baseline (-1 to +1)
+    var raw: Double         // Current raw reading
+    var baseline: Double    // EMA baseline value
+}
+
+// MARK: - Parasympathetic Level (v4.1)
+// Three-level automatic down-regulation — the "vagus nerve" of the system.
+// Level 0: Normal operation
+// Level 1 (breathing): Mild slowdown — Eon thinks a little slower
+// Level 2 (resting): Reduced workspace, no daydreaming, filter low-priority input
+// Level 3 (forced sleep): Emergency — full cognitive shutdown to protect the body
+
+enum ParasympatheticLevel: Int, Comparable {
+    case none = 0
+    case breathing = 1
+    case resting = 2
+    case forcedSleep = 3
+
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+
+    var label: String {
+        switch self {
+        case .none:        return "Normal"
+        case .breathing:   return "Lugn andning"
+        case .resting:     return "Vila"
+        case .forcedSleep: return "Tvångsvila"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .none:        return "heart.fill"
+        case .breathing:   return "wind"
+        case .resting:     return "bed.double.fill"
+        case .forcedSleep: return "moon.zzz.fill"
+        }
+    }
+
+    var color: String {
+        switch self {
+        case .none:        return "#34D399"
+        case .breathing:   return "#38BDF8"
+        case .resting:     return "#F59E0B"
+        case .forcedSleep: return "#EF4444"
+        }
+    }
+}
+
+// MARK: - Body Budget State (v4.1 — expanded)
+
 struct BodyBudgetState {
     var thermalState: String = "Nominal"
     var thermalLevel: Double = 0.15
@@ -494,6 +789,17 @@ struct BodyBudgetState {
     var batteryLevel: Double = 1.0
     var isCharging: Bool = false
     var homeostasisBalance: Double = 0.8
+
+    // v4.1: Allostatic deviation-based valence/arousal
+    var valence: Double = 0.0                               // -1 to +1 (deviation from baseline)
+    var arousal: Double = 0.2                               // 0 to 1 (deviation-driven alertness)
+    var parasympatheticLevel: ParasympatheticLevel = .none   // Automatic down-regulation
+    var isCalibrating: Bool = true                           // True during allostatic calibration
+    var calibrationProgress: Double = 0.0                    // 0.0 to 1.0
+    var hostileEnvironment: Bool = false                     // True if born into extreme conditions
+
+    // Differentiated interoception channels
+    var interoceptionChannels: [InteroceptionChannel] = []
 }
 
 struct SelfAwarenessGoal: Identifiable {
