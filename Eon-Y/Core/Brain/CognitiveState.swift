@@ -369,7 +369,7 @@ final class CognitiveState: ObservableObject {
     @MainActor
     private func startStateMonitor() async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            try? await Task.sleep(nanoseconds: 8_000_000_000) // 8s — minskar CPU-användning
             updateFeedbackLoops()
             applyHomeostaticDecay()
             updateCognitiveLoad()

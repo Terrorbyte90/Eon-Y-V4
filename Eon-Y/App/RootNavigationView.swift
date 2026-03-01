@@ -21,43 +21,43 @@ enum EonTab: Int, CaseIterable {
     case chat
     case creative
     case mind
+    case selfAwareness
     case knowledge
-    case progress
     case profile
 
     var label: String {
         switch self {
-        case .home:      return "Hem"
-        case .chat:      return "Chatt"
-        case .creative:  return "Kreativ"
-        case .mind:      return "Hjärna"
-        case .knowledge: return "Kunskap"
-        case .progress:  return "Framsteg"
-        case .profile:   return "Profil"
+        case .home:           return "Hem"
+        case .chat:           return "Chatt"
+        case .creative:       return "Kreativ"
+        case .mind:           return "Hjärna"
+        case .selfAwareness:  return "Medvetande"
+        case .knowledge:      return "Kunskap"
+        case .profile:        return "Profil"
         }
     }
 
     var icon: String {
         switch self {
-        case .home:      return "circle.hexagongrid.fill"
-        case .chat:      return "bubble.left.and.bubble.right.fill"
-        case .creative:  return "sparkles"
-        case .mind:      return "brain.head.profile"
-        case .knowledge: return "books.vertical.fill"
-        case .progress:  return "chart.line.uptrend.xyaxis"
-        case .profile:   return "person.crop.circle.fill"
+        case .home:           return "circle.hexagongrid.fill"
+        case .chat:           return "bubble.left.and.bubble.right.fill"
+        case .creative:       return "sparkles"
+        case .mind:           return "brain.head.profile"
+        case .selfAwareness:  return "eye.trianglebadge.exclamationmark"
+        case .knowledge:      return "books.vertical.fill"
+        case .profile:        return "person.crop.circle.fill"
         }
     }
 
     var activeColor: Color {
         switch self {
-        case .home:      return Color(hex: "#A78BFA")
-        case .chat:      return Color(hex: "#34D399")
-        case .creative:  return Color(hex: "#EC4899")
-        case .mind:      return Color(hex: "#60A5FA")
-        case .knowledge: return Color(hex: "#FBBF24")
-        case .progress:  return Color(hex: "#FB923C")
-        case .profile:   return Color(hex: "#F472B6")
+        case .home:           return Color(hex: "#A78BFA")
+        case .chat:           return Color(hex: "#34D399")
+        case .creative:       return Color(hex: "#EC4899")
+        case .mind:           return Color(hex: "#60A5FA")
+        case .selfAwareness:  return Color(hex: "#F472B6")
+        case .knowledge:      return Color(hex: "#FBBF24")
+        case .profile:        return Color(hex: "#F472B6")
         }
     }
 
@@ -126,15 +126,15 @@ struct TabContentView: View {
                 .opacity(selectedTab == .mind ? 1 : 0)
                 .allowsHitTesting(selectedTab == .mind)
 
+            SelfAwarenessView()
+                .environment(\.tabBarVisible, $tabBarVisible)
+                .opacity(selectedTab == .selfAwareness ? 1 : 0)
+                .allowsHitTesting(selectedTab == .selfAwareness)
+
             KnowledgeView()
                 .environment(\.tabBarVisible, $tabBarVisible)
                 .opacity(selectedTab == .knowledge ? 1 : 0)
                 .allowsHitTesting(selectedTab == .knowledge)
-
-            EonProgressView()
-                .environment(\.tabBarVisible, $tabBarVisible)
-                .opacity(selectedTab == .progress ? 1 : 0)
-                .allowsHitTesting(selectedTab == .progress)
 
             ProfileRootView()
                 .environment(\.tabBarVisible, $tabBarVisible)
@@ -250,10 +250,11 @@ struct EonTabBar: View {
         )
         .shadow(color: Color.black.opacity(0.4), radius: 12, y: -4)
         .onReceive(brain.$engineActivity) { activity in
-            tabActivity[.mind]      = activity["cognitive"] ?? 0
-            tabActivity[.chat]      = activity["language"] ?? 0
-            tabActivity[.creative]  = activity["hypothesis"] ?? 0
-            tabActivity[.knowledge] = activity["memory"] ?? 0
+            tabActivity[.mind]           = activity["cognitive"] ?? 0
+            tabActivity[.chat]           = activity["language"] ?? 0
+            tabActivity[.creative]       = activity["hypothesis"] ?? 0
+            tabActivity[.selfAwareness]  = activity["autonomy"] ?? 0
+            tabActivity[.knowledge]      = activity["memory"] ?? 0
         }
     }
 }

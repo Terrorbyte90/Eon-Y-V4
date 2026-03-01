@@ -16,9 +16,15 @@ struct EonPulseHomeView: View {
     @State private var showCognitionLog = false
     @State private var showFullLog = false
 
+    // Flipping meter states
+    @State private var autonomFlipped = false
+    @State private var levandeFlipped = false
+    @State private var intelligentFlipped = false
+    @State private var flipTimer: Timer? = nil
+
     var body: some View {
-        // TimelineView uppdaterar varje sekund — garanterar att UI alltid ritas om
-        TimelineView(.periodic(from: .now, by: 1.0)) { timeline in
+        // TimelineView uppdaterar varannan sekund — balans mellan levande UI och CPU-sparande
+        TimelineView(.periodic(from: .now, by: 2.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             ZStack {
                 background(t: t)
@@ -218,14 +224,62 @@ struct EonPulseHomeView: View {
                 )
                 .shadow(color: dominant.opacity(0.5), radius: 24)
 
-            HStack(spacing: 16) {
-                liveDot(Color(hex: "#34D399"), "Autonom")
-                Text("·").foregroundStyle(.white.opacity(0.2))
-                liveDot(Color(hex: "#38BDF8"), "Levande")
-                Text("·").foregroundStyle(.white.opacity(0.2))
-                liveDot(Color(hex: "#A78BFA"), "Intelligent")
+            HStack(spacing: 10) {
+                FlipMeterView(
+                    frontLabel: "Autonom",
+                    frontColor: Color(hex: "#34D399"),
+                    backContent: AnyView(
+                        VStack(spacing: 2) {
+                            Text("CPU")
+                                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#34D399").opacity(0.6))
+                            Text(brain.thermalState)
+                                .font(.system(size: 9, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#34D399"))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                        }
+                    ),
+                    isFlipped: autonomFlipped,
+                    orbPulse: orbPulse
+                )
+                FlipMeterView(
+                    frontLabel: "Levande",
+                    frontColor: Color(hex: "#38BDF8"),
+                    backContent: AnyView(
+                        VStack(spacing: 2) {
+                            Text("MEDVETANDE")
+                                .font(.system(size: 5, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#38BDF8").opacity(0.6))
+                            Text(consciousnessShortLabel)
+                                .font(.system(size: 9, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#38BDF8"))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                        }
+                    ),
+                    isFlipped: levandeFlipped,
+                    orbPulse: orbPulse
+                )
+                FlipMeterView(
+                    frontLabel: "Intelligent",
+                    frontColor: Color(hex: "#A78BFA"),
+                    backContent: AnyView(
+                        VStack(spacing: 2) {
+                            Text("Φ")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#A78BFA").opacity(0.6))
+                            Text(String(format: "%.3f", brain.phiValue))
+                                .font(.system(size: 9, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#A78BFA"))
+                        }
+                    ),
+                    isFlipped: intelligentFlipped,
+                    orbPulse: orbPulse
+                )
             }
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .onAppear { startFlipTimer() }
+            .onDisappear { flipTimer?.invalidate() }
 
             // Process-label — uppdateras via TimelineView
             HStack(spacing: 8) {
@@ -251,15 +305,43 @@ struct EonPulseHomeView: View {
         }
     }
 
-    func liveDot(_ color: Color, _ label: String) -> some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 5, height: 5)
-                .shadow(color: color.opacity(0.8), radius: 4)
-                .scaleEffect(orbPulse)
-            Text(label)
-                .foregroundStyle(color.opacity(0.7))
+    var consciousnessShortLabel: String {
+        switch brain.consciousnessLevel {
+        case ..<0.15: return "Minimal"
+        case 0.15..<0.30: return "Låg"
+        case 0.30..<0.50: return "Växer"
+        case 0.50..<0.70: return "Stark"
+        default: return "Djup"
+        }
+    }
+
+    func startFlipTimer() {
+        // Stagger flip initiation
+        flipTimer?.invalidate()
+
+        // Use DispatchQueue for repeating flip cycles
+        func runFlipCycle() {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                autonomFlipped.toggle()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                    levandeFlipped.toggle()
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                    intelligentFlipped.toggle()
+                }
+            }
+        }
+
+        // Initial flip after 3 seconds, then repeat every 6 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            runFlipCycle()
+        }
+        flipTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { _ in
+            runFlipCycle()
         }
     }
 
@@ -459,6 +541,52 @@ struct HomeParticleView: View {
                     opacity = particle.opacity * Double.random(in: 0.25...1.0)
                 }
             }
+    }
+}
+
+// MARK: - FlipMeterView — flippar regelbundet mellan framsida (label) och baksida (mätning)
+
+struct FlipMeterView: View {
+    let frontLabel: String
+    let frontColor: Color
+    let backContent: AnyView
+    let isFlipped: Bool
+    let orbPulse: CGFloat
+
+    var body: some View {
+        ZStack {
+            // Front side
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(frontColor)
+                    .frame(width: 5, height: 5)
+                    .shadow(color: frontColor.opacity(0.8), radius: 4)
+                    .scaleEffect(orbPulse)
+                Text(frontLabel)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(frontColor.opacity(0.7))
+            }
+            .opacity(isFlipped ? 0 : 1)
+            .rotation3DEffect(.degrees(isFlipped ? 180 : 0), axis: (x: 1, y: 0, z: 0))
+
+            // Back side
+            backContent
+                .opacity(isFlipped ? 1 : 0)
+                .rotation3DEffect(.degrees(isFlipped ? 0 : -180), axis: (x: 1, y: 0, z: 0))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isFlipped ? frontColor.opacity(0.08) : Color.clear)
+                .overlay(
+                    isFlipped
+                    ? RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(frontColor.opacity(0.2), lineWidth: 0.5)
+                    : nil
+                )
+        )
+        .animation(.spring(response: 0.6, dampingFraction: 0.75), value: isFlipped)
     }
 }
 

@@ -25,7 +25,7 @@ struct ChatView: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0)) { timeline in
+        TimelineView(.periodic(from: .now, by: 2.0)) { timeline in
             let _ = timeline.date
             ZStack {
                 chatBackground
