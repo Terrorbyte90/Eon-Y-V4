@@ -1500,6 +1500,7 @@ struct NLPFactExtractor {
         let uniqueNouns = Array(Set(nouns)).prefix(8)
         let uniqueVerbs = Array(Set(verbs)).prefix(4)
 
+        guard uniqueNouns.count >= 2 else { return facts }
         for i in 0..<min(uniqueNouns.count - 1, 5) {
             let subject = String(uniqueNouns[i])
             let predicate = uniqueVerbs.randomElement() ?? "relaterar till"
