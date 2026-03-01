@@ -2,13 +2,21 @@ import Foundation
 import SQLite3
 
 // SQLITE_TRANSIENT är ett C-makro som Swift inte importerar direkt.
-// Definieras som internal (ej private) så att actor-metoder kan nå den.
 let SQLITE_TRANSIENT_FUNC = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 // Säker helper: returnerar "" om sqlite3_column_text ger NULL (undviker EXC_BREAKPOINT)
 private func sqlText(_ stmt: OpaquePointer?, _ col: Int32) -> String {
     guard let ptr = sqlite3_column_text(stmt, col) else { return "" }
     return String(cString: ptr)
+}
+
+// Säker sqlite3_bind_text via NSString — garanterar giltig C-sträng-livstid
+// under hela bind-anropet, oavsett Swift ARC-optimeringar.
+@inline(__always)
+private func bindText(_ stmt: OpaquePointer?, _ col: Int32, _ value: String) {
+    (value as NSString).utf8String.map {
+        sqlite3_bind_text(stmt, col, $0, -1, SQLITE_TRANSIENT_FUNC)
+    }
 }
 
 // MARK: - PersistentMemoryStore: SQLite WAL med komplett schema
@@ -196,11 +204,11 @@ actor PersistentMemoryStore {
         var stmt: OpaquePointer?
         var success = false
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, sessionId, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 2, role, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 3, content, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 1, sessionId)
+            bindText(stmt, 2, role)
+            bindText(stmt, 3, content)
             sqlite3_bind_double(stmt, 4, confidence)
-            sqlite3_bind_text(stmt, 5, emotion, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 5, emotion)
             sqlite3_bind_double(stmt, 6, Date().timeIntervalSince1970)
             sqlite3_bind_double(stmt, 7, 0.5)
             success = sqlite3_step(stmt) == SQLITE_DONE
@@ -229,7 +237,7 @@ actor PersistentMemoryStore {
         """
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, query, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 1, query)
             sqlite3_bind_int(stmt, 2, Int32(limit))
             while sqlite3_step(stmt) == SQLITE_ROW {
                 results.append(ConversationRecord(
@@ -283,12 +291,12 @@ actor PersistentMemoryStore {
         var success = false
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             let now = Date().timeIntervalSince1970
-            sqlite3_bind_text(stmt, 1, subject, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 2, predicate, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 3, object, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 1, subject)
+            bindText(stmt, 2, predicate)
+            bindText(stmt, 3, object)
             sqlite3_bind_double(stmt, 4, confidence)
             if let src = source {
-                sqlite3_bind_text(stmt, 5, src, -1, SQLITE_TRANSIENT_FUNC)
+                bindText(stmt, 5, src)
             } else {
                 sqlite3_bind_null(stmt, 5)
             }
@@ -309,7 +317,7 @@ actor PersistentMemoryStore {
         let sql = "SELECT predicate, object, confidence FROM facts WHERE subject = ? ORDER BY confidence DESC LIMIT 20"
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, subject, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 1, subject)
             while sqlite3_step(stmt) == SQLITE_ROW {
                 results.append((sqlText(stmt, 0), sqlText(stmt, 1), sqlite3_column_double(stmt, 2)))
             }
@@ -332,8 +340,8 @@ actor PersistentMemoryStore {
         """
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, word, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 2, sense, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 1, word)
+            bindText(stmt, 2, sense)
             sqlite3_bind_double(stmt, 3, Date().timeIntervalSince1970)
             if sqlite3_step(stmt) != SQLITE_DONE {
                 print("[Memory] updateWSDProfile fel '\(word)': \(String(cString: sqlite3_errmsg(db)))")
@@ -350,7 +358,7 @@ actor PersistentMemoryStore {
         var stmt: OpaquePointer?
         var result: String? = nil
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, word, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 1, word)
             if sqlite3_step(stmt) == SQLITE_ROW {
                 result = sqlText(stmt, 0)
             }
@@ -433,7 +441,7 @@ actor PersistentMemoryStore {
             sqlite3_bind_double(stmt, 4, selfKnowledge)
             sqlite3_bind_double(stmt, 5, adaptivity)
             sqlite3_bind_int(stmt, 6, Int32(loraVersion))
-            sqlite3_bind_text(stmt, 7, config, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 7, config)
             success = sqlite3_step(stmt) == SQLITE_DONE
             if !success { print("[Memory] saveEvalResult fel: \(String(cString: sqlite3_errmsg(db)))") }
         } else {
@@ -478,12 +486,12 @@ actor PersistentMemoryStore {
         var stmt: OpaquePointer?
         var success = false
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, article.id.uuidString, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 2, article.title, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 3, article.content, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 4, article.summary, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 5, article.domain, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 6, article.source, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 1, article.id.uuidString)
+            bindText(stmt, 2, article.title)
+            bindText(stmt, 3, article.content)
+            bindText(stmt, 4, article.summary)
+            bindText(stmt, 5, article.domain)
+            bindText(stmt, 6, article.source)
             sqlite3_bind_int(stmt, 7, article.isAutonomous ? 1 : 0)
             sqlite3_bind_double(stmt, 8, article.date.timeIntervalSince1970)
             success = sqlite3_step(stmt) == SQLITE_DONE
@@ -621,8 +629,7 @@ actor PersistentMemoryStore {
 
         let likeClause = keywords.map { _ in "(subject LIKE ? OR object LIKE ?)" }.joined(separator: " OR ")
         let sql = "SELECT subject, predicate, object FROM facts WHERE \(likeClause) ORDER BY confidence DESC LIMIT ?"
-        // Bygg patterns som NSString för att garantera giltig C-sträng-livstid under hela bind-sekvensen
-        let patterns: [NSString] = keywords.map { "%\($0)%" as NSString }
+        let patterns: [String] = keywords.map { "%\($0)%" }
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -634,8 +641,8 @@ actor PersistentMemoryStore {
 
         var idx: Int32 = 1
         for pattern in patterns {
-            sqlite3_bind_text(stmt, idx,     pattern.utf8String, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, idx + 1, pattern.utf8String, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, idx,     pattern)
+            bindText(stmt, idx + 1, pattern)
             idx += 2
         }
         sqlite3_bind_int(stmt, idx, Int32(limit))
@@ -686,7 +693,7 @@ actor PersistentMemoryStore {
         var stmt: OpaquePointer?
         let sql = "SELECT COUNT(*) FROM articles WHERE domain = ?"
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(stmt, 1, (domain as NSString).utf8String, -1, SQLITE_TRANSIENT_FUNC)
+            bindText(stmt, 1, domain)
             if sqlite3_step(stmt) == SQLITE_ROW { count = Int(sqlite3_column_int(stmt, 0)) }
         }
         sqlite3_finalize(stmt)
