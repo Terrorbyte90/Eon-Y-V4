@@ -43,11 +43,19 @@ final class UserProfileEngine: ObservableObject {
         return e
     }
 
+    private var knownUniqueWords: Set<String> = []
+
     func loadWordStats() async {
         totalWordCount = await memory.totalWordCount()
-        // Vokabulärstorlek: approximation baserat på unika ord i konversationer
-        // Genomsnittlig unik-ord-ratio: ~40% av totala ord är unika
-        uniqueVocabularySize = Int(Double(totalWordCount) * 0.40)
+        // Use actual unique word tracking if available, otherwise use Heap's law approximation
+        // Heap's law: V = K * N^β where K ≈ 20-50 for natural language, β ≈ 0.4-0.6
+        if knownUniqueWords.isEmpty {
+            // Approximate using Heap's law: V ≈ 30 * N^0.5 (conservative estimate for Swedish)
+            let n = Double(totalWordCount)
+            uniqueVocabularySize = n > 0 ? Int(30.0 * pow(n, 0.5)) : 0
+        } else {
+            uniqueVocabularySize = knownUniqueWords.count
+        }
     }
 
     // MARK: - Update after conversation
@@ -70,9 +78,17 @@ final class UserProfileEngine: ObservableObject {
 
         // Uppdatera konversationsräknare och ordräknare
         totalConversations += 1
-        let msgWords = userMessage.split(separator: " ").count + eonResponse.split(separator: " ").count
+        let userWords = userMessage.lowercased().split(separator: " ").map(String.init)
+        let eonWords = eonResponse.lowercased().split(separator: " ").map(String.init)
+        let msgWords = userWords.count + eonWords.count
         totalWordCount += msgWords
-        uniqueVocabularySize = Int(Double(totalWordCount) * 0.40)
+        // Track actual unique words from user messages
+        for word in userWords where word.count > 2 {
+            knownUniqueWords.insert(word)
+        }
+        uniqueVocabularySize = knownUniqueWords.isEmpty
+            ? Int(30.0 * pow(Double(totalWordCount), 0.5))
+            : knownUniqueWords.count
 
         // Uppdatera Eons beskrivning av användaren
         updateEonDescription()

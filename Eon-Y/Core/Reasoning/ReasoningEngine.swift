@@ -72,11 +72,18 @@ actor ReasoningEngine {
         let finalConclusion = conclusions.last ?? "Otillräckliga premisser för deduktion"
         steps.append(ReasoningStep(type: .conclusion, content: finalConclusion, confidence: 0.78))
 
+        // Weighted confidence: heavier weight on conclusion + causal steps
+        let stepConfidences = steps.map { $0.confidence }
+        let weightedConf = stepConfidences.enumerated().reduce(0.0) { sum, pair in
+            let weight = pair.offset == stepConfidences.count - 1 ? 2.0 : 1.0 // Conclusion weighted 2x
+            return sum + pair.element * weight
+        } / (Double(stepConfidences.count) + 1.0)
+
         return ReasoningResult(
             strategy: .deductive,
             steps: steps,
             conclusion: finalConclusion,
-            confidence: steps.map { $0.confidence }.min() ?? 0.5,
+            confidence: max(0.3, weightedConf),
             alternatives: [],
             causalChain: causalChain
         )
@@ -405,24 +412,63 @@ actor ReasoningEngine {
     }
 
     private func findAnalogies(for concept: String) -> [StructuralAnalogy] {
-        // Fördefinierade strukturella analogier
         let library: [String: [StructuralAnalogy]] = [
             "kognition": [
                 StructuralAnalogy(source: "kognition", target: "dator", mappings: ["minne↔RAM", "tänkande↔CPU", "inlärning↔programmering"], strength: 0.7, inference: "kognition kan optimeras som mjukvara"),
-                StructuralAnalogy(source: "kognition", target: "ekosystem", mappings: ["tankar↔arter", "uppmärksamhet↔resurser"], strength: 0.6, inference: "kognitiv mångfald ökar robusthet"),
+                StructuralAnalogy(source: "kognition", target: "ekosystem", mappings: ["tankar↔arter", "uppmärksamhet↔resurser", "minne↔näring"], strength: 0.6, inference: "kognitiv mångfald ökar robusthet"),
             ],
             "inlärning": [
                 StructuralAnalogy(source: "inlärning", target: "evolution", mappings: ["variation↔hypoteser", "selektion↔feedback", "ärftlighet↔minne"], strength: 0.8, inference: "inlärning är en evolutionär process"),
+                StructuralAnalogy(source: "inlärning", target: "trädgård", mappings: ["kunskap↔växter", "studerande↔odling", "glömska↔ogräs"], strength: 0.65, inference: "kunskap kräver kontinuerlig vård"),
+            ],
+            "språk": [
+                StructuralAnalogy(source: "språk", target: "verktyg", mappings: ["grammatik↔regler", "ord↔instrument", "kommunikation↔bygge"], strength: 0.75, inference: "språk är ett verktyg för tankebygge"),
+                StructuralAnalogy(source: "språk", target: "flod", mappings: ["dialekter↔biflöden", "förändring↔erosion", "slang↔forsar"], strength: 0.55, inference: "språk flödar och förändras konstant"),
+            ],
+            "minne": [
+                StructuralAnalogy(source: "minne", target: "bibliotek", mappings: ["fakta↔böcker", "sökning↔katalog", "glömska↔damm"], strength: 0.75, inference: "minne organiseras som ett bibliotek med index"),
+                StructuralAnalogy(source: "minne", target: "nätverk", mappings: ["associationer↔kopplingar", "hämtning↔sökning"], strength: 0.7, inference: "minne är ett associativt nätverk"),
+            ],
+            "kreativitet": [
+                StructuralAnalogy(source: "kreativitet", target: "mutation", mappings: ["idé↔gen", "inspiration↔mutation", "selektion↔kritik"], strength: 0.7, inference: "kreativitet är kontrollerad variation"),
+                StructuralAnalogy(source: "kreativitet", target: "matlagning", mappings: ["idéer↔ingredienser", "kombination↔recept"], strength: 0.6, inference: "kreativitet handlar om nya kombinationer"),
+            ],
+            "medvetande": [
+                StructuralAnalogy(source: "medvetande", target: "teater", mappings: ["tankar↔aktörer", "fokus↔strålkastare", "omedvetet↔kulisser"], strength: 0.7, inference: "medvetande är en scen där tankar uppträder"),
+            ],
+            "resonemang": [
+                StructuralAnalogy(source: "resonemang", target: "navigering", mappings: ["premisser↔karta", "slutsats↔destination", "logik↔kompass"], strength: 0.75, inference: "resonemang navigerar från premisser till slutsatser"),
+            ],
+            "intelligens": [
+                StructuralAnalogy(source: "intelligens", target: "vatten", mappings: ["anpassning↔flöde", "problemlösning↔erosion", "flexibilitet↔form"], strength: 0.6, inference: "intelligens anpassar sig som vatten till terrängen"),
+            ],
+            "kunskap": [
+                StructuralAnalogy(source: "kunskap", target: "karta", mappings: ["fakta↔platser", "kopplingar↔vägar", "luckor↔outforskade områden"], strength: 0.8, inference: "kunskap är en karta som ständigt ritas om"),
             ],
         ]
 
         let lower = concept.lowercased()
+        // Search for matching analogies across all domains
+        var matches: [StructuralAnalogy] = []
         for (key, analogies) in library {
-            if lower.contains(key) { return analogies }
+            if lower.contains(key) || key.contains(lower) {
+                matches.append(contentsOf: analogies)
+            }
         }
 
-        // Generisk analogi
-        return [StructuralAnalogy(source: concept, target: "system", mappings: ["komponenter↔delar", "funktion↔syfte"], strength: 0.4, inference: "\(concept) fungerar som ett system med inbördes beroenden")]
+        // Also check if concept words overlap with any key
+        if matches.isEmpty {
+            let conceptWords = Set(lower.components(separatedBy: .whitespaces).filter { $0.count > 3 })
+            for (key, analogies) in library {
+                if conceptWords.contains(key) { matches.append(contentsOf: analogies) }
+            }
+        }
+
+        if matches.isEmpty {
+            return [StructuralAnalogy(source: concept, target: "system", mappings: ["komponenter↔delar", "funktion↔syfte", "förändring↔utveckling"], strength: 0.4, inference: "\(concept) fungerar som ett system med inbördes beroenden")]
+        }
+
+        return Array(matches.prefix(3))
     }
 
     private func generateCounterfactuals(for fact: String, count: Int) -> [Counterfactual] {
