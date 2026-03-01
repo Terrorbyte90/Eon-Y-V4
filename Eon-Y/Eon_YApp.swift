@@ -98,6 +98,9 @@ struct Eon_YApp: App {
         let nodeCount = await PersistentMemoryStore.shared.knowledgeNodeCount()
         brain.knowledgeNodeCount = nodeCount
 
-        print("[Boot] Eon fullt initierad ✓ (facts+articles: \(nodeCount) noder)")
+        // 8. Starta ConsciousnessEngine — medvetandemätning och tankeström
+        ConsciousnessEngine.shared.start(brain: brain)
+
+        print("[Boot] Eon fullt initierad ✓ (facts+articles: \(nodeCount) noder, consciousness engine aktiv)")
     }
 }

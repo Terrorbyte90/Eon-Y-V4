@@ -17,7 +17,7 @@ struct MindView: View {
     ]
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0)) { tl in
+        TimelineView(.periodic(from: .now, by: 2.0)) { tl in
             let _ = tl.date
             ZStack(alignment: .top) {
                 mindBackground

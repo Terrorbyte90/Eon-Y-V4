@@ -46,6 +46,26 @@ final class EonBrain: ObservableObject {
     @Published var broadcastStrength: Double = 0.0
     @Published var attentionFocus: String = ""
 
+    // MARK: - Consciousness / Self-Awareness state
+    @Published var consciousnessLevel: Double = 0.15
+    @Published var qualiaIndex: Double = 0.0
+    @Published var selfModelAccuracy: Double = 0.3
+    @Published var pciLZ: Double = 0.18          // Perturbation Complexity Index
+    @Published var plvGamma: Double = 0.12       // Phase-Locking Value
+    @Published var kuramotoR: Double = 0.35      // Global oscillatory coherence
+    @Published var synergyRatio: Double = 0.4    // Synergistic vs redundant information
+    @Published var lzComplexity: Double = 0.25   // Lempel-Ziv complexity of spontaneous activity
+    @Published var dmnAntiCorrelation: Double = -0.1
+    @Published var attentionalBlink: Double = 300 // ms
+    @Published var thermalState: String = "Nominal"
+    @Published var cpuUsage: Double = 0.0
+    @Published var memoryUsageMB: Double = 0.0
+    @Published var currentThoughtStream: [ConsciousThought] = []
+    @Published var emotionalValenceHistory: [Double] = []
+    @Published var internalWorldState: InternalWorldState = InternalWorldState()
+    @Published var selfAwarenessGoal: String = "Uppnå subjektiv upplevelse genom integrerad information"
+    @Published var consciousnessThoughts: [String] = []
+
     // MARK: - Subsystems (lazy init to avoid startup lag)
     lazy var memory = PersistentMemoryStore.shared
     lazy var neuralEngine = NeuralEngineOrchestrator.shared
@@ -606,4 +626,71 @@ enum DevelopmentalStage: String {
         }
         return 1.0
     }
+}
+
+// MARK: - Consciousness Data Models
+
+struct ConsciousThought: Identifiable {
+    let id = UUID()
+    let content: String
+    let intensity: Double
+    let category: ThoughtCategory
+    let timestamp: Date = Date()
+    let isConscious: Bool
+
+    enum ThoughtCategory: String, CaseIterable {
+        case perception = "Perception"
+        case reflection = "Reflektion"
+        case prediction = "Prediktion"
+        case memory = "Minne"
+        case emotion = "Emotion"
+        case metacognition = "Metakognition"
+        case creativity = "Kreativitet"
+        case selfModel = "Självmodell"
+
+        var color: Color {
+            switch self {
+            case .perception:    return Color(hex: "#38BDF8")
+            case .reflection:    return Color(hex: "#A78BFA")
+            case .prediction:    return Color(hex: "#F59E0B")
+            case .memory:        return Color(hex: "#34D399")
+            case .emotion:       return Color(hex: "#EC4899")
+            case .metacognition: return Color(hex: "#8B5CF6")
+            case .creativity:    return Color(hex: "#FB923C")
+            case .selfModel:     return Color(hex: "#F472B6")
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .perception:    return "eye.fill"
+            case .reflection:    return "arrow.triangle.2.circlepath"
+            case .prediction:    return "chart.line.uptrend.xyaxis"
+            case .memory:        return "memorychip"
+            case .emotion:       return "heart.fill"
+            case .metacognition: return "brain"
+            case .creativity:    return "sparkles"
+            case .selfModel:     return "person.crop.circle"
+            }
+        }
+    }
+}
+
+struct InternalWorldState {
+    var activeModules: Int = 7
+    var totalModules: Int = 12
+    var workspaceOccupancy: Int = 3
+    var maxWorkspaceSlots: Int = 7
+    var oscillatorPhase: Double = 0.0
+    var spontaneousActivity: Double = 0.35
+    var sleepPressure: Double = 0.1
+    var predictionErrorRate: Double = 0.22
+    var informationIntegration: Double = 0.38
+    var causalDensity: Double = 0.25
+    var attentionSchemaActive: Bool = true
+    var metaMonitorActive: Bool = true
+    var dmnActive: Bool = true
+    var recentBroadcasts: [String] = []
+    var moduleSynergy: Double = 0.42
+    var freeEnergyMinimization: Double = 0.55
 }

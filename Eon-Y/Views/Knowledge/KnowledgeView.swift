@@ -58,6 +58,7 @@ struct KnowledgeView: View {
                         onSelect: { selectedArticle = $0 },
                         onDelete: { article in Task { await viewModel.deleteArticle(article) } }
                     )
+                    .frame(maxHeight: .infinity)
                 } else {
                     // Hem-läge: kategori-rutor
                     categoryGrid
@@ -463,9 +464,11 @@ struct CategoryArticleView: View {
                     .padding(.top, 16)
                 }
 
-                Spacer(minLength: 100)
+                Spacer(minLength: 140)
             }
         }
+        .coordinateSpace(name: "scrollSpace")
+        .scrollDismissesKeyboard(.interactively)
         .transition(.asymmetric(
             insertion: .move(edge: .trailing).combined(with: .opacity),
             removal: .move(edge: .trailing).combined(with: .opacity)

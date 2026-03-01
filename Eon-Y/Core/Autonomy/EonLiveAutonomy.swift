@@ -227,7 +227,7 @@ final class EonLiveAutonomy: ObservableObject {
                 brain.autonomousProcessLabel = "[\(currentPhase.rawValue)] \(ProcessLabels.label(for: brain.engineActivity.max(by: { $0.value < $1.value })?.key ?? "cognitive", brain: brain))"
             }
 
-            let interval = autoScaledInterval(base: 4_000_000_000)
+            let interval = autoScaledInterval(base: 5_000_000_000)
             try? await Task.sleep(nanoseconds: interval)
         }
     }
@@ -286,8 +286,8 @@ final class EonLiveAutonomy: ObservableObject {
                 await runRestPhaseWork(brain: brain)
             }
 
-            // Sleep between work items (thermal-aware)
-            let workInterval = autoScaledInterval(base: 8_000_000_000)
+            // Sleep between work items (thermal-aware) — ökad bas för lägre termisk belastning
+            let workInterval = autoScaledInterval(base: 10_000_000_000)
             try? await Task.sleep(nanoseconds: workInterval)
         }
     }
@@ -459,6 +459,59 @@ final class EonLiveAutonomy: ObservableObject {
         await creative.generateSuggestionsFromKnowledge()
     }
 
+    // MARK: - Live AERO Self-Evolution
+    // Kör AERO-liknande evolutionscykel i förgrunden med jämna mellanrum.
+    // Identifierar svagaste kognitiva dimensioner och ger riktade boosts.
+    // Genererar ny kunskap och förstärker existerande kopplingar.
+
+    private func runLiveAEROEvolution(brain: EonBrain) async {
+        let state = CognitiveState.shared
+        let weakest = state.weakestDimensions(limit: 3)
+
+        brain.innerMonologue.append(MonologueLine(
+            text: "⚡ AERO Live-Evolution: Identifierar svagaste dimensioner...",
+            type: .loopTrigger
+        ))
+
+        for (dim, level) in weakest {
+            let boost = 0.008 * (1.0 - level)
+            state.update(dimension: dim, delta: boost, source: "aero_live")
+        }
+
+        // Generera en ny associativ koppling baserat på senaste tankar
+        let recentMonologue = brain.innerMonologue.suffix(10)
+        if recentMonologue.count >= 3 {
+            let keywords = recentMonologue.compactMap { line -> String? in
+                let words = line.text.split(separator: " ").filter { $0.count > 4 }
+                return words.randomElement().map(String.init)
+            }
+            if keywords.count >= 2 {
+                let connection = "\(keywords[0]) ↔ \(keywords[1])"
+                await PersistentMemoryStore.shared.saveFact(
+                    subject: keywords[0],
+                    predicate: "associerad_med",
+                    object: keywords[1],
+                    confidence: 0.65,
+                    source: "aero_live_association"
+                )
+                brain.innerMonologue.append(MonologueLine(
+                    text: "⚡ AERO: Ny association skapad: \(connection)",
+                    type: .insight
+                ))
+            }
+        }
+
+        // Uppmana till bättre språk och intelligens
+        state.update(dimension: .language, delta: 0.003, source: "aero_live_lang")
+        state.update(dimension: .selfAwareness, delta: 0.002, source: "aero_live_awareness")
+
+        selfModelVersion += 1
+        brain.innerMonologue.append(MonologueLine(
+            text: "⚡ AERO Live v\(selfModelVersion): Självevolution klar — \(weakest.map { "\($0.0.rawValue): +\(String(format: "%.3f", 0.008 * (1.0 - $0.1)))" }.joined(separator: ", "))",
+            type: .insight
+        ))
+    }
+
     private func runLanguagePhaseWork(brain: EonBrain) async {
         let workDone = phaseWorkDone[.language] ?? 0
         phaseWorkDone[.language] = workDone + 1
@@ -524,6 +577,12 @@ final class EonLiveAutonomy: ObservableObject {
             // Article generation (every ~5 cycles = ~25 min)
             if maintenanceCycle % 5 == 1 && isArticlesEnabled {
                 await generateArticleIfNeeded(brain: brain)
+            }
+
+            // AERO Self-Evolution — kör ibland när appen är öppen (inte bara på natten)
+            // Var 3:e cykel (~15 min) kör vi AERO-liknande self-improvement
+            if maintenanceCycle % 3 == 0 && !brain.isThinking {
+                await runLiveAEROEvolution(brain: brain)
             }
 
             // User profiling (every ~8 cycles = ~40 min)
