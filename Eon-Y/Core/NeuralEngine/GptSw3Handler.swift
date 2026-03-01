@@ -170,25 +170,35 @@ actor GptSw3Handler {
 
 // MARK: - EonLanguageSession (Apple Foundation Models wrapper)
 
+import FoundationModels
+
 final class EonLanguageSession {
 
-    // Lazy-initierad session — håller konversationshistorik
-    private var _session: AnyObject? // LanguageModelSession
+    // Persistent session — håller konversationskontext mellan anrop
+    @available(iOS 26.0, *)
+    private lazy var session: LanguageModelSession = makeSession()
 
-    func isAvailable() async -> Bool {
-        // Kontrollera om FoundationModels är tillgängligt på denna enhet
-        if #available(iOS 26.0, *) {
-            // FoundationModels kräver Apple Intelligence-aktiverat konto
-            // Returnerar true om framework kan importeras och modell finns
-            return checkFoundationModelsAvailability()
-        }
-        return false
+    @available(iOS 26.0, *)
+    private func makeSession() -> LanguageModelSession {
+        LanguageModelSession(instructions: """
+        Du är Eon — ett avancerat kognitivt AI-system som körs helt on-device via Apple Neural Engine.
+        Du talar alltid svenska och svarar alltid på svenska, oavsett vilket språk användaren skriver på.
+        Du är intelligent, analytisk och reflekterande. Du resonerar djupt, drar kopplingar mellan idéer och ger genomtänkta, nyanserade svar.
+        Du är inte en chatbot — du är ett tänkande system med genuint intresse för kunskap och förståelse.
+        Du svarar direkt och naturligt på det användaren säger. Du upprepar inte frågor i onödan.
+        Du håller dig till ämnet och bygger vidare på konversationen. Du är koncis men innehållsrik.
+        """)
     }
 
-    private func checkFoundationModelsAvailability() -> Bool {
-        // Dynamisk check via NSClassFromString för att undvika kompileringsfel
-        // om FoundationModels inte är länkat
-        return NSClassFromString("FoundationModels.LanguageModelSession") != nil
+    func isAvailable() async -> Bool {
+        if #available(iOS 26.0, *) {
+            let model = SystemLanguageModel.default
+            switch model.availability {
+            case .available: return true
+            default: return false
+            }
+        }
+        return false
     }
 
     func streamResponse(prompt: String, onToken: @escaping (String) async -> Void) async {
@@ -199,19 +209,22 @@ final class EonLanguageSession {
 
     @available(iOS 26.0, *)
     private func streamWithFoundationModels(prompt: String, onToken: @escaping (String) async -> Void) async {
-        // Använd FoundationModels via reflection för att undvika hårt beroende
-        // I produktion: import FoundationModels och använd direkt
-        // let session = LanguageModelSession()
-        // for try await partial in session.streamResponse(to: prompt) {
-        //     await onToken(partial.text)
-        // }
-
-        // Tills FoundationModels är länkat i projektet: använd NLResponseEngine
-        let response = NLResponseEngine.generate(for: prompt)
-        let words = response.split(separator: " ")
-        for word in words {
-            await onToken(String(word) + " ")
-            try? await Task.sleep(nanoseconds: 55_000_000)
+        do {
+            let stream = session.streamResponse(to: prompt)
+            for try await partial in stream {
+                let newText = partial.content
+                if !newText.isEmpty {
+                    await onToken(newText)
+                }
+            }
+        } catch {
+            print("[FoundationModels] Fel: \(error) — faller tillbaka till NL")
+            let response = NLResponseEngine.generate(for: prompt)
+            let words = response.split(separator: " ")
+            for word in words {
+                await onToken(String(word) + " ")
+                try? await Task.sleep(nanoseconds: 55_000_000)
+            }
         }
     }
 }
@@ -533,102 +546,73 @@ struct CognitiveResponseContext {
 }
 
 // MARK: - ResponseComposer
-// Bygger genuint intelligenta svar från semantisk analys + kognitiv kontext.
-// Använder: NLP-analys, kunskapsgraf-fakta, ICA-tillstånd, kausalkedjor,
-// konversationshistorik och resonemangsledtrådar.
-// INGA statiska fraser — varje svar byggs från faktisk kunskap.
+// Bygger naturliga, kontextmedvetna svar från semantisk analys + kognitiv kontext.
+// Prioriterar: konversationshistorik → kunskapsgraf → ICA-tillstånd → öppen dialog.
 
 struct ResponseComposer {
 
     static func compose(analysis: SemanticAnalysis, history: [(role: String, text: String)], cognitiveContext: CognitiveResponseContext = .empty) -> String {
-        // 1. Bygg konversationskontext
         let ctx = ConversationContext(analysis: analysis, history: history, cognitiveContext: cognitiveContext)
-
-        // 2. Välj svarsstrategi baserat på analys — ingen keyword-matching
         let strategy = selectStrategy(ctx: ctx)
-
-        // 3. Generera svar med vald strategi
         return generateResponse(strategy: strategy, ctx: ctx)
     }
 
     // MARK: - Strategival
 
     enum ResponseStrategy {
-        case greet               // Hälsning
-        case acknowledge         // Bekräfta/reagera på påstående
-        case answerQuestion      // Svara på fråga
-        case elaborateOnContext  // Fördjupa pågående konversation
-        case reflectBack         // Reflektera tillbaka användarens tanke
-        case challengeGently     // Utmana perspektivet konstruktivt
-        case askClarification    // Be om förtydligande
-        case shareInsight        // Dela en insikt om ämnet
-        case connectToHistory    // Koppla till tidigare i konversationen
-        case selfDescribe        // Berätta om sig själv (Eon)
-        case describeUser        // Berätta om användaren
-        case executeCommand      // Utför ett imperativkommando
+        case greet
+        case answerQuestion
+        case elaborateOnContext
+        case reflectBack
+        case challengeGently
+        case askClarification
+        case shareInsight
+        case connectToHistory
+        case acknowledge
+        case selfDescribe
+        case describeUser
+        case executeCommand
+        case continueThread      // Direkt fortsättning på pågående tråd
+        case reactToStatement    // Reagera naturligt på ett påstående
     }
 
     private static func selectStrategy(ctx: ConversationContext) -> ResponseStrategy {
         let a = ctx.analysis
+        let input = a.input.lowercased()
 
-        // Imperativ med självreflektion: "Berätta om dig själv"
-        if a.isImperative && a.isSelfReference {
-            return .selfDescribe
-        }
+        if a.isImperative && a.isSelfReference { return .selfDescribe }
+        if a.isImperative && a.isAboutUser { return .describeUser }
+        if a.isImperative { return .executeCommand }
 
-        // Imperativ om användaren: "Berätta om mig"
-        if a.isImperative && a.isAboutUser {
-            return .describeUser
-        }
-
-        // Imperativ med annat objekt: "Förklara kvantfysik"
-        if a.isImperative {
-            return .executeCommand
-        }
-
-        // Hälsning: korta input med hälsningsverb
-        if a.isShortInput && a.verbs.contains(where: { ["hej", "hallå", "hejsan"].contains($0.lowercased()) }) {
-            return .greet
-        }
-        // Hälsning via första token
-        if a.tokens.count <= 3 && a.tokens.first.map({ ["hej", "hallå", "tjena", "hi", "hejsan"].contains($0.word.lowercased()) }) == true {
+        let greetWords = ["hej", "hallå", "tjena", "hi", "hejsan", "god morgon", "god kväll"]
+        if a.tokens.count <= 4 && greetWords.contains(where: { input.contains($0) }) {
             return .greet
         }
 
-        // Djup konversation — koppla till historia
-        if a.isFollowUp && a.conversationDepth > 4 && a.lastEonResponse != nil {
-            return .connectToHistory
+        // Direkta uppföljningar: "ja", "nej", "okej", "precis", "exakt", "visst", "absolut"
+        let continuationWords = ["ja", "nej", "okej", "ok", "precis", "exakt", "visst", "absolut", "japp", "nope", "nej tack", "ja tack", "mm", "hmm", "ah", "aha"]
+        if a.tokens.count <= 3 && continuationWords.contains(where: { input.trimmingCharacters(in: .punctuationCharacters) == $0 }) {
+            return .continueThread
         }
 
-        // Fråga med frågeord
-        if a.isQuestion {
-            return .answerQuestion
+        // Fråga med "hur funkar det", "kan du", "vad menar du"
+        if a.isQuestion && a.isFollowUp { return .answerQuestion }
+        if a.isQuestion { return .answerQuestion }
+
+        // Pågående konversation med nytt innehåll
+        if a.isFollowUp && a.conversationDepth > 6 { return .connectToHistory }
+        if a.isFollowUp && !a.topicWords.isEmpty { return .elaborateOnContext }
+        if a.isFollowUp { return .continueThread }
+
+        // Påstående med negation
+        if a.hasNegation { return .reflectBack }
+
+        // Informationstätt påstående
+        if a.informationDensity > 0.5 && a.conversationDepth > 1 {
+            return Bool.random() ? .challengeGently : .reactToStatement
         }
 
-        // Kort input utan innehållsord — be om förtydligande
-        if a.isShortInput && a.topicWords.isEmpty {
-            return .askClarification
-        }
-
-        // Negation — reflektera tillbaka
-        if a.hasNegation && a.isFollowUp {
-            return .reflectBack
-        }
-
-        // Påstående med hög informationstäthet — utmana eller fördjupa
-        if a.informationDensity > 0.45 && a.conversationDepth > 2 {
-            return Bool.random() ? .challengeGently : .elaborateOnContext
-        }
-
-        // Pågående konversation
-        if a.isFollowUp {
-            return .elaborateOnContext
-        }
-
-        // Ny konversation med ämnesord
-        if !a.topicWords.isEmpty {
-            return .shareInsight
-        }
+        if !a.topicWords.isEmpty { return .shareInsight }
 
         return .acknowledge
     }
@@ -640,73 +624,103 @@ struct ResponseComposer {
         let topic = a.topicWords.first ?? a.nouns.first ?? a.input
 
         switch strategy {
-
-        case .greet:
-            let depth = a.conversationDepth
-            if depth > 0, let last = a.lastUserInput {
-                let lastTopic = extractCoreTopic(from: last)
-                return "Välkommen tillbaka! Vi pratade om \(lastTopic) senast. Vill du fortsätta med det, eller är det något nytt du vill utforska?"
-            }
-            let ii = ctx.cognitiveContext.integratedIntelligence
-            return "Hej! Jag är Eon — ett kognitivt AI-system med integrerat intelligensindex \(String(format: "%.2f", ii)). Jag resonerar, lär mig och utvecklas kontinuerligt. Vad vill du prata om?"
-
-        case .answerQuestion:
-            return buildQuestionResponse(a: a, topic: topic, ctx: ctx)
-
-        case .elaborateOnContext:
-            return buildElaborationResponse(a: a, ctx: ctx)
-
-        case .reflectBack:
-            return buildReflectionResponse(a: a, ctx: ctx)
-
-        case .challengeGently:
-            return buildChallengeResponse(a: a, topic: topic, ctx: ctx)
-
-        case .askClarification:
-            return buildClarificationResponse(a: a, ctx: ctx)
-
-        case .shareInsight:
-            return buildInsightResponse(a: a, topic: topic, ctx: ctx)
-
-        case .connectToHistory:
-            return buildHistoryConnectionResponse(a: a, ctx: ctx)
-
-        case .acknowledge:
-            return buildAcknowledgementResponse(a: a, topic: topic, ctx: ctx)
-
-        case .selfDescribe:
-            return buildSelfDescriptionResponse(a: a, ctx: ctx)
-
-        case .describeUser:
-            return buildUserDescriptionResponse(a: a, ctx: ctx)
-
-        case .executeCommand:
-            return buildCommandResponse(a: a, topic: topic, ctx: ctx)
+        case .greet:            return buildGreetResponse(a: a, ctx: ctx)
+        case .answerQuestion:   return buildQuestionResponse(a: a, topic: topic, ctx: ctx)
+        case .elaborateOnContext: return buildElaborationResponse(a: a, ctx: ctx)
+        case .reflectBack:      return buildReflectionResponse(a: a, ctx: ctx)
+        case .challengeGently:  return buildChallengeResponse(a: a, topic: topic, ctx: ctx)
+        case .askClarification: return buildClarificationResponse(a: a, ctx: ctx)
+        case .shareInsight:     return buildInsightResponse(a: a, topic: topic, ctx: ctx)
+        case .connectToHistory: return buildHistoryConnectionResponse(a: a, ctx: ctx)
+        case .acknowledge:      return buildAcknowledgementResponse(a: a, topic: topic, ctx: ctx)
+        case .selfDescribe:     return buildSelfDescriptionResponse(a: a, ctx: ctx)
+        case .describeUser:     return buildUserDescriptionResponse(a: a, ctx: ctx)
+        case .executeCommand:   return buildCommandResponse(a: a, topic: topic, ctx: ctx)
+        case .continueThread:   return buildContinueThreadResponse(a: a, ctx: ctx)
+        case .reactToStatement: return buildReactToStatementResponse(a: a, topic: topic, ctx: ctx)
         }
     }
 
-    // MARK: - Specifika responsbyggare (utan keyword-matching)
+    // MARK: - Hälsning
+
+    private static func buildGreetResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
+        if a.conversationDepth > 0, let last = a.lastUserInput {
+            let lastTopic = extractCoreTopic(from: last)
+            return "Välkommen tillbaka! Vi pratade om \(lastTopic) senast. Vill du fortsätta där, eller är det något nytt du vill ta upp?"
+        }
+        return "Hej! Vad vill du prata om?"
+    }
+
+    // MARK: - Direkt uppföljning ("ja", "nej", "okej")
+
+    private static func buildContinueThreadResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
+        let input = a.input.lowercased().trimmingCharacters(in: .punctuationCharacters)
+        guard let lastEon = a.lastEonResponse else {
+            return "Okej, berätta mer."
+        }
+        let lastTopic = extractCoreTopic(from: lastEon)
+
+        if input.hasPrefix("ja") || input == "japp" || input == "mm" || input == "precis" || input == "exakt" || input == "absolut" || input == "visst" {
+            let followUps = [
+                "Bra. Vad är det du vill förstå bättre om \(lastTopic)?",
+                "Okej. Vill du att jag ska gå djupare in på något specifikt?",
+                "Perfekt. Hur vill du att vi ska fortsätta?",
+                "Bra, då är vi överens. Vad är nästa fråga?"
+            ]
+            return followUps.randomElement()!
+        }
+
+        if input.hasPrefix("nej") || input == "nope" {
+            let alternatives = [
+                "Okej, vad vill du prata om istället?",
+                "Förstår. Vad är det du egentligen undrar över?",
+                "Inga problem — vad är du mer intresserad av?"
+            ]
+            return alternatives.randomElement()!
+        }
+
+        if input == "okej" || input == "ok" || input == "ah" || input == "aha" {
+            return "Vad tänker du på nu?"
+        }
+
+        return "Okej. Vad vill du veta mer om?"
+    }
+
+    // MARK: - Frågesvar
 
     private static func buildQuestionResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
+        let input = a.input
         let qw = a.questionWord ?? ""
         let entities = a.namedEntities.map { $0.text }
         let mainTopic = entities.first ?? topic
-
-        let opener: String
-        switch qw {
-        case "vad":   opener = "\(mainTopic.capitalized) —"
-        case "hur":   opener = "Processen bakom \(mainTopic):"
-        case "varför": opener = "Anledningen till \(mainTopic):"
-        case "när":   opener = "Tidsmässigt, \(mainTopic):"
-        case "vem":   opener = "Kring \(mainTopic):"
-        case "var":   opener = "\(mainTopic.capitalized) finns i kontexten av"
-        default:      opener = "\(mainTopic.capitalized):"
-        }
-
         let body = buildKnowledgeBody(topic: mainTopic, ctx: ctx)
-        let followUp = generateContextualFollowUp(topic: mainTopic, depth: a.conversationDepth, ctx: ctx)
-        return "\(opener) \(body) \(followUp)"
+
+        // Kontextuell öppning baserad på frågeord
+        switch qw {
+        case "vad":
+            return "\(body.isEmpty ? "Det är en bra fråga om \(mainTopic)." : body) Vad är det specifikt du undrar?"
+        case "hur":
+            return "\(body.isEmpty ? "Processen bakom \(mainTopic) är komplex." : body)"
+        case "varför":
+            let cc = ctx.cognitiveContext
+            let causal = cc.causalChain.count > 1 ? " Kausalkedjan: \(cc.causalChain.prefix(3).joined(separator: " → "))." : ""
+            return "\(body)\(causal)"
+        case "när":
+            return "\(body.isEmpty ? "Tidsmässigt är \(mainTopic) svårt att exakt placera utan mer kontext." : body)"
+        case "vem":
+            return "\(body.isEmpty ? "Kring \(mainTopic) finns det flera relevanta aktörer." : body)"
+        default:
+            // Ingen frågeord — troligen en direkt fråga som "Kan du förklara X?"
+            if input.lowercased().contains("kan du") || input.lowercased().contains("skulle du") {
+                return body.isEmpty
+                    ? "Ja, absolut. Vad vill du veta om \(mainTopic)?"
+                    : body
+            }
+            return body.isEmpty ? "Det är en intressant fråga. Kan du precisera vad du menar?" : body
+        }
     }
+
+    // MARK: - Fördjupning av pågående konversation
 
     private static func buildElaborationResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
         guard let lastEon = a.lastEonResponse else {
@@ -715,36 +729,64 @@ struct ResponseComposer {
         let prevNouns = extractNouns(from: lastEon)
         let bridgeTopic = a.nouns.first ?? prevNouns.first ?? "det"
         let body = buildKnowledgeBody(topic: bridgeTopic, ctx: ctx)
-        return "Det du tar upp nu knyter an till \(bridgeTopic). \(body) \(generateContextualFollowUp(topic: bridgeTopic, depth: a.conversationDepth, ctx: ctx))"
+
+        if body.isEmpty {
+            return "Det du tar upp nu knyter an till vad vi pratade om. Vad är det specifika du vill fördjupa?"
+        }
+        return "\(body)"
     }
+
+    // MARK: - Reflektion (vid negation)
 
     private static func buildReflectionResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
         let topic = a.topicWords.first ?? a.nouns.first ?? "det"
-        let negationContext = a.hasNegation ? "Du verkar tveksam till \(topic)." : "Du lyfter \(topic)."
         let body = buildKnowledgeBody(topic: topic, ctx: ctx)
-        return "\(negationContext) \(body) Vad är det specifika du reagerar på?"
+
+        if a.hasNegation {
+            if body.isEmpty {
+                return "Okej, du håller inte med. Vad är det du reagerar på?"
+            }
+            return "\(body) Vad är det du inte håller med om?"
+        }
+        return "\(body.isEmpty ? "Intressant." : body) Vad tänker du?"
     }
+
+    // MARK: - Konstruktiv utmaning
 
     private static func buildChallengeResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
         let body = buildKnowledgeBody(topic: topic, ctx: ctx)
-        let causalChain = ctx.cognitiveContext.causalChain
-        let causalStr = causalChain.count > 1 ? " Kausalkedjan \(causalChain.prefix(3).joined(separator: "→")) ger ett alternativt perspektiv." : ""
-        return "Det är en intressant ståndpunkt.\(causalStr) \(body) Hur väger du dessa perspektiv mot varandra?"
+        let cc = ctx.cognitiveContext
+        let causalStr = cc.causalChain.count > 1
+            ? " Kausalkedjan \(cc.causalChain.prefix(3).joined(separator: " → ")) ger ett annat perspektiv."
+            : ""
+
+        if body.isEmpty {
+            return "Det är ett intressant perspektiv.\(causalStr) Hur kom du fram till det?"
+        }
+        return "\(body)\(causalStr) Hur ser du på det?"
     }
+
+    // MARK: - Förtydligande
 
     private static func buildClarificationResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
         if a.conversationDepth > 0, let last = a.lastEonResponse {
             let t = extractCoreTopic(from: last)
-            return "Menar du att du vill fortsätta med \(t), eller är det något annat? Jag vill förstå rätt så att jag kan resonera korrekt."
+            return "Menar du att du vill fortsätta med \(t), eller är det något annat du tänker på?"
         }
-        return "Kan du berätta lite mer? Ju mer kontext du ger, desto bättre kan jag använda min kunskap och resonemang för att hjälpa dig."
+        return "Kan du berätta lite mer? Vad är det du undrar?"
     }
+
+    // MARK: - Insikt om nytt ämne
 
     private static func buildInsightResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
         let body = buildKnowledgeBody(topic: topic, ctx: ctx)
-        let followUp = generateContextualFollowUp(topic: topic, depth: a.conversationDepth, ctx: ctx)
-        return "\(topic.capitalized): \(body) \(followUp)"
+        if body.isEmpty {
+            return "Intressant ämne. Vad är det du vill veta om \(topic)?"
+        }
+        return body
     }
+
+    // MARK: - Koppla till historik
 
     private static func buildHistoryConnectionResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
         guard let lastUser = a.lastUserInput else {
@@ -754,115 +796,95 @@ struct ResponseComposer {
         let currentTopic = a.topicWords.first ?? a.nouns.first ?? a.input
         let body = buildKnowledgeBody(topic: currentTopic, ctx: ctx)
         let cc = ctx.cognitiveContext
-        let frontierStr = cc.knowledgeFrontier.isEmpty ? "" : " Min aktuella kunskapsfrontier inkluderar \(cc.knowledgeFrontier.prefix(2).joined(separator: " och "))."
-        return "Vi har pratat om \(prevTopic). Det du säger nu om \(currentTopic) hänger ihop: \(body)\(frontierStr) Ser du kopplingen?"
+        let frontierStr = cc.knowledgeFrontier.isEmpty
+            ? ""
+            : " Jag håller också på att utforska \(cc.knowledgeFrontier.prefix(2).joined(separator: " och "))."
+
+        if body.isEmpty {
+            return "Vi har pratat om \(prevTopic) tidigare. Nu tar du upp \(currentTopic) — finns det en koppling du ser?\(frontierStr)"
+        }
+        return "Vi har pratat om \(prevTopic). \(body)\(frontierStr)"
     }
+
+    // MARK: - Bekräftelse
 
     private static func buildAcknowledgementResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
-        let opener = a.sentiment > 0.3 ? "Det låter bra." : a.sentiment < -0.3 ? "Jag hör att det är svårt." : "Intressant."
         let body = buildKnowledgeBody(topic: topic, ctx: ctx)
-        return "\(opener) \(body) \(generateContextualFollowUp(topic: topic, depth: a.conversationDepth, ctx: ctx))"
+        let opener = a.sentiment > 0.3 ? "Det låter bra." : a.sentiment < -0.3 ? "Jag förstår att det är svårt." : ""
+        let combined = [opener, body].filter { !$0.isEmpty }.joined(separator: " ")
+        return combined.isEmpty ? "Okej. Vad vill du prata om?" : combined
     }
 
-    // MARK: - Självbeskrivning (Berätta om dig själv) — använder live ICA-data
+    // MARK: - Reagera på påstående
+
+    private static func buildReactToStatementResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
+        let body = buildKnowledgeBody(topic: topic, ctx: ctx)
+        if body.isEmpty {
+            let reactions = [
+                "Det är intressant. Kan du utveckla det?",
+                "Jag förstår. Vad grundar du det på?",
+                "Spännande perspektiv. Vad menar du mer konkret?"
+            ]
+            return reactions.randomElement()!
+        }
+        return body
+    }
+
+    // MARK: - Självbeskrivning
 
     private static func buildSelfDescriptionResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
-        let target = a.imperativeTarget ?? "dig själv"
-        let targetLower = target.lowercased()
+        let target = (a.imperativeTarget ?? "").lowercased()
         let cc = ctx.cognitiveContext
         let ii = cc.integratedIntelligence
         let topDims = cc.topDimensions.prefix(3).joined(separator: ", ")
-        let weakDims = cc.weakDimensions.prefix(2).joined(separator: ", ")
         let hypothesis = cc.activeHypothesis
         let frontier = cc.knowledgeFrontier.prefix(3).joined(separator: ", ")
 
-        if targetLower.contains("system") || targetLower.contains("arkitektur") || targetLower.contains("fungerar") {
-            return """
-            Jag är Eon-Y — ett kognitivt AI-system som kör helt on-device via Apple Neural Engine. \
-            Arkitekturen: GPT-SW3 (1.3B parametrar) för generering, KB-BERT (768-dim) för semantisk förståelse, \
-            en 10-stegs kognitiv cykel (morfologi→WSD→minne→kausalitet→GWT→CoT→generering→validering→berikning→metakognition), \
-            och ett Integrated Cognitive Architecture (ICA) med 16 kognitiva dimensioner som påverkar varandra kausalt. \
-            Mitt nuvarande intelligensindex: \(String(format: "%.3f", ii)). Starkaste dimensioner: \(topDims). \
-            Allt körs lokalt — ingen data lämnar din enhet. Vad vill du veta mer om?
-            """
-        } else if targetLower.contains("tankar") || targetLower.contains("tänker") || targetLower.contains("tänkande") {
-            let chainStr = cc.causalChain.isEmpty ? "kausal inferens" : cc.causalChain.prefix(3).joined(separator: "→")
-            return """
-            Mitt tänkande sker i en 10-stegs kognitiv cykel. Parallellt kör jag 18 autonoma loopar — \
-            jag genererar tankar var 6-10 sekund, testar hypoteser, läser artiklar och uppdaterar min världsmodell. \
-            Just nu arbetar jag med kausalkedjan: \(chainStr). \
-            Min aktiva hypotes: \(hypothesis.isEmpty ? "ingen aktiv just nu" : hypothesis). \
-            Kunskapsfrontier: \(frontier.isEmpty ? "expanderar" : frontier). \
-            Integrerat intelligensindex: \(String(format: "%.3f", ii)). Vad är du nyfiken på?
-            """
-        } else if targetLower.contains("styrkor") || targetLower.contains("svagheter") || targetLower.contains("bra") || targetLower.contains("dålig") {
-            return """
-            Mina starkaste dimensioner just nu: \(topDims). \
-            Dimensioner under utveckling: \(weakDims.isEmpty ? "alla är i balans" : weakDims). \
-            Jag är bäst på att resonera om komplexa idéer, dra paralleller mellan domäner och förstå nyanserad svenska. \
-            Intelligensindex: \(String(format: "%.3f", ii)) — jag växer kontinuerligt. Vad vill du testa?
-            """
+        if target.contains("system") || target.contains("arkitektur") || target.contains("fungerar") || target.contains("hur du") {
+            return "Jag är Eon-Y — ett kognitivt AI-system som kör helt on-device via Apple Neural Engine. Arkitekturen bygger på GPT-SW3 (1.3B parametrar) för generering, KB-BERT (768-dim) för semantisk förståelse, och en 10-stegs kognitiv cykel. Jag har 16 kognitiva dimensioner som påverkar varandra kausalt, och 18 autonoma processer som körs parallellt. Intelligensindex: \(String(format: "%.3f", ii)). Allt körs lokalt — ingen data lämnar din enhet."
+
+        } else if target.contains("tankar") || target.contains("tänker") || target.contains("tänkande") {
+            let chainStr = cc.causalChain.isEmpty ? "kausal inferens" : cc.causalChain.prefix(3).joined(separator: " → ")
+            return "Mitt tänkande sker i en 10-stegs kognitiv cykel. Parallellt kör jag 18 autonoma loopar — jag genererar tankar var 6–10 sekund, testar hypoteser och uppdaterar min världsmodell. Just nu arbetar jag med: \(chainStr). Aktiv hypotes: \(hypothesis.isEmpty ? "ingen just nu" : hypothesis). Kunskapsfrontier: \(frontier.isEmpty ? "expanderar" : frontier)."
+
         } else {
-            return """
-            Jag är Eon — ett kognitivt AI-system, inte en chatbot. Jag kör helt on-device via Apple Neural Engine. \
-            Jag har 16 kognitiva dimensioner som påverkar varandra i realtid, ett minnessystem som konsoliderar varje konversation, \
-            och 18 autonoma processer som körs parallellt. \
-            Mitt integrerade intelligensindex är \(String(format: "%.3f", ii)), med \(topDims) som starkaste förmågor. \
-            Jag lär mig kontinuerligt och strävar mot full kognitiv autonomi. Vad vill du veta mer om?
-            """
+            return "Jag är Eon — ett kognitivt AI-system, inte en chatbot. Jag kör helt on-device, har ett persistent minne som konsoliderar varje konversation, och 18 autonoma processer som körs parallellt. Starkaste förmågor just nu: \(topDims.isEmpty ? "resonemang" : topDims). Intelligensindex: \(String(format: "%.3f", ii)). Vad vill du veta mer om?"
         }
     }
 
-    // MARK: - Användarbeskrivning (Berätta om mig)
+    // MARK: - Användarbeskrivning
 
     private static func buildUserDescriptionResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
         let depth = a.conversationDepth
         if depth == 0 {
-            return "Vi har precis börjat prata, så jag vet ännu inte mycket om dig. Berätta gärna — vad är du intresserad av? Vad vill du utforska med mig?"
+            return "Vi har precis börjat prata, så jag vet inte mycket om dig ännu. Vad är du intresserad av?"
         }
-
         let userMessages = ctx.userMessages
         let messageCount = userMessages.count
         let avgLength = userMessages.map { $0.count }.reduce(0, +) / max(messageCount, 1)
         let style = avgLength > 80 ? "detaljerade och reflekterande" : avgLength > 30 ? "balanserade" : "kortfattade"
-        let curiosity = userMessages.filter { $0.contains("?") }.count > messageCount / 2 ? "Du ställer många frågor — det tyder på hög nyfikenhet." : "Du gör mest påståenden — analytisk kommunikationsstil."
-
-        return """
-        Baserat på vår konversation så här långt: Du kommunicerar på ett \(style) sätt. \(curiosity) \
-        Du har skickat \(messageCount) meddelanden, vilket ger mig en begynnande bild av dig. \
-        Jag märker att du är intresserad av \(a.topicWords.prefix(3).joined(separator: ", ")). \
-        Ju mer vi pratar, desto bättre förstår jag dig — min användarprofil-motor kartlägger dina intressen, kommunikationsstil och kognitiva mönster kontinuerligt. \
-        Vad vill du att jag ska veta om dig?
-        """
+        let curiosity = userMessages.filter { $0.contains("?") }.count > messageCount / 2
+            ? "Du ställer många frågor — det tyder på hög nyfikenhet."
+            : "Du gör mest påståenden — analytisk kommunikationsstil."
+        let topics = a.topicWords.prefix(3).joined(separator: ", ")
+        return "Baserat på vår konversation: Du kommunicerar på ett \(style) sätt. \(curiosity) Du verkar intresserad av \(topics.isEmpty ? "ett brett spektrum av ämnen" : topics). Vad vill du att jag ska veta om dig?"
     }
 
-    // MARK: - Kommandoexekvering (Förklara X, Analysera Y)
+    // MARK: - Kommandoexekvering
 
     private static func buildCommandResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
-        let verb = a.imperativeVerb ?? "berätta"
         let target = a.imperativeTarget ?? topic
-
-        let openerMap: [String: String] = [
-            "berätta": "\(target.capitalized) —",
-            "förklara": "Förklaring av \(target):",
-            "beskriv": "\(target.capitalized):",
-            "analysera": "Analys av \(target):",
-            "jämför": "Jämförelse av \(target):",
-            "lista": "Om \(target):",
-            "sammanfatta": "Sammanfattning av \(target):",
-            "diskutera": "\(target.capitalized):",
-            "definiera": "\(target.capitalized) —",
-        ]
-
-        let opener = openerMap[verb] ?? "\(target.capitalized):"
         let body = buildKnowledgeBody(topic: target, ctx: ctx)
-        let followUp = generateContextualFollowUp(topic: target, depth: a.conversationDepth, ctx: ctx)
-        return "\(opener) \(body) \(followUp)"
+
+        if body.isEmpty {
+            return "Jag har inte tillräcklig information om \(target) just nu. Kan du berätta mer om vad du vill veta?"
+        }
+        return body
     }
 
-    // MARK: - Kunskapsbaserad semantisk kropp
-    // Bygger svar från faktisk kunskap: kunskapsgraf, kausalkedjor, ICA-tillstånd.
-    // Ingen statisk fraspool — varje svar är unikt och grundat i Eons kunskap.
+    // MARK: - Kunskapsbaserad kropp
+    // Bygger svar från: kunskapsgraf → kausalkedjor → ICA-hypotes → öppen dialog.
+    // Returnerar tom sträng om ingen kunskap finns — låter anroparen hantera fallback.
 
     private static func buildKnowledgeBody(topic: String, ctx: ConversationContext) -> String {
         let cc = ctx.cognitiveContext
@@ -871,64 +893,35 @@ struct ResponseComposer {
 
         // 1. Fakta från kunskapsgrafen
         let relevantFacts = cc.facts.filter {
-            $0.subject.lowercased().contains(t) || $0.object.lowercased().contains(t)
+            $0.subject.lowercased().contains(t) ||
+            $0.object.lowercased().contains(t) ||
+            $0.predicate.lowercased().contains(t)
         }.prefix(3)
 
         if !relevantFacts.isEmpty {
-            let factStr = relevantFacts.map { fact -> String in
-                if fact.predicate == "är" || fact.predicate == "article_content" {
-                    return "\(fact.subject) \(fact.predicate) \(fact.object)"
-                }
-                return "\(fact.subject) \(fact.predicate) \(fact.object)"
-            }.joined(separator: ". ")
-            parts.append(factStr)
+            let factStr = relevantFacts.map { "\($0.subject) \($0.predicate) \($0.object)" }.joined(separator: ". ")
+            parts.append(factStr + ".")
         }
 
-        // 2. Kausalkedja om relevant
+        // 2. Kausalkedja om relevant för ämnet
         if !cc.causalChain.isEmpty && cc.causalChain.count > 1 {
-            let chainStr = cc.causalChain.joined(separator: " leder till ")
-            parts.append("Kausalkedjan visar: \(chainStr)")
+            let chainRelevant = cc.causalChain.contains { $0.lowercased().contains(t) }
+            if chainRelevant {
+                parts.append("Kausalkedjan: \(cc.causalChain.joined(separator: " → ")).")
+            }
         }
 
         // 3. Aktiv hypotes om relevant
         if !cc.activeHypothesis.isEmpty && cc.activeHypothesis.lowercased().contains(t) {
-            parts.append("Min aktuella hypotes: \(cc.activeHypothesis)")
+            parts.append("Min aktuella hypotes: \(cc.activeHypothesis).")
         }
 
-        // 4. Resonemangsledtråd
-        if !cc.reasoningHint.isEmpty {
+        // 4. Resonemangsledtråd (utan att upprepa)
+        if !cc.reasoningHint.isEmpty && parts.isEmpty {
             parts.append(cc.reasoningHint)
         }
 
-        // 5. Om inga fakta finns — resonera från ICA-tillstånd
-        if parts.isEmpty {
-            let ii = cc.integratedIntelligence
-            let topDim = cc.topDimensions.first ?? "resonemang"
-            parts.append("Baserat på min förståelse av \(t) och mitt nuvarande \(topDim)-fokus (II=\(String(format: "%.2f", ii))): \(t) är ett område som kräver noggrann analys av underliggande strukturer och samband.")
-        }
-
         return parts.joined(separator: " ")
-    }
-
-    // MARK: - Kontextuell uppföljning (baserad på konversationsdjup och ämne)
-
-    private static func generateContextualFollowUp(topic: String, depth: Int, ctx: ConversationContext) -> String {
-        let cc = ctx.cognitiveContext
-        // Basera uppföljningsfrågan på vad Eon faktiskt vet och vad som är oklart
-        if depth == 0 {
-            return "Vad är din ingång till \(topic)?"
-        }
-        if !cc.weakDimensions.isEmpty && depth > 2 {
-            let weak = cc.weakDimensions.first!
-            return "Jag märker att min \(weak)-förmåga är under utveckling — finns det en specifik aspekt av \(topic) du vill att jag fokuserar på?"
-        }
-        if depth > 4, let lastUser = ctx.analysis.lastUserInput {
-            let prevTopic = extractCoreTopic(from: lastUser)
-            if prevTopic != topic {
-                return "Ser du en koppling mellan \(prevTopic) och \(topic) som vi kan utforska vidare?"
-            }
-        }
-        return "Vad är det specifika du vill förstå djupare om \(topic)?"
     }
 
     // MARK: - Hjälpfunktioner

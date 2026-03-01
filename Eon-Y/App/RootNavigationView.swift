@@ -1,10 +1,27 @@
 import SwiftUI
 
+// MARK: - Scroll visibility environment key
+// Views publish scroll direction via preference; RootNavigationView reads it to hide/show tab bar.
+
+struct TabBarVisibilityKey: EnvironmentKey {
+    static let defaultValue: Binding<Bool> = .constant(true)
+}
+
+extension EnvironmentValues {
+    var tabBarVisible: Binding<Bool> {
+        get { self[TabBarVisibilityKey.self] }
+        set { self[TabBarVisibilityKey.self] = newValue }
+    }
+}
+
+// MARK: - EonTab
+
 enum EonTab: Int, CaseIterable {
     case home = 0
     case chat
     case mind
     case knowledge
+    case progress
     case profile
 
     var label: String {
@@ -13,6 +30,7 @@ enum EonTab: Int, CaseIterable {
         case .chat:      return "Chatt"
         case .mind:      return "Hjärna"
         case .knowledge: return "Kunskap"
+        case .progress:  return "Framsteg"
         case .profile:   return "Profil"
         }
     }
@@ -23,6 +41,7 @@ enum EonTab: Int, CaseIterable {
         case .chat:      return "bubble.left.and.bubble.right.fill"
         case .mind:      return "brain.head.profile"
         case .knowledge: return "books.vertical.fill"
+        case .progress:  return "chart.line.uptrend.xyaxis"
         case .profile:   return "person.crop.circle.fill"
         }
     }
@@ -33,6 +52,7 @@ enum EonTab: Int, CaseIterable {
         case .chat:      return Color(hex: "#34D399")
         case .mind:      return Color(hex: "#60A5FA")
         case .knowledge: return Color(hex: "#FBBF24")
+        case .progress:  return Color(hex: "#FB923C")
         case .profile:   return Color(hex: "#F472B6")
         }
     }
@@ -43,26 +63,34 @@ enum EonTab: Int, CaseIterable {
 struct RootNavigationView: View {
     @EnvironmentObject var brain: EonBrain
     @State private var selectedTab: EonTab = .chat
+    @State private var tabBarVisible: Bool = true
 
     var body: some View {
         GeometryReader { geo in
+            let tabBarHeight = 52 + geo.safeAreaInsets.bottom
+
             ZStack(alignment: .bottom) {
                 Color(hex: "#07050F").ignoresSafeArea()
 
-                // Content fills screen, safeAreaInset reserves space for tab bar
-                TabContentView(selectedTab: $selectedTab)
+                // Content — reserves exact space for tab bar so nothing hides behind it
+                TabContentView(selectedTab: $selectedTab, tabBarVisible: $tabBarVisible)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
-                        // Transparent spacer = exact tab bar height so content never hides behind it
-                        Color.clear.frame(height: 60 + max(geo.safeAreaInsets.bottom, 16) + 4)
+                        Color.clear.frame(height: tabBarVisible ? tabBarHeight : 0)
                     }
 
-                // Floating tab bar overlays at bottom
+                // Tab bar — pinned to bottom, slides off-screen when hidden
                 EonTabBar(selectedTab: $selectedTab, safeBottom: geo.safeAreaInsets.bottom)
+                    .frame(maxWidth: .infinity)
+                    .offset(y: tabBarVisible ? 0 : tabBarHeight + 2)
+                    .animation(.spring(response: 0.38, dampingFraction: 0.78), value: tabBarVisible)
             }
             .ignoresSafeArea(edges: .bottom)
         }
         .preferredColorScheme(.dark)
+        .onAppear {
+            brain.launchIfNeeded()
+        }
     }
 }
 
@@ -70,30 +98,101 @@ struct RootNavigationView: View {
 
 struct TabContentView: View {
     @Binding var selectedTab: EonTab
+    @Binding var tabBarVisible: Bool
 
     var body: some View {
         ZStack {
             EonPulseHomeView()
+                .environment(\.tabBarVisible, $tabBarVisible)
                 .opacity(selectedTab == .home ? 1 : 0)
                 .allowsHitTesting(selectedTab == .home)
 
             ChatView()
+                .environment(\.tabBarVisible, $tabBarVisible)
                 .opacity(selectedTab == .chat ? 1 : 0)
                 .allowsHitTesting(selectedTab == .chat)
 
             MindView()
+                .environment(\.tabBarVisible, $tabBarVisible)
                 .opacity(selectedTab == .mind ? 1 : 0)
                 .allowsHitTesting(selectedTab == .mind)
 
             KnowledgeView()
+                .environment(\.tabBarVisible, $tabBarVisible)
                 .opacity(selectedTab == .knowledge ? 1 : 0)
                 .allowsHitTesting(selectedTab == .knowledge)
 
+            EonProgressView()
+                .environment(\.tabBarVisible, $tabBarVisible)
+                .opacity(selectedTab == .progress ? 1 : 0)
+                .allowsHitTesting(selectedTab == .progress)
+
             ProfileRootView()
+                .environment(\.tabBarVisible, $tabBarVisible)
                 .opacity(selectedTab == .profile ? 1 : 0)
                 .allowsHitTesting(selectedTab == .profile)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: selectedTab) { _ in
+            // Tab-byte: visa alltid tab bar igen
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) {
+                tabBarVisible = true
+            }
+        }
+    }
+}
+
+// MARK: - Scroll offset tracking
+
+struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// Attach to any ScrollView's content to auto-hide/show the tab bar.
+/// Usage: .scrollTabBarVisibility(tabBarVisible: $tabBarVisible)
+struct ScrollTabBarVisibilityModifier: ViewModifier {
+    @Binding var tabBarVisible: Bool
+    @State private var lastOffset: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: ScrollOffsetKey.self,
+                        value: geo.frame(in: .named("scrollSpace")).minY
+                    )
+                }
+            )
+            .onPreferenceChange(ScrollOffsetKey.self) { offset in
+                let delta = offset - lastOffset
+                // Threshold to avoid jitter on tiny movements
+                if delta < -8 {
+                    // Scrolling down → hide
+                    if tabBarVisible {
+                        withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) {
+                            tabBarVisible = false
+                        }
+                    }
+                } else if delta > 8 {
+                    // Scrolling up → show
+                    if !tabBarVisible {
+                        withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) {
+                            tabBarVisible = true
+                        }
+                    }
+                }
+                lastOffset = offset
+            }
+    }
+}
+
+extension View {
+    func scrollTabBarVisibility(tabBarVisible: Binding<Bool>) -> some View {
+        modifier(ScrollTabBarVisibilityModifier(tabBarVisible: tabBarVisible))
     }
 }
 
@@ -106,60 +205,41 @@ struct EonTabBar: View {
 
     @State private var tabActivity: [EonTab: Double] = [:]
 
-    private let barHeight: CGFloat = 60
-    private let horizontalPadding: CGFloat = 20
-    private let bottomPadding: CGFloat = 4
-
     var body: some View {
         VStack(spacing: 0) {
-            Spacer()
+            // Thin separator line at top
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
 
-            ZStack {
-                // Glass pill background
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .background(
-                        RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .fill(Color.white.opacity(0.04))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.18),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.10)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 0.8
-                            )
-                    )
-                    .shadow(color: Color.black.opacity(0.5), radius: 24, y: 8)
-                    .shadow(color: selectedTab.glowColor.opacity(0.15), radius: 16)
-
-                // Tab items
-                HStack(spacing: 0) {
-                    ForEach(EonTab.allCases, id: \.self) { tab in
-                        EonTabItem(
-                            tab: tab,
-                            isSelected: selectedTab == tab,
-                            activity: tabActivity[tab] ?? 0
-                        ) {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
-                                selectedTab = tab
-                            }
+            // Tab items row
+            HStack(spacing: 0) {
+                ForEach(EonTab.allCases, id: \.self) { tab in
+                    EonTabItem(
+                        tab: tab,
+                        isSelected: selectedTab == tab,
+                        activity: tabActivity[tab] ?? 0
+                    ) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
+                            selectedTab = tab
                         }
                     }
                 }
-                .padding(.horizontal, 8)
             }
-            .frame(height: barHeight)
-            .padding(.horizontal, horizontalPadding)
-            .padding(.bottom, max(safeBottom, 16) + bottomPadding)
+            .frame(height: 52)
+            .padding(.horizontal, 4)
+
+            // Safe area fill — same background, no gap
+            Color(hex: "#07050F")
+                .frame(height: safeBottom)
         }
+        .background(
+            Color(hex: "#07050F")
+                .opacity(0.96)
+                .background(.ultraThinMaterial)
+                .ignoresSafeArea(edges: .bottom)
+        )
+        .shadow(color: Color.black.opacity(0.4), radius: 12, y: -4)
         .onReceive(brain.$engineActivity) { activity in
             tabActivity[.mind]      = activity["cognitive"] ?? 0
             tabActivity[.chat]      = activity["language"] ?? 0

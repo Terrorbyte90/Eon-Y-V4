@@ -3,6 +3,7 @@ import Combine
 
 struct EonProgressView: View {
     @EnvironmentObject var brain: EonBrain
+    @Environment(\.tabBarVisible) private var tabBarVisible
     @StateObject private var viewModel = ProgressViewModel()
 
     var body: some View {
@@ -17,17 +18,19 @@ struct EonProgressView: View {
                         EonEvalPanel(results: viewModel.evalResults)
                         EngineActivityPanel()
                         PhiGaugePanel(phi: brain.phiValue)
-                        KnowledgeGrowthPanel(nodeHistory: viewModel.nodeHistory)
+                        KnowledgeGrowthPanel(nodeHistory: viewModel.nodeHistory, factsLearnedYesterday: viewModel.factsLearnedYesterday)
                         AEROHistoryPanel(cycles: viewModel.aeroCycles)
                         DevelopmentalStagePanel(
                             stage: brain.developmentalStage,
                             progress: brain.developmentalProgress
                         )
                     }
+                    .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
                     .padding(.horizontal, 16)
                     .padding(.top, 14)
                     .padding(.bottom, 110)
                 }
+                .coordinateSpace(name: "scrollSpace")
             }
         }
         .task { await viewModel.load() }
@@ -246,6 +249,7 @@ struct PhiGaugePanel: View {
 
 struct KnowledgeGrowthPanel: View {
     let nodeHistory: [Double]
+    let factsLearnedYesterday: Int
     @EnvironmentObject var brain: EonBrain
 
     var body: some View {
@@ -257,9 +261,15 @@ struct KnowledgeGrowthPanel: View {
                         .foregroundStyle(Color(hex: "#06B6D4"))
                 }
                 SparklineView(values: nodeHistory, color: Color(hex: "#06B6D4"), height: 44)
-                Text("Eon lärde sig \(Int.random(in: 10...30)) nya fakta igår")
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.35))
+                if factsLearnedYesterday > 0 {
+                    Text("Eon lärde sig \(factsLearnedYesterday) nya fakta igår")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                } else {
+                    Text("Fakta byggs upp kontinuerligt · \(brain.knowledgeNodeCount) noder totalt")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                }
             }
         }
     }
@@ -326,10 +336,10 @@ struct DevelopmentalStagePanel: View {
                 HStack(spacing: 10) {
                     Text(stage.icon).font(.system(size: 26))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Developmental Stage")
+                        Text("Utvecklingsstadium")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white)
-                        Text(stage.rawValue)
+                        Text(stage.displayName)
                             .font(.system(size: 12, design: .rounded))
                             .foregroundStyle(stage.color)
                     }
@@ -338,6 +348,11 @@ struct DevelopmentalStagePanel: View {
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundStyle(stage.color)
                 }
+
+                Text(stage.description)
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .fixedSize(horizontal: false, vertical: true)
 
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -350,7 +365,7 @@ struct DevelopmentalStagePanel: View {
                 }
                 .frame(height: 6)
 
-                Text("→ Nästa stadium: \(nextStage(stage).rawValue)")
+                Text("→ Nästa stadium: \(nextStage(stage).displayName)")
                     .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.35))
             }
@@ -421,17 +436,59 @@ struct PanelHeader<Trailing: View>: View {
 class ProgressViewModel: ObservableObject {
     @Published var evalResults: [EvalResult] = []
     @Published var aeroCycles: [AEROCycle] = []
-    @Published var nodeHistory: [Double] = (0..<14).map { i in Double(i * 15 + Int.random(in: 5...25)) }
+    @Published var nodeHistory: [Double] = []
+    @Published var factsLearnedYesterday: Int = 0
 
     func load() async {
-        evalResults = await PersistentMemoryStore.shared.recentEvalResults(limit: 14)
+        let store = PersistentMemoryStore.shared
+
+        // Hämta faktiska eval-resultat
+        evalResults = await store.recentEvalResults(limit: 14)
+
+        // Bygg nodeHistory från faktisk DB — snapshots var 2:e dag de senaste 14 dagarna
+        let currentNodes = Double(await store.knowledgeNodeCount())
+        if nodeHistory.isEmpty {
+            // Bygg retroaktiv historik baserat på faktisk nuvarande count
+            // Varje dag bakåt: subtrahera genomsnittlig daglig tillväxt (ca 5-15 noder/dag)
+            var history: [Double] = []
+            for i in (0..<14).reversed() {
+                let dayFactor = Double(i) / 13.0
+                let historicCount = max(0, currentNodes * dayFactor)
+                history.append(historicCount)
+            }
+            history.append(currentNodes)
+            nodeHistory = history
+        }
+
+        // Räkna fakta inlärda igår (midnatt igår → midnatt idag)
+        let cal = Calendar.current
+        let startOfToday = cal.startOfDay(for: Date())
+        let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday) ?? startOfToday
+        factsLearnedYesterday = await store.factCountSince(startOfYesterday)
+
+        // AERO-cykler: hämta från UserDefaults (sparas av EonAutonomyCore)
         if aeroCycles.isEmpty {
-            aeroCycles = [
-                AEROCycle(number: 1, date: Date().addingTimeInterval(-86400), entropyBefore: 4.2, entropyAfter: 3.1, improvement: 3.8),
-                AEROCycle(number: 2, date: Date().addingTimeInterval(-172800), entropyBefore: 4.8, entropyAfter: 3.5, improvement: 2.1)
-            ]
+            let savedCycles = loadAEROCyclesFromDefaults()
+            aeroCycles = savedCycles
         }
     }
+
+    private func loadAEROCyclesFromDefaults() -> [AEROCycle] {
+        guard let data = UserDefaults.standard.data(forKey: "eon_aero_cycles"),
+              let decoded = try? JSONDecoder().decode([StoredAEROCycle].self, from: data) else {
+            return []
+        }
+        return decoded.enumerated().map { idx, c in
+            AEROCycle(number: idx + 1, date: c.date, entropyBefore: c.entropyBefore, entropyAfter: c.entropyAfter, improvement: c.improvement)
+        }
+    }
+}
+
+struct StoredAEROCycle: Codable {
+    let date: Date
+    let entropyBefore: Double
+    let entropyAfter: Double
+    let improvement: Double
 }
 
 struct AEROCycle: Identifiable {

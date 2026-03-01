@@ -6,6 +6,21 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AA000001AA000001AA000001 /* GptSw3_1_3B_Instruct.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA000002AA000002AA000002 /* GptSw3_1_3B_Instruct.mlpackage */; };
+		AA000003AA000003AA000003 /* KBBertSwedish.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA000004AA000004AA000004 /* KBBertSwedish.mlpackage */; };
+		AA000005AA000005AA000005 /* SentimentScorer.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA000006AA000006AA000006 /* SentimentScorer.mlpackage */; };
+		AA000007AA000007AA000007 /* ComplexityEstimator.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA000008AA000008AA000008 /* ComplexityEstimator.mlpackage */; };
+		AA000009AA000009AA000009 /* IntentClassifier.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA00000AAA00000AAA00000A /* IntentClassifier.mlpackage */; };
+		AA00000BAA00000BAA00000B /* EmotionMultiLabel.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA00000CAA00000CAA00000C /* EmotionMultiLabel.mlpackage */; };
+		AA00000DAA00000DAA00000D /* TopicClassifier.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA00000EAA00000EAA00000E /* TopicClassifier.mlpackage */; };
+		AA00000FAA00000FAA00000F /* RegisterDetector.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA000010AA000010AA000010 /* RegisterDetector.mlpackage */; };
+		AA000011AA000011AA000011 /* BatchCosineSimilarity.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA000012AA000012AA000012 /* BatchCosineSimilarity.mlpackage */; };
+		AA000013AA000013AA000013 /* bert_vocab.txt in Resources */ = {isa = PBXBuildFile; fileRef = AA000014AA000014AA000014 /* bert_vocab.txt */; };
+		AA000015AA000015AA000015 /* gpt_sw3_vocab.json in Resources */ = {isa = PBXBuildFile; fileRef = AA000016AA000016AA000016 /* gpt_sw3_vocab.json */; };
+		AA000017AA000017AA000017 /* lexicon_seed.json in Resources */ = {isa = PBXBuildFile; fileRef = AA000018AA000018AA000018 /* lexicon_seed.json */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		9B388BB42F523DE700F48273 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,11 +42,49 @@
 		9B388BA62F523DE600F48273 /* Eon-Y.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Eon-Y.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9B388BB32F523DE700F48273 /* Eon-YTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Eon-YTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9B388BBD2F523DE700F48273 /* Eon-YUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Eon-YUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA000002AA000002AA000002 /* GptSw3_1_3B_Instruct.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper.mlpackage; path = GptSw3_1_3B_Instruct.mlpackage; sourceTree = "<group>"; };
+		AA000004AA000004AA000004 /* KBBertSwedish.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper.mlpackage; path = KBBertSwedish.mlpackage; sourceTree = "<group>"; };
+		AA000006AA000006AA000006 /* SentimentScorer.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper.mlpackage; path = SentimentScorer.mlpackage; sourceTree = "<group>"; };
+		AA000008AA000008AA000008 /* ComplexityEstimator.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper.mlpackage; path = ComplexityEstimator.mlpackage; sourceTree = "<group>"; };
+		AA00000AAA00000AAA00000A /* IntentClassifier.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper.mlpackage; path = IntentClassifier.mlpackage; sourceTree = "<group>"; };
+		AA00000CAA00000CAA00000C /* EmotionMultiLabel.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper.mlpackage; path = EmotionMultiLabel.mlpackage; sourceTree = "<group>"; };
+		AA00000EAA00000EAA00000E /* TopicClassifier.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper.mlpackage; path = TopicClassifier.mlpackage; sourceTree = "<group>"; };
+		AA000010AA000010AA000010 /* RegisterDetector.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper.mlpackage; path = RegisterDetector.mlpackage; sourceTree = "<group>"; };
+		AA000012AA000012AA000012 /* BatchCosineSimilarity.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper.mlpackage; path = BatchCosineSimilarity.mlpackage; sourceTree = "<group>"; };
+		AA000014AA000014AA000014 /* bert_vocab.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = bert_vocab.txt; sourceTree = "<group>"; };
+		AA000016AA000016AA000016 /* gpt_sw3_vocab.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = gpt_sw3_vocab.json; sourceTree = "<group>"; };
+		AA000018AA000018AA000018 /* lexicon_seed.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = lexicon_seed.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		AA000030AA000030AA000030 /* Exceptions for "Eon-Y" folder in "Eon-Y" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Eon-Y.entitlements",
+				Info.plist,
+				Models/BatchCosineSimilarity.mlpackage,
+				Models/ComplexityEstimator.mlpackage,
+				Models/EmotionMultiLabel.mlpackage,
+				Models/GptSw3_1_3B_Instruct.mlpackage,
+				Models/IntentClassifier.mlpackage,
+				Models/KBBertSwedish.mlpackage,
+				Models/RegisterDetector.mlpackage,
+				Models/SentimentScorer.mlpackage,
+				Models/TopicClassifier.mlpackage,
+				Resources/bert_vocab.txt,
+				Resources/gpt_sw3_vocab.json,
+				Resources/lexicon_seed.json,
+			);
+			target = 9B388BA52F523DE600F48273 /* Eon-Y */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9B388BA82F523DE600F48273 /* Eon-Y */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				AA000030AA000030AA000030 /* Exceptions for "Eon-Y" folder in "Eon-Y" target */,
+			);
 			path = "Eon-Y";
 			sourceTree = "<group>";
 		};
@@ -76,6 +129,8 @@
 			isa = PBXGroup;
 			children = (
 				9B388BA82F523DE600F48273 /* Eon-Y */,
+				AA000020AA000020AA000020 /* Models */,
+				AA000021AA000021AA000021 /* Resources */,
 				9B388BB62F523DE700F48273 /* Eon-YTests */,
 				9B388BC02F523DE700F48273 /* Eon-YUITests */,
 				9B388BA72F523DE600F48273 /* Products */,
@@ -90,6 +145,34 @@
 				9B388BBD2F523DE700F48273 /* Eon-YUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		AA000020AA000020AA000020 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				AA000002AA000002AA000002 /* GptSw3_1_3B_Instruct.mlpackage */,
+				AA000004AA000004AA000004 /* KBBertSwedish.mlpackage */,
+				AA000006AA000006AA000006 /* SentimentScorer.mlpackage */,
+				AA000008AA000008AA000008 /* ComplexityEstimator.mlpackage */,
+				AA00000AAA00000AAA00000A /* IntentClassifier.mlpackage */,
+				AA00000CAA00000CAA00000C /* EmotionMultiLabel.mlpackage */,
+				AA00000EAA00000EAA00000E /* TopicClassifier.mlpackage */,
+				AA000010AA000010AA000010 /* RegisterDetector.mlpackage */,
+				AA000012AA000012AA000012 /* BatchCosineSimilarity.mlpackage */,
+			);
+			name = Models;
+			path = "Eon-Y/Models";
+			sourceTree = "<group>";
+		};
+		AA000021AA000021AA000021 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				AA000014AA000014AA000014 /* bert_vocab.txt */,
+				AA000016AA000016AA000016 /* gpt_sw3_vocab.json */,
+				AA000018AA000018AA000018 /* lexicon_seed.json */,
+			);
+			name = Resources;
+			path = "Eon-Y/Resources";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -212,6 +295,18 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA000001AA000001AA000001 /* GptSw3_1_3B_Instruct.mlpackage in Resources */,
+				AA000003AA000003AA000003 /* KBBertSwedish.mlpackage in Resources */,
+				AA000005AA000005AA000005 /* SentimentScorer.mlpackage in Resources */,
+				AA000007AA000007AA000007 /* ComplexityEstimator.mlpackage in Resources */,
+				AA000009AA000009AA000009 /* IntentClassifier.mlpackage in Resources */,
+				AA00000BAA00000BAA00000B /* EmotionMultiLabel.mlpackage in Resources */,
+				AA00000DAA00000DAA00000D /* TopicClassifier.mlpackage in Resources */,
+				AA00000FAA00000FAA00000F /* RegisterDetector.mlpackage in Resources */,
+				AA000011AA000011AA000011 /* BatchCosineSimilarity.mlpackage in Resources */,
+				AA000013AA000013AA000013 /* bert_vocab.txt in Resources */,
+				AA000015AA000015AA000015 /* gpt_sw3_vocab.json in Resources */,
+				AA000017AA000017AA000017 /* lexicon_seed.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -395,16 +490,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Eon-Y/Eon-Y.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = G648H762LD;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_FILE = "Eon-Y/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -427,16 +519,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Eon-Y/Eon-Y.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = G648H762LD;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_FILE = "Eon-Y/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

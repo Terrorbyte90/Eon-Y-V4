@@ -82,7 +82,7 @@ final class CognitiveState: ObservableObject {
     private init() {
         buildCausalInfluences()
         buildFeedbackLoops()
-        Task { await startStateMonitor() }
+        Task { @MainActor in await self.startStateMonitor() }
     }
 
     // MARK: - Uppdatera dimension (kallas av varje pelare)
@@ -94,8 +94,8 @@ final class CognitiveState: ObservableObject {
 
         // Spara historik
         dimensionHistory[dimension, default: []].append(new)
-        if dimensionHistory[dimension]!.count > 100 {
-            dimensionHistory[dimension]!.removeFirst(20)
+        if (dimensionHistory[dimension]?.count ?? 0) > 100 {
+            dimensionHistory[dimension]?.removeFirst(20)
         }
 
         // Propagera kausal påverkan till relaterade dimensioner
@@ -293,22 +293,30 @@ final class CognitiveState: ObservableObject {
 
         integratedIntelligence = newII
 
-        // Spara snapshot var 5:e uppdatering
+        // Spara snapshot var 30s
         if intelligenceHistory.count == 0 || intelligenceHistory.last.map({ Date().timeIntervalSince($0.timestamp) > 30 }) == true {
             intelligenceHistory.append(IntelligenceSnapshot(value: newII, timestamp: Date()))
             if intelligenceHistory.count > 200 { intelligenceHistory.removeFirst(50) }
+        }
+
+        // Auto-persistera kognitiv state var 60s — säkerställer att lärande överlever omstarter
+        let lastPersistTs = UserDefaults.standard.double(forKey: "eon_persisted_timestamp")
+        if Date().timeIntervalSince1970 - lastPersistTs > 60 {
+            persistCurrentState()
+            // Spara developmental stage och progress
+            UserDefaults.standard.set(DevelopmentalStage.fromIntelligence(newII).rawValue, forKey: "eon_persisted_stage")
+            UserDefaults.standard.set(DevelopmentalStage.progressToNext(newII), forKey: "eon_persisted_progress")
         }
     }
 
     // MARK: - Tillståndsmonitor
 
+    @MainActor
     private func startStateMonitor() async {
-        while true {
-            try? await Task.sleep(nanoseconds: 10_000_000_000)  // var 10s
-            await MainActor.run {
-                updateFeedbackLoops()
-                identifyBottlenecks()
-            }
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            updateFeedbackLoops()
+            identifyBottlenecks()
         }
     }
 
@@ -365,6 +373,47 @@ final class CognitiveState: ObservableObject {
         let recentAvg = recent.reduce(0, +) / Double(recent.count)
         let olderAvg = older.reduce(0, +) / Double(older.count)
         return recentAvg - olderAvg
+    }
+
+    // MARK: - Persistens: spara och återställ kognitiv state över omstarter
+
+    func persistCurrentState() {
+        let ud = UserDefaults.standard
+        ud.set(integratedIntelligence, forKey: "eon_persisted_ii")
+        // Spara alla dimensioner
+        var dimDict: [String: Double] = [:]
+        for (dim, val) in dimensions { dimDict[dim.rawValue] = val }
+        ud.set(dimDict, forKey: "eon_persisted_dimensions")
+        ud.set(Date().timeIntervalSince1970, forKey: "eon_persisted_timestamp")
+    }
+
+    func restoreFromPersisted(ii: Double) {
+        // Återställ dimensioner från UserDefaults
+        if let dimDict = UserDefaults.standard.dictionary(forKey: "eon_persisted_dimensions") as? [String: Double] {
+            for (rawValue, val) in dimDict {
+                if let dim = CognitiveDimension(rawValue: rawValue) {
+                    dimensions[dim] = max(0.01, min(0.99, val))
+                }
+            }
+        } else {
+            // Ingen sparad state — starta på låg men deterministisk bas (0.05), byggs upp via riktig inlärning
+            let baseLevel = max(0.05, min(0.3, ii * 0.4))
+            for dim in CognitiveDimension.allCases {
+                dimensions[dim] = baseLevel
+            }
+        }
+        integratedIntelligence = ii
+        recalculateIntegratedIntelligence()
+        print("[CognitiveState] Återställd från persistens: II=\(String(format: "%.3f", ii))")
+    }
+
+    // Snapshot av alla dimensioner för checkpoint-sparning
+    func dimensionSnapshot() -> [String: Double] {
+        var snap: [String: Double] = [:]
+        for (dim, val) in dimensions {
+            snap[dim.rawValue] = val
+        }
+        return snap
     }
 }
 

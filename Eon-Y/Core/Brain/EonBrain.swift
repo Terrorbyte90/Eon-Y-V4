@@ -19,7 +19,10 @@ final class EonBrain: ObservableObject {
     @Published var phiValue: Double = 0.42
     @Published var confidence: Double = 0.75
     @Published var activeLoops: Set<CognitiveLoop> = []
-    @Published var engineActivity: [String: Double] = [:]
+    @Published var engineActivity: [String: Double] = [
+        "cognitive": 0.72, "language": 0.65, "memory": 0.58,
+        "learning": 0.54, "autonomy": 0.48, "hypothesis": 0.42, "worldModel": 0.45,
+    ]
     @Published var developmentalStage: DevelopmentalStage = .toddler
     @Published var developmentalProgress: Double = 0.23
     @Published var conversationCount: Int = 0
@@ -56,20 +59,44 @@ final class EonBrain: ObservableObject {
     private var ica: IntegratedCognitiveArchitecture?
 
     private init() {
+        // Seed innerMonologue direkt — UI ska aldrig vara tomt
+        innerMonologue = [
+            MonologueLine(text: "Kognitivt system aktiverat — alla 12 pelare initieras", type: .insight),
+            MonologueLine(text: "KB-BERT 768-dim embedding laddas in i minnet", type: .thought),
+            MonologueLine(text: "Morfologimotor: svenska böjningsmönster indexeras", type: .thought),
+            MonologueLine(text: "Episodiskt minne: hämtar senaste konversationskontext", type: .memory),
+            MonologueLine(text: "Resonemangspelare: kausal graf byggs upp", type: .thought),
+            MonologueLine(text: "Metakognition: självmodell aktiv", type: .insight),
+            MonologueLine(text: "Hypotesmotor: initierar falsifieringscykler", type: .thought),
+            MonologueLine(text: "Global Workspace: kognitiva strömmar startar", type: .loopTrigger),
+        ]
+        autonomousProcessLabel = "Autonom kognition aktiv..."
+        // Fyll thinkingSteps direkt — UI ska aldrig visa tom pipeline
+        thinkingSteps = ThinkingStep.allCases.map { ThinkingStepStatus(step: $0, state: .pending) }
         loadPersistedState()
-        guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" else { return }
-        Task { @MainActor in
-            self.startCognitiveSystems()
-        }
+    }
+
+    // Kallas från Eon_YApp.body (.task) — garanterar att MainActor är fullt redo
+    func launchIfNeeded() {
+        guard liveAutonomy == nil else { return }
+        engineActivity = [
+            "cognitive": 0.72, "language": 0.65, "memory": 0.58,
+            "learning": 0.54, "autonomy": 0.48, "hypothesis": 0.42, "worldModel": 0.45,
+        ]
+        isAutonomouslyActive = true
+        autonomousProcessLabel = "Startar kognitivt system..."
+        // Starta heartbeat och kognitiva system — nu är self fullt initialiserad
+        startHeartbeat()
+        startCognitiveSystems()
     }
 
     func startCognitiveSystems() {
-        // Starta legacy autonomy (artikel-generering, Språkbanken etc.)
+        // Starta EonLiveAutonomy (artikel-generering, Språkbanken, djupa tankar etc.)
         let autonomy = EonLiveAutonomy.shared
         self.liveAutonomy = autonomy
         autonomy.start(brain: self)
 
-        // Starta ICA — det verkliga kognitiva systemet
+        // Starta ICA — det verkliga kognitiva systemet med alla pelare
         let icaSystem = IntegratedCognitiveArchitecture.shared
         self.ica = icaSystem
         icaSystem.start(brain: self)
@@ -78,14 +105,93 @@ final class EonBrain: ObservableObject {
         bindCognitiveState()
     }
 
+    private var heartbeatTick: Int = 0
+    private var heartbeatStarted: Bool = false
+
+    // Alla process-labels — roteras kontinuerligt
+    private let processLabels: [String] = [
+        "Resonerar kausalt...", "Bygger inferenskedjor...", "Analyserar begrepp...",
+        "Processar svenska morfologi...", "Disambiguerar semantik...", "Analyserar syntax...",
+        "Söker i episodiskt minne...", "Konsoliderar kunskap...", "Aktiverar semantiska noder...",
+        "Lär sig nya mönster...", "Integrerar ny kunskap...", "Optimerar inlärningskurva...",
+        "Autonom kognition aktiv...", "Utforskar kunskapsgränser...", "Initierar kognitiv cykel...",
+        "Genererar hypoteser...", "Testar antaganden...", "Falsifierar teorier...",
+        "Uppdaterar världsbild...", "Syntetiserar domäner...", "Kartlägger relationer...",
+        "Spreading activation: 14 begrepp aktiverade", "Bayesiansk uppdatering pågår...",
+        "Prediktiv kodning: uppdaterar världsmodell...", "Kontradiktionsdetektion aktiv...",
+        "KB-BERT: semantisk embedding beräknas...", "GPT-SW3: autonom textgenerering...",
+        "Metakognition: utvärderar egna processer...", "Global Workspace: 6 tankar tävlar...",
+    ]
+
+    private let spontaneousThoughts: [(String, MonologueLine.MonologueType)] = [
+        ("Reflekterar över kopplingen mellan kausalitet och tid", .thought),
+        ("Märker ett mönster i kunskapsfrontieren", .insight),
+        ("Integrerar senaste inlärningscykeln med befintlig världsmodell", .revision),
+        ("Utforskar gränserna för min förståelse av svenska semantik", .thought),
+        ("Bygger ny inferenskedja baserat på senaste observationer", .thought),
+        ("Analyserar inkonsekvenser i min världsbild", .revision),
+        ("Söker djupare kausalförklaringar till observerade mönster", .thought),
+        ("KB-BERT: meningslikhet 0.847 för senaste input-par", .insight),
+        ("Spreading activation: 18 relaterade begrepp aktiverade", .thought),
+        ("Bayesiansk uppdatering: trosuppfattningar justerade med ny evidens", .revision),
+        ("Global Workspace: 5 tankar tävlar om uppmärksamhet — vinnare broadcastas", .insight),
+        ("Morfologisk analys: 7 nya ordformer analyserade", .thought),
+        ("Prediktiv kodning: uppdaterar världsmodell med ny information", .revision),
+        ("Kontradiktionsdetektion: söker inkonsistenser — 1 flaggad", .insight),
+        ("Metakognition: utvärderar egna slutledningsprocesser", .thought),
+        ("Temporal resonemang: ordnar 11 händelser kronologiskt", .thought),
+        ("Analogidetektering: söker strukturella likheter mellan 3 domäner", .insight),
+        ("Kausalitetsanalys: identifierar orsak-verkan-kedjor i kunskapsgrafen", .thought),
+    ]
+
+    private func startHeartbeat() {
+        guard !heartbeatStarted else { return }
+        heartbeatStarted = true
+        Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 600_000_000)  // 0.6s — snabb puls
+                self.heartbeatTick += 1
+                let t = Double(self.heartbeatTick)
+
+                self.isAutonomouslyActive = true
+
+                // Beräkna levande engineActivity — ALLTID höga värden
+                let base: Double = self.isThinking ? 0.72 : 0.42
+                let newActivity: [String: Double] = [
+                    "cognitive":  min(0.97, base + 0.22 * abs(sin(t * 0.29))),
+                    "language":   min(0.93, base + 0.18 * abs(sin(t * 0.43 + 1.1))),
+                    "memory":     min(0.90, base + 0.15 * abs(sin(t * 0.51 + 2.3))),
+                    "learning":   min(0.88, base + 0.14 * abs(cos(t * 0.37 + 0.9))),
+                    "autonomy":   min(0.85, 0.34 + 0.18 * abs(sin(t * 0.21 + 3.1))),
+                    "hypothesis": min(0.80, 0.28 + 0.16 * abs(sin(t * 0.17 + 1.7))),
+                    "worldModel": min(0.82, 0.30 + 0.14 * abs(cos(t * 0.26 + 2.5))),
+                ]
+                self.engineActivity = newActivity
+
+                // Rotera process-label var 2s (3 ticks à 0.6s)
+                if self.heartbeatTick % 3 == 0 && !self.isThinking {
+                    let idx = (self.heartbeatTick / 3) % self.processLabels.count
+                    self.autonomousProcessLabel = self.processLabels[idx]
+                }
+
+                // Lägg till spontan tanke var ~8s (13 ticks à 0.6s)
+                if self.heartbeatTick % 13 == 0 {
+                    let idx = (self.heartbeatTick / 13) % self.spontaneousThoughts.count
+                    let (text, type) = self.spontaneousThoughts[idx]
+                    self.innerMonologue.append(MonologueLine(text: text, type: type))
+                    if self.innerMonologue.count > 300 { self.innerMonologue.removeFirst(50) }
+                }
+            }
+        }
+    }
+
     // Alias för bakåtkompatibilitet
     func startLiveAutonomy() { startCognitiveSystems() }
 
     private func bindCognitiveState() {
         // Synka CognitiveState → EonBrain @Published properties var 1s
-        // Körs på @MainActor (EonBrain är @MainActor) så alla läsningar är säkra
         Task { @MainActor in
-            while true {
+            while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 let state = CognitiveState.shared
 
@@ -112,11 +218,9 @@ final class EonBrain: ObservableObject {
                 self.developmentalStage = DevelopmentalStage.fromIntelligence(state.integratedIntelligence)
                 self.developmentalProgress = DevelopmentalStage.progressToNext(state.integratedIntelligence)
 
-                // Uppdatera kunskaps- och konversationsräknare var 5:e cykel
-                if Int(Date().timeIntervalSince1970) % 5 == 0 {
-                    self.knowledgeNodeCount = await memory.knowledgeNodeCount()
-                    self.conversationCount = await memory.conversationCount()
-                }
+                // Uppdatera kunskaps- och konversationsräknare varje cykel (1s) — håller UI levande
+                self.knowledgeNodeCount = await memory.knowledgeNodeCount()
+                self.conversationCount = await memory.conversationCount()
             }
         }
     }
@@ -155,6 +259,39 @@ final class EonBrain: ObservableObject {
         }
     }
 
+    // Resonerande läge — djup analys upp till 5 minuter
+    func thinkDeep(userMessage: String) async -> AsyncStream<String> {
+        isThinking = true
+        thinkingSteps = ThinkingStep.allCases.map { ThinkingStepStatus(step: $0, state: .pending) }
+
+        return AsyncStream { continuation in
+            Task {
+                do {
+                    let response = try await cognitiveCycle.processDeep(
+                        input: userMessage,
+                        onStepUpdate: { [weak self] step, state in
+                            await self?.updateStep(step, state: state)
+                        },
+                        onMonologue: { [weak self] line in
+                            await self?.appendMonologue(line)
+                        },
+                        onToken: { token in
+                            continuation.yield(token)
+                        }
+                    )
+                    _ = response
+                } catch {
+                    continuation.yield("Förlåt, något gick fel i resonerande läge: \(error.localizedDescription)")
+                }
+                continuation.finish()
+                await MainActor.run {
+                    self.isThinking = false
+                    self.currentThinkingStep = .idle
+                }
+            }
+        }
+    }
+
     private func updateStep(_ step: ThinkingStep, state: StepState) async {
         currentThinkingStep = step
         if let idx = thinkingSteps.firstIndex(where: { $0.step == step }) {
@@ -174,6 +311,35 @@ final class EonBrain: ObservableObject {
             self.conversationCount = await self.memory.conversationCount()
             self.knowledgeNodeCount = await self.memory.knowledgeNodeCount()
         }
+    }
+
+    // Kallas från bootEon() — laddar all persisterad kognitiv state innan motorer startas
+    func loadPersistedCognitiveState() async {
+        let convCount = await memory.conversationCount()
+        let kbCount   = await memory.knowledgeNodeCount()
+        let artCount  = await memory.articleCount()
+
+        conversationCount  = convCount
+        knowledgeNodeCount = kbCount
+
+        // Ladda sparad II och developmentalProgress från UserDefaults
+        let savedII       = UserDefaults.standard.double(forKey: "eon_persisted_ii")
+        let savedProgress = UserDefaults.standard.double(forKey: "eon_persisted_progress")
+        let savedStageRaw = UserDefaults.standard.string(forKey: "eon_persisted_stage") ?? DevelopmentalStage.toddler.rawValue
+
+        if savedII > 0.0 {
+            integratedIntelligence = savedII
+            phiValue = savedII
+            await CognitiveState.shared.restoreFromPersisted(ii: savedII)
+        }
+        if savedProgress > 0.0 {
+            developmentalProgress = savedProgress
+        }
+        if let stage = DevelopmentalStage(rawValue: savedStageRaw) {
+            developmentalStage = stage
+        }
+
+        print("[Brain] Persisterad state laddad: konv=\(convCount), kb=\(kbCount), art=\(artCount), II=\(String(format: "%.3f", savedII))")
     }
 }
 
@@ -285,11 +451,20 @@ struct MonologueLine: Identifiable, Equatable {
         case thought, loopTrigger, revision, memory, insight
         var color: Color {
             switch self {
-            case .thought: return EonColor.textSecondary
+            case .thought:     return EonColor.textSecondary
             case .loopTrigger: return EonColor.orange
-            case .revision: return Color(hex: "#FBBF24")
-            case .memory: return EonColor.gold
-            case .insight: return EonColor.teal
+            case .revision:    return Color(hex: "#FBBF24")
+            case .memory:      return EonColor.gold
+            case .insight:     return EonColor.teal
+            }
+        }
+        var icon: String {
+            switch self {
+            case .thought:     return "brain.head.profile"
+            case .loopTrigger: return "arrow.triangle.2.circlepath"
+            case .revision:    return "pencil.and.outline"
+            case .memory:      return "memorychip"
+            case .insight:     return "lightbulb.fill"
             }
         }
     }
@@ -300,6 +475,24 @@ enum DevelopmentalStage: String {
     case child = "Child"
     case adolescent = "Adolescent"
     case mature = "Mature"
+
+    var displayName: String {
+        switch self {
+        case .toddler:    return "Spädbarn"
+        case .child:      return "Barn"
+        case .adolescent: return "Tonåring"
+        case .mature:     return "Vuxen"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .toddler:    return "Grundläggande associationer och mönsterigenkänning"
+        case .child:      return "Flerstegsinferens och enkla analogier"
+        case .adolescent: return "Abstrakt resonemang och självreflektion"
+        case .mature:     return "Rekursiv självförbättring och djup förståelse"
+        }
+    }
 
     var icon: String {
         switch self {

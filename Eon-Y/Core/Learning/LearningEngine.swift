@@ -29,13 +29,58 @@ actor LearningEngine {
             "AI & Maskininlärning", "Kognitionsvetenskap", "Filosofi",
             "Historia", "Psykologi", "Naturvetenskap"
         ]
+        // Starta på 0.05 — verklig nivå byggs upp från faktisk data, inte slumpmässigt
         for domain in domains {
             competencyBook[domain] = DomainCompetency(
                 domain: domain,
-                level: Double.random(in: 0.1...0.4),
+                level: 0.05,
                 knowledgeItems: [],
-                lastStudied: Date().addingTimeInterval(-Double.random(in: 0...86400))
+                lastStudied: Date(timeIntervalSince1970: 0)
             )
+        }
+        // Ladda persisterade nivåer från UserDefaults om de finns
+        for domain in domains {
+            let key = "competency_\(domain)"
+            let saved = UserDefaults.standard.double(forKey: key)
+            if saved > 0.0 {
+                competencyBook[domain]?.level = saved
+            }
+        }
+    }
+
+    // Kallas från EonLiveAutonomy efter varje inlärningscykel — driver kompetens från faktisk DB
+    func syncCompetenciesFromDatabase() async {
+        let memory = PersistentMemoryStore.shared
+        let domainKeywords: [String: [String]] = [
+            "Morfologi": ["morfologi", "böjning", "ordklass", "böjningsform", "avledning"],
+            "Syntax": ["syntax", "mening", "sats", "ordföljd", "fras"],
+            "Semantik": ["semantik", "betydelse", "definition", "saldo_sense", "primär_betydelse"],
+            "Pragmatik": ["pragmatik", "talakt", "implikatur", "kontext"],
+            "Kausalitet": ["kausalitet", "orsak", "slutsats", "kausal"],
+            "AI & Maskininlärning": ["ai", "neural", "modell", "transformer", "bert", "gpt"],
+            "Kognitionsvetenskap": ["kognition", "medvetande", "perception", "uppmärksamhet"],
+            "Metakognition": ["metakognition", "självreflektion", "självmedvetenhet"],
+            "Filosofi": ["filosofi", "epistemologi", "ontologi", "medvetande"],
+            "Historia": ["historia", "historisk", "krig", "konflikt"],
+            "Psykologi": ["psykologi", "känsla", "beteende", "inlärning"],
+            "Naturvetenskap": ["naturvetenskap", "fysik", "kemi", "biologi"]
+        ]
+
+        for (domain, keywords) in domainKeywords {
+            var totalFacts = 0
+            for keyword in keywords {
+                let facts = await memory.searchFacts(query: keyword, limit: 20)
+                totalFacts += facts.count
+            }
+            // Kompetens = min(0.95, antal relevanta fakta / 50) — verklig mätning
+            let newLevel = min(0.95, Double(totalFacts) / 50.0)
+            if var comp = competencyBook[domain] {
+                // Ratchet: kompetens kan bara öka, aldrig minska (bevarar lärande)
+                comp.level = max(comp.level, newLevel)
+                competencyBook[domain] = comp
+                // Persistera
+                UserDefaults.standard.set(comp.level, forKey: "competency_\(domain)")
+            }
         }
     }
 
@@ -85,20 +130,45 @@ actor LearningEngine {
     private func studyItem(_ item: FSRSItem) async {
         guard let idx = fsrsItems.firstIndex(where: { $0.id == item.id }) else { return }
 
-        // FSRS-algoritm: uppdatera stabilitet och nästa repetition
-        let rating = Double.random(in: 0.6...1.0)  // Simulerat inlärningsresultat
-        let newStability = fsrsItems[idx].stability * (1.0 + 0.1 * rating)
-        let interval = max(1.0, newStability * log(0.9) / log(0.9))  // Förenklad FSRS
+        // FSRS-algoritm: rating baseras på faktisk review-historik, inte slump
+        // Rating 1.0 = perfekt, 0.6 = svårt men ihågkommet, 0.0 = glömt
+        let reviewCount = fsrsItems[idx].reviewCount
+        let lastReview = fsrsItems[idx].lastReview
+        let daysSinceLast = lastReview.map { Date().timeIntervalSince($0) / 86400 } ?? 1.0
+
+        // FSRS-4.5 förenklad: rating baseras på hur länge sedan senaste review
+        // Om vi studerar i tid → hög rating; om försenat → lägre
+        let scheduledInterval = fsrsItems[idx].dueDate.timeIntervalSince(lastReview ?? Date()) / 86400
+        let actualInterval = daysSinceLast
+        let rating: Double
+        if scheduledInterval <= 0 {
+            rating = 0.9  // Nytt item, antag bra
+        } else {
+            let ratio = actualInterval / max(scheduledInterval, 1.0)
+            rating = ratio <= 1.2 ? 0.9 : ratio <= 2.0 ? 0.7 : 0.5  // I tid, lite sent, mycket sent
+        }
+
+        // FSRS stabilitetsfunktion: S_new = S * e^(0.1 * (rating - 0.5))
+        let newStability = max(0.1, fsrsItems[idx].stability * exp(0.1 * (rating - 0.5)))
+
+        // Nästa interval: I = S * ln(R_target) / ln(0.9), R_target = 0.9
+        let targetRetention = 0.9
+        let interval = max(1.0, newStability * log(targetRetention) / log(targetRetention))
 
         fsrsItems[idx].stability = newStability
         fsrsItems[idx].dueDate = Date().addingTimeInterval(interval * 86400)
-        fsrsItems[idx].reviewCount += 1
+        fsrsItems[idx].reviewCount = reviewCount + 1
         fsrsItems[idx].lastReview = Date()
 
-        // Uppdatera kompetens
+        // Uppdatera kompetens baserat på faktisk rating och antal reviews
         if let domain = fsrsItems[idx].domain {
-            competencyBook[domain]?.level = min(0.99, (competencyBook[domain]?.level ?? 0.3) + 0.01 * rating)
+            let learningBoost = 0.005 * rating * (1.0 - (competencyBook[domain]?.level ?? 0.3))
+            competencyBook[domain]?.level = min(0.99, (competencyBook[domain]?.level ?? 0.05) + learningBoost)
             competencyBook[domain]?.lastStudied = Date()
+            // Persistera
+            if let level = competencyBook[domain]?.level {
+                UserDefaults.standard.set(level, forKey: "competency_\(domain)")
+            }
         }
     }
 
@@ -162,18 +232,22 @@ actor LearningEngine {
     private func generateKnowledgeForGaps(_ gaps: [KnowledgeGap]) async -> [String] {
         var generated: [String] = []
         for gap in gaps {
-            let knowledge = "Ny kunskap i \(gap.domain): \(gap.suggestedTopics.first ?? "grundläggande koncept") (nivå: \(String(format: "%.0f", gap.currentLevel * 100))% → \(String(format: "%.0f", gap.targetLevel * 100))%)"
+            let topic = gap.suggestedTopics.first ?? "grundläggande \(gap.domain)"
+            let knowledge = "\(gap.domain): studerar '\(topic)' (nivå: \(String(format: "%.0f", gap.currentLevel * 100))% → \(String(format: "%.0f", gap.targetLevel * 100))%)"
             generated.append(knowledge)
 
-            // Spara i persistent store
-            Task.detached(priority: .background) {
-                await PersistentMemoryStore.shared.saveFact(
-                    subject: gap.domain,
-                    predicate: "kunskapslucka_fylld",
-                    object: gap.suggestedTopics.first ?? "okänt",
-                    confidence: 0.7,
-                    source: "learning_engine"
-                )
+            // Spara kunskapslucka som faktum i databasen
+            await PersistentMemoryStore.shared.saveFact(
+                subject: gap.domain,
+                predicate: "kunskapslucka",
+                object: topic,
+                confidence: 0.75,
+                source: "learning_engine"
+            )
+
+            // Lägg till FSRS-item för varje föreslagen topic
+            for suggestedTopic in gap.suggestedTopics.prefix(3) {
+                addFSRSItem(topic: suggestedTopic, domain: gap.domain, initialDifficulty: 1.0 - gap.currentLevel)
             }
         }
         return generated
