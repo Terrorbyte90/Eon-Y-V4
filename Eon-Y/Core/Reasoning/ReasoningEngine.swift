@@ -329,18 +329,23 @@ actor ReasoningEngine {
 
     // Uppdatera kausalgraf från faktiska SPO-fakta i databasen
     func enrichCausalGraphFromFacts() async {
+        // Hämta fakta utanför actor-kontexten (await-anrop)
         let facts = await PersistentMemoryStore.shared.recentFactsWithConfidence(limit: 50)
-        var added = 0
-        for fact in facts {
-            let causalPredicates = ["orsakar", "leder_till", "påverkar", "förstärker", "hämmar", "möjliggör", "kräver", "ger_upphov_till"]
-            if causalPredicates.contains(fact.predicate.lowercased()) {
-                let strength: Double = fact.predicate.contains("hämmar") ? -fact.confidence : fact.confidence
-                causalGraph.addRelation(cause: fact.subject, effect: fact.object, strength: strength)
-                added += 1
-            }
+
+        // Filtrera kausala relationer lokalt — ingen mutation av actor-property under await
+        let causalPredicates = ["orsakar", "leder_till", "påverkar", "förstärker", "hämmar", "möjliggör", "kräver", "ger_upphov_till"]
+        let relations: [(cause: String, effect: String, strength: Double)] = facts.compactMap { fact in
+            guard causalPredicates.contains(fact.predicate.lowercased()) else { return nil }
+            let strength: Double = fact.predicate.contains("hämmar") ? -fact.confidence : fact.confidence
+            return (fact.subject, fact.object, strength)
         }
-        if added > 0 {
-            print("[ReasoningEngine] Kausalgraf berikad med \(added) fakta-relationer (totalt \(causalGraph.nodeCount) noder)")
+
+        // Uppdatera grafen synkront inom actor-isoleringen (ingen inout-problematik)
+        for rel in relations {
+            causalGraph.addRelation(cause: rel.cause, effect: rel.effect, strength: rel.strength)
+        }
+        if !relations.isEmpty {
+            print("[ReasoningEngine] Kausalgraf berikad med \(relations.count) fakta-relationer (totalt \(causalGraph.nodeCount) noder)")
         }
     }
 
@@ -460,14 +465,16 @@ actor ReasoningEngine {
 
 // MARK: - Kausalgraf
 
-struct CausalGraph {
+// CausalGraph är en class (referenstyp) så att addRelation inte kräver mutating/inout.
+// Det gör att actor-isolerade properties kan anropas utan problem i async-kontext.
+final class CausalGraph {
     private var relations: [CausalRelation] = []
 
     var nodeCount: Int {
         Set(relations.flatMap { [$0.cause, $0.effect] }).count
     }
 
-    mutating func addRelation(cause: String, effect: String, strength: Double) {
+    func addRelation(cause: String, effect: String, strength: Double) {
         relations.append(CausalRelation(cause: cause, effect: effect, strength: strength))
     }
 
