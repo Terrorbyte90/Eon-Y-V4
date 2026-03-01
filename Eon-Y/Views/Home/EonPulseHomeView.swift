@@ -13,6 +13,7 @@ struct EonPulseHomeView: View {
     @State private var orbPulse: CGFloat = 1.0
     @State private var particles: [HomeParticle] = HomeParticle.generate(count: 20)
     @State private var showContent = false
+    @State private var showCognitionLog = false
 
     var body: some View {
         // TimelineView uppdaterar varje sekund — garanterar att UI alltid ritas om
@@ -296,6 +297,34 @@ struct EonPulseHomeView: View {
                 }
             }
             .padding(.bottom, 6)
+
+            // Knapp: Visa hela loggen
+            Button {
+                showCognitionLog = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 10))
+                    Text("Visa sparad logg")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    Spacer()
+                    Text(CognitionLogger.shared.fileSizeString)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.3))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+                .foregroundStyle(Color(hex: "#34D399").opacity(0.7))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color(hex: "#34D399").opacity(0.05))
+            }
+            .sheet(isPresented: $showCognitionLog) {
+                CognitionLogView()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
         }
         .background(glassCard(accent: Color(hex: "#34D399")))
     }

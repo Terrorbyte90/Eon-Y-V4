@@ -60,7 +60,6 @@
 		AA000030AA000030AA000030 /* Exceptions for "Eon-Y" folder in "Eon-Y" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				"Eon-Y.entitlements",
 				Info.plist,
 				Models/BatchCosineSimilarity.mlpackage,
 				Models/ComplexityEstimator.mlpackage,

@@ -80,6 +80,33 @@ final class EonBrain: ObservableObject {
         // Fyll thinkingSteps direkt — UI ska aldrig visa tom pipeline
         thinkingSteps = ThinkingStep.allCases.map { ThinkingStepStatus(step: $0, state: .pending) }
         loadPersistedState()
+        // Observera innerMonologue — logga automatiskt varje ny rad till fil
+        startMonologueLogging()
+    }
+
+    private var lastLoggedMonologueCount: Int = 0
+
+    private func startMonologueLogging() {
+        $innerMonologue
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] lines in
+                guard let self, !self.isPreviewInstance else { return }
+                guard lines.count > self.lastLoggedMonologueCount else { return }
+                let newLines = lines.suffix(lines.count - self.lastLoggedMonologueCount)
+                self.lastLoggedMonologueCount = lines.count
+                for line in newLines {
+                    let typeLabel: String
+                    switch line.type {
+                    case .thought:     typeLabel = "TANKE"
+                    case .loopTrigger: typeLabel = "LOOP"
+                    case .revision:    typeLabel = "REVISION"
+                    case .memory:      typeLabel = "MINNE"
+                    case .insight:     typeLabel = "INSIKT"
+                    }
+                    CognitionLogger.shared.append(text: line.text, type: typeLabel)
+                }
+            }
+            .store(in: &cancellables)
     }
 
     // Lätt preview-instans — inga motorer, ingen DB, ingen SQLite
@@ -97,6 +124,22 @@ final class EonBrain: ObservableObject {
             "learning": 0.49, "autonomy": 0.43, "hypothesis": 0.38, "worldModel": 0.41,
         ]
         return b
+    }
+
+    // Lägg till en rad i innerMonologue och spara till loggfil
+    func appendMonologue(_ line: MonologueLine) {
+        innerMonologue.append(line)
+        if innerMonologue.count > 500 { innerMonologue.removeFirst(100) }
+        guard !isPreviewInstance else { return }
+        let typeLabel: String
+        switch line.type {
+        case .thought:     typeLabel = "TANKE"
+        case .loopTrigger: typeLabel = "LOOP"
+        case .revision:    typeLabel = "REVISION"
+        case .memory:      typeLabel = "MINNE"
+        case .insight:     typeLabel = "INSIKT"
+        }
+        CognitionLogger.shared.append(text: line.text, type: typeLabel)
     }
 
     // Kallas från Eon_YApp.body (.task) — garanterar att MainActor är fullt redo
