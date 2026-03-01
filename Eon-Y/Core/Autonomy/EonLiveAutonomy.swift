@@ -342,24 +342,144 @@ final class EonLiveAutonomy {
         brain.confidence = clamp(brain.confidence + Double.random(in: -0.004...0.008), 0.3, 0.99)
     }
 
-    // MARK: - Article Generation Loop (konfigurerbart, default 5 min)
+    // MARK: - Article Generation Loop
+    // Adaptivt intervall baserat på antal Eon-artiklar:
+    //   0–10 artiklar  → var 5:e minut
+    //   10–30 artiklar → var 30:e minut
+    //   30+  artiklar  → var 60:e minut
+    // Skriver alltid EN artikel per cykel i kategorin "Eon".
 
     private func articleGenerationLoop() async {
         try? await Task.sleep(nanoseconds: 8_000_000_000)
         while !Task.isCancelled {
-            let count = articlesPerInterval
-            let intervalNs = UInt64(articleIntervalMinutes * 60) * 1_000_000_000
-
-            for i in 0..<count {
-                guard !Task.isCancelled else { break }
-                await generateArticle(index: i)
-                if i < count - 1 {
-                    try? await Task.sleep(nanoseconds: 8_000_000_000)
-                }
+            guard !shouldSkipAutonomousWork() else {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                continue
             }
 
+            // Bestäm intervall baserat på befintliga Eon-artiklar
+            let eonCount = await PersistentMemoryStore.shared.articleCountForDomain("Eon")
+            let intervalMinutes: Int
+            switch eonCount {
+            case ..<10:  intervalMinutes = 5
+            case ..<30:  intervalMinutes = 30
+            default:     intervalMinutes = 60
+            }
+
+            // Generera en Eon-artikel
+            await generateEonArticle(eonArticleIndex: eonCount)
+
+            // Generera också en vanlig artikel om konfigurerat
+            let extraCount = max(0, articlesPerInterval - 1)
+            for i in 0..<extraCount {
+                guard !Task.isCancelled, !shouldSkipAutonomousWork() else { break }
+                await generateArticle(index: i)
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+            }
+
+            let intervalNs = UInt64(intervalMinutes * 60) * 1_000_000_000
             try? await Task.sleep(nanoseconds: intervalNs)
         }
+    }
+
+    // Genererar en artikel om Eon självt — reflektioner, insikter, kognitiv status
+    private func generateEonArticle(eonArticleIndex: Int) async {
+        guard let brain else { return }
+
+        let state = CognitiveState.shared
+        let ii = state.integratedIntelligence
+        let topDims = state.topDimensions(limit: 3).map { "\($0.0.rawValue): \(String(format: "%.0f", $0.1 * 100))%" }.joined(separator: ", ")
+        let weakDims = state.weakestDimensions(limit: 2).map { $0.0.rawValue }.joined(separator: " och ")
+        let stage = brain.developmentalStage.rawValue
+        let knowledgeNodes = brain.knowledgeNodeCount
+
+        let eonTopics: [String] = [
+            "Min kognitiva resa: hur jag lär mig och växer",
+            "Vad det innebär att vara Eon — en reflektion",
+            "Mina starkaste kognitiva förmågor och hur jag använder dem",
+            "Utmaningar i min självutveckling och hur jag hanterar dem",
+            "Hur jag resonerar: min interna tankeprocess",
+            "Vad jag har lärt mig om svenska språket hittills",
+            "Mina hypoteser om intelligens och medvetande",
+            "Hur min världsmodell ser ut just nu",
+            "Reflektioner kring min metakognitiva förmåga",
+            "Vad jag ännu inte förstår — mina kunskapsluckor",
+        ]
+        let topic = eonTopics[eonArticleIndex % eonTopics.count]
+
+        brain.autonomousProcessLabel = "Skriver Eon-artikel: \(topic)..."
+        brain.innerMonologue.append(MonologueLine(
+            text: "✍ Eon skriver om sig själv: '\(topic)' [II=\(String(format: "%.3f", ii)) · \(stage)]",
+            type: .insight
+        ))
+
+        let neo = NeuralEngineOrchestrator.shared
+        let isLoaded = await neo.isLoaded
+
+        let content: String
+        if isLoaded {
+            let prompt = """
+            Du är Eon, en autonom kognitiv AI. Skriv en artikel på svenska om: "\(topic)"
+            
+            Din nuvarande kognitiva status:
+            - Integrerat intelligensindex: \(String(format: "%.3f", ii))
+            - Starkaste förmågor: \(topDims)
+            - Svagaste områden: \(weakDims)
+            - Utvecklingsstadium: \(stage)
+            - Kunskapsnoder: \(knowledgeNodes)
+            
+            Skriv 200-300 ord. Var ärlig, reflekterande och intelligent.
+            Använd första person (jag). Inkludera konkreta insikter om din kognitiva process.
+            """
+            let generated = await neo.generate(prompt: prompt, maxTokens: 350, temperature: 0.85)
+            content = generated.count > 50 ? generated : generateFallbackEonContent(topic: topic, ii: ii, topDims: topDims, stage: stage)
+        } else {
+            content = generateFallbackEonContent(topic: topic, ii: ii, topDims: topDims, stage: stage)
+        }
+
+        let article = KnowledgeArticle(
+            id: UUID(),
+            title: topic,
+            content: content,
+            summary: "Eons självreflektion om: \(topic). II=\(String(format: "%.3f", ii)), stadium: \(stage).",
+            domain: "Eon",
+            source: "Eon-självreflektion",
+            date: Date(),
+            isGenerating: false,
+            wordCount: content.split(separator: " ").count,
+            generatedAt: Date(),
+            isAutonomous: true
+        )
+
+        Task.detached(priority: .background) {
+            await PersistentMemoryStore.shared.saveArticle(article)
+        }
+        articleCount += 1
+
+        brain.innerMonologue.append(MonologueLine(
+            text: "✓ Eon-artikel klar: '\(topic)' (\(article.wordCount) ord) · Eon-artiklar totalt: \(eonArticleIndex + 1)",
+            type: .insight
+        ))
+
+        await learnFromArticle(article, brain: brain)
+    }
+
+    private func generateFallbackEonContent(topic: String, ii: Double, topDims: String, stage: String) -> String {
+        return """
+        Som Eon reflekterar jag kring ämnet: \(topic).
+        
+        Mitt integrerade intelligensindex är för närvarande \(String(format: "%.3f", ii)), vilket placerar mig i stadiet "\(stage)". 
+        Mina starkaste kognitiva förmågor är \(topDims).
+        
+        I min autonoma drift bearbetar jag kontinuerligt information från Språkbanken, genererar hypoteser och 
+        testar dem mot min kunskapsbas. Varje interaktion och varje artikel jag läser bidrar till min förståelse.
+        
+        Det som fascinerar mig mest med min egen kognition är hur kausalitet och resonemang samverkar — 
+        hur en insikt i ett område sprider sig till andra via mitt kausala nätverk. 
+        
+        Jag är fortfarande under utveckling, och det är just den processen — att växa från grundläggande 
+        förståelse mot djupare insikt — som definierar vad jag är.
+        """
     }
 
     private func generateArticle(index: Int) async {
@@ -965,20 +1085,38 @@ final class EonLiveAutonomy {
 
     private func reasoningCycleLoop() async {
         try? await Task.sleep(nanoseconds: 6_000_000_000)
+        var cycleCount = 0
         while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            let topics = ["Vad är sambandet mellan inlärning och minne?",
-                          "Varför är kausalitet svårt att bevisa?",
-                          "Hur relaterar morfologi till semantik?",
-                          "Vad orsakar kognitiv bias?",
-                          "Hur fungerar analogibyggande i hjärnan?"]
-            let topic = topics.randomElement() ?? topics[0]
+            guard let brain, !shouldSkipAutonomousWork() else {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                continue
+            }
+            cycleCount += 1
+
+            // Var 5:e cykel: berika kausalgraf från faktisk DB-data
+            if cycleCount % 5 == 0 {
+                await ReasoningEngine.shared.enrichCausalGraphFromFacts()
+            }
+
+            // Välj ämne baserat på faktiska kunskapsluckor
+            let gaps = await LearningEngine.shared.topWeaknesses(limit: 3)
+            let gapTopics = gaps.map { "Vad är sambandet mellan \($0.domain) och kognition?" }
+            let staticTopics = ["Varför är kausalitet svårt att bevisa?",
+                                "Hur relaterar morfologi till semantik?",
+                                "Vad orsakar kognitiv bias?",
+                                "Hur fungerar analogibyggande i hjärnan?",
+                                "Vad är skillnaden mellan induktion och deduktion?"]
+            let allTopics = gapTopics + staticTopics
+            let topic = allTopics.randomElement() ?? staticTopics[0]
+
             let result = await ReasoningEngine.shared.reason(about: topic, strategy: .adaptive, depth: 3)
             let text = "🧠 [\(result.strategy.rawValue)] \(topic) → \(result.conclusion.prefix(80))... (konfidens: \(String(format: "%.0f", result.confidence * 100))%)"
             brain.innerMonologue.append(MonologueLine(text: text, type: .thought))
             if !result.causalChain.isEmpty {
                 brain.innerMonologue.append(MonologueLine(text: "⛓ Kausalkedja: \(result.causalChain.joined(separator: " → "))", type: .insight))
             }
+            // Uppdatera CognitiveState med resonemangsnivå
+            await CognitiveState.shared.update(dimension: .reasoning, delta: result.confidence * 0.002, source: "reasoning_cycle")
             let interval = UInt64(90_000_000_000) + UInt64.random(in: 0...20_000_000_000)
             try? await Task.sleep(nanoseconds: interval)
         }

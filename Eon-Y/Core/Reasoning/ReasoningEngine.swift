@@ -303,17 +303,45 @@ actor ReasoningEngine {
     // MARK: - Kausalgraf
 
     private func buildInitialCausalGraph() {
-        // Grundläggande kausala relationer
-        causalGraph.addRelation(cause: "Inlärning", effect: "Kompetens", strength: 0.9)
-        causalGraph.addRelation(cause: "Kompetens", effect: "Prestation", strength: 0.85)
-        causalGraph.addRelation(cause: "Nyfikenhet", effect: "Inlärning", strength: 0.8)
-        causalGraph.addRelation(cause: "Motivation", effect: "Nyfikenhet", strength: 0.75)
-        causalGraph.addRelation(cause: "Feedback", effect: "Inlärning", strength: 0.7)
-        causalGraph.addRelation(cause: "Stress", effect: "Prestation", strength: -0.6)
-        causalGraph.addRelation(cause: "Sömn", effect: "Kognition", strength: 0.85)
-        causalGraph.addRelation(cause: "Kognition", effect: "Resonemang", strength: 0.9)
-        causalGraph.addRelation(cause: "Resonemang", effect: "Förståelse", strength: 0.88)
-        causalGraph.addRelation(cause: "Förståelse", effect: "Kunskap", strength: 0.92)
+        // Grundläggande kausala relationer — utökad med fler kognitiva noder
+        causalGraph.addRelation(cause: "Inlärning",       effect: "Kompetens",      strength: 0.90)
+        causalGraph.addRelation(cause: "Kompetens",       effect: "Prestation",     strength: 0.85)
+        causalGraph.addRelation(cause: "Nyfikenhet",      effect: "Inlärning",      strength: 0.80)
+        causalGraph.addRelation(cause: "Motivation",      effect: "Nyfikenhet",     strength: 0.75)
+        causalGraph.addRelation(cause: "Feedback",        effect: "Inlärning",      strength: 0.70)
+        causalGraph.addRelation(cause: "Stress",          effect: "Prestation",     strength: -0.60)
+        causalGraph.addRelation(cause: "Sömn",            effect: "Kognition",      strength: 0.85)
+        causalGraph.addRelation(cause: "Kognition",       effect: "Resonemang",     strength: 0.90)
+        causalGraph.addRelation(cause: "Resonemang",      effect: "Förståelse",     strength: 0.88)
+        causalGraph.addRelation(cause: "Förståelse",      effect: "Kunskap",        strength: 0.92)
+        causalGraph.addRelation(cause: "Kunskap",         effect: "Kreativitet",    strength: 0.65)
+        causalGraph.addRelation(cause: "Kreativitet",     effect: "Innovation",     strength: 0.78)
+        causalGraph.addRelation(cause: "Metakognition",   effect: "Inlärning",      strength: 0.82)
+        causalGraph.addRelation(cause: "Metakognition",   effect: "Resonemang",     strength: 0.75)
+        causalGraph.addRelation(cause: "Kausalitet",      effect: "Förståelse",     strength: 0.80)
+        causalGraph.addRelation(cause: "Analogier",       effect: "Kreativitet",    strength: 0.70)
+        causalGraph.addRelation(cause: "Språk",           effect: "Tänkande",       strength: 0.85)
+        causalGraph.addRelation(cause: "Tänkande",        effect: "Problemlösning", strength: 0.88)
+        causalGraph.addRelation(cause: "Uppmärksamhet",   effect: "Inlärning",      strength: 0.78)
+        causalGraph.addRelation(cause: "Repetition",      effect: "Minne",          strength: 0.90)
+        causalGraph.addRelation(cause: "Minne",           effect: "Kunskap",        strength: 0.85)
+    }
+
+    // Uppdatera kausalgraf från faktiska SPO-fakta i databasen
+    func enrichCausalGraphFromFacts() async {
+        let facts = await PersistentMemoryStore.shared.recentFactsWithConfidence(limit: 50)
+        var added = 0
+        for fact in facts {
+            let causalPredicates = ["orsakar", "leder_till", "påverkar", "förstärker", "hämmar", "möjliggör", "kräver", "ger_upphov_till"]
+            if causalPredicates.contains(fact.predicate.lowercased()) {
+                let strength: Double = fact.predicate.contains("hämmar") ? -fact.confidence : fact.confidence
+                causalGraph.addRelation(cause: fact.subject, effect: fact.object, strength: strength)
+                added += 1
+            }
+        }
+        if added > 0 {
+            print("[ReasoningEngine] Kausalgraf berikad med \(added) fakta-relationer (totalt \(causalGraph.nodeCount) noder)")
+        }
     }
 
     // MARK: - Hjälpfunktioner
