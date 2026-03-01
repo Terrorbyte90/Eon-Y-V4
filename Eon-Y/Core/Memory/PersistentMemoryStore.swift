@@ -1,8 +1,9 @@
 import Foundation
 import SQLite3
 
-// SQLITE_TRANSIENT är ett C-makro som Swift inte importerar direkt
-private let SQLITE_TRANSIENT_FUNC = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+// SQLITE_TRANSIENT är ett C-makro som Swift inte importerar direkt.
+// Definieras som internal (ej private) så att actor-metoder kan nå den.
+let SQLITE_TRANSIENT_FUNC = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 // Säker helper: returnerar "" om sqlite3_column_text ger NULL (undviker EXC_BREAKPOINT)
 private func sqlText(_ stmt: OpaquePointer?, _ col: Int32) -> String {
@@ -27,8 +28,14 @@ actor PersistentMemoryStore {
     // MARK: - Schema setup
 
     private func setupDatabase() {
-        guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
-            print("[Memory] Kunde inte öppna databas: \(dbPath)")
+        // Försök öppna — om det misslyckas, försök med en in-memory databas som fallback
+        var openResult = sqlite3_open(dbPath, &db)
+        if openResult != SQLITE_OK {
+            print("[Memory] Kunde inte öppna databas på disk (\(dbPath)): \(openResult) — försöker in-memory")
+            openResult = sqlite3_open(":memory:", &db)
+        }
+        guard openResult == SQLITE_OK, db != nil else {
+            print("[Memory] KRITISKT: Kunde inte öppna databas alls")
             return
         }
         execute("PRAGMA journal_mode=WAL")
@@ -38,6 +45,9 @@ actor PersistentMemoryStore {
         createTables()
         print("[Memory] Databas initierad: \(dbPath)")
     }
+
+    // Returnerar true om databasen är redo att användas
+    private var isReady: Bool { db != nil }
 
     private func createTables() {
         execute("""
@@ -178,6 +188,7 @@ actor PersistentMemoryStore {
 
     @discardableResult
     func saveMessage(role: String, content: String, sessionId: String, confidence: Double = 0.75, emotion: String = "neutral") -> Bool {
+        guard isReady else { return false }
         let sql = """
             INSERT INTO conversations (session_id, role, content, confidence, emotion, timestamp, importance)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -207,6 +218,7 @@ actor PersistentMemoryStore {
     }
 
     func searchConversations(query: String, limit: Int = 10) -> [ConversationRecord] {
+        guard isReady else { return [] }
         var results: [ConversationRecord] = []
         let sql = """
             SELECT c.id, c.role, c.content, c.timestamp, c.confidence, c.emotion
@@ -237,6 +249,7 @@ actor PersistentMemoryStore {
     func getRecentConversation(limit: Int = 8) -> [ConversationRecord] { recentConversations(limit: limit) }
 
     func recentConversations(limit: Int = 50) -> [ConversationRecord] {
+        guard isReady else { return [] }
         var results: [ConversationRecord] = []
         let sql = "SELECT id, role, content, timestamp, confidence, emotion FROM conversations ORDER BY timestamp DESC LIMIT ?"
         var stmt: OpaquePointer?
@@ -261,6 +274,7 @@ actor PersistentMemoryStore {
 
     @discardableResult
     func saveFact(subject: String, predicate: String, object: String, confidence: Double = 0.7, source: String? = nil) -> Bool {
+        guard isReady else { return false }
         let sql = """
             INSERT OR REPLACE INTO facts (subject, predicate, object, confidence, source, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -290,6 +304,7 @@ actor PersistentMemoryStore {
     }
 
     func factsAbout(subject: String) -> [(predicate: String, object: String, confidence: Double)] {
+        guard isReady else { return [] }
         var results: [(String, String, Double)] = []
         let sql = "SELECT predicate, object, confidence FROM facts WHERE subject = ? ORDER BY confidence DESC LIMIT 20"
         var stmt: OpaquePointer?
@@ -306,6 +321,7 @@ actor PersistentMemoryStore {
     // MARK: - WSD Profile
 
     func updateWSDProfile(word: String, sense: String) {
+        guard isReady else { return }
         let sql = """
             INSERT INTO wsd_profile (word, preferred_sense, occurrence_count, last_seen)
             VALUES (?, ?, 1, ?)
@@ -329,6 +345,7 @@ actor PersistentMemoryStore {
     }
 
     func preferredSense(for word: String) -> String? {
+        guard isReady else { return nil }
         let sql = "SELECT preferred_sense FROM wsd_profile WHERE word = ? ORDER BY occurrence_count DESC LIMIT 1"
         var stmt: OpaquePointer?
         var result: String? = nil
@@ -345,6 +362,7 @@ actor PersistentMemoryStore {
     // MARK: - Stats
 
     func conversationCount() -> Int {
+        guard isReady else { return 0 }
         var count = 0
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM conversations WHERE role = 'user'", -1, &stmt, nil) == SQLITE_OK {
@@ -356,6 +374,7 @@ actor PersistentMemoryStore {
 
     // Antal fakta sparade sedan ett visst datum
     func factCountSince(_ date: Date) -> Int {
+        guard isReady else { return 0 }
         var count = 0
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM facts WHERE created_at >= ?", -1, &stmt, nil) == SQLITE_OK {
@@ -368,6 +387,7 @@ actor PersistentMemoryStore {
 
     // Totalt antal ord i alla sparade konversationer (räknar content-kolumnen)
     func totalWordCount() -> Int {
+        guard isReady else { return 0 }
         var count = 0
         var stmt: OpaquePointer?
         // Räknar mellanslag+1 per rad som approximation för ordantal
@@ -381,6 +401,7 @@ actor PersistentMemoryStore {
 
     // Räknar faktiska kunskapsnoder: fakta + artiklar
     func knowledgeNodeCount() -> Int {
+        guard isReady else { return 0 }
         var factCount = 0
         var articleCount = 0
         var stmt: OpaquePointer?
@@ -398,6 +419,7 @@ actor PersistentMemoryStore {
 
     @discardableResult
     func saveEvalResult(correctness: Double, depth: Double, selfKnowledge: Double, adaptivity: Double, loraVersion: Int, config: String) -> Bool {
+        guard isReady else { return false }
         let sql = """
             INSERT INTO eval_results (run_date, correctness, depth, self_knowledge, adaptivity, lora_version, config)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -422,6 +444,7 @@ actor PersistentMemoryStore {
     }
 
     func recentEvalResults(limit: Int = 14) -> [EvalResult] {
+        guard isReady else { return [] }
         var results: [EvalResult] = []
         let sql = "SELECT run_date, correctness, depth, self_knowledge, adaptivity, lora_version FROM eval_results ORDER BY run_date DESC LIMIT ?"
         var stmt: OpaquePointer?
@@ -446,6 +469,7 @@ actor PersistentMemoryStore {
 
     @discardableResult
     func saveArticle(_ article: KnowledgeArticle) -> Bool {
+        guard isReady else { return false }
         let sql = """
             INSERT OR REPLACE INTO articles
                 (id, title, content, summary, domain, source, is_autonomous, created_at)
@@ -472,6 +496,7 @@ actor PersistentMemoryStore {
     }
 
     func loadAllArticles(limit: Int = 500) -> [KnowledgeArticle] {
+        guard isReady else { return [] }
         var results: [KnowledgeArticle] = []
         let sql = "SELECT id, title, content, summary, domain, source, is_autonomous, created_at FROM articles ORDER BY created_at DESC LIMIT ?"
         var stmt: OpaquePointer?
@@ -501,6 +526,7 @@ actor PersistentMemoryStore {
     }
 
     func articleCount() -> Int {
+        guard isReady else { return 0 }
         var count = 0
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM articles", -1, &stmt, nil) == SQLITE_OK {
@@ -511,6 +537,7 @@ actor PersistentMemoryStore {
     }
 
     func factCount() -> Int {
+        guard isReady else { return 0 }
         var count = 0
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM facts", -1, &stmt, nil) == SQLITE_OK {
@@ -521,6 +548,7 @@ actor PersistentMemoryStore {
     }
 
     func pruneOldFacts(olderThan days: Int, minConfidence: Double) {
+        guard isReady else { return }
         let cutoff = Date().timeIntervalSince1970 - Double(days) * 86400
         let sql = "DELETE FROM facts WHERE created_at < ? AND confidence < ?"
         var stmt: OpaquePointer?
@@ -540,6 +568,7 @@ actor PersistentMemoryStore {
     }
 
     func recentUserMessages(limit: Int = 10) -> [String] {
+        guard isReady else { return [] }
         var results: [String] = []
         let sql = "SELECT content FROM conversations WHERE role = 'user' ORDER BY timestamp DESC LIMIT ?"
         var stmt: OpaquePointer?
@@ -554,6 +583,7 @@ actor PersistentMemoryStore {
     }
 
     func randomArticles(limit: Int = 3) -> [KnowledgeArticle] {
+        guard isReady else { return [] }
         var results: [KnowledgeArticle] = []
         let sql = "SELECT id, title, content, summary, domain, source, is_autonomous, created_at FROM articles ORDER BY RANDOM() LIMIT ?"
         var stmt: OpaquePointer?
@@ -580,25 +610,40 @@ actor PersistentMemoryStore {
     // MARK: - Search facts by keyword
 
     func searchFacts(query: String, limit: Int = 5) -> [(subject: String, predicate: String, object: String)] {
+        guard isReady else { return [] }
         var results: [(String, String, String)] = []
-        let keywords = query.lowercased().split(separator: " ").filter { $0.count > 3 }.map(String.init)
+        let keywords = Array(query.lowercased()
+            .split(separator: " ")
+            .filter { $0.count > 3 }
+            .map(String.init)
+            .prefix(3))
         guard !keywords.isEmpty else { return [] }
-        let likeClause = keywords.prefix(3).map { _ in "(subject LIKE ? OR object LIKE ?)" }.joined(separator: " OR ")
+
+        let likeClause = keywords.map { _ in "(subject LIKE ? OR object LIKE ?)" }.joined(separator: " OR ")
         let sql = "SELECT subject, predicate, object FROM facts WHERE \(likeClause) ORDER BY confidence DESC LIMIT ?"
+        let patterns: [String] = keywords.map { "%\($0)%" }
+
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            var idx: Int32 = 1
-            for kw in keywords.prefix(3) {
-                let pattern = "%\(kw)%"
-                sqlite3_bind_text(stmt, idx, pattern, -1, SQLITE_TRANSIENT_FUNC); idx += 1
-                sqlite3_bind_text(stmt, idx, pattern, -1, SQLITE_TRANSIENT_FUNC); idx += 1
-            }
-            sqlite3_bind_int(stmt, idx, Int32(limit))
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                results.append((sqlText(stmt, 0), sqlText(stmt, 1), sqlText(stmt, 2)))
-            }
-        } else {
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             print("[Memory] searchFacts prepare fel: \(String(cString: sqlite3_errmsg(db)))")
+            return []
+        }
+
+        var idx: Int32 = 1
+        for pattern in patterns {
+            pattern.withCString { ptr in
+                sqlite3_bind_text(stmt, idx, ptr, -1, SQLITE_TRANSIENT_FUNC)
+            }
+            idx += 1
+            pattern.withCString { ptr in
+                sqlite3_bind_text(stmt, idx, ptr, -1, SQLITE_TRANSIENT_FUNC)
+            }
+            idx += 1
+        }
+        sqlite3_bind_int(stmt, idx, Int32(limit))
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            results.append((sqlText(stmt, 0), sqlText(stmt, 1), sqlText(stmt, 2)))
         }
         sqlite3_finalize(stmt)
         return results
@@ -607,6 +652,7 @@ actor PersistentMemoryStore {
     // MARK: - Recent facts
 
     func recentFacts(limit: Int = 10) -> [(subject: String, predicate: String, object: String)] {
+        guard isReady else { return [] }
         var results: [(String, String, String)] = []
         let sql = "SELECT subject, predicate, object FROM facts ORDER BY created_at DESC LIMIT ?"
         var stmt: OpaquePointer?
@@ -624,6 +670,7 @@ actor PersistentMemoryStore {
 
     @discardableResult
     private func execute(_ sql: String) -> Bool {
+        guard db != nil else { return false }
         var errMsg: UnsafeMutablePointer<Int8>?
         let result = sqlite3_exec(db, sql, nil, nil, &errMsg)
         if result != SQLITE_OK, let msg = errMsg {
