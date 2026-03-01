@@ -140,6 +140,18 @@ actor CrossDomainAnalyzer {
         return insights.sorted { $0.articleTitles.count > $1.articleTitles.count }
     }
 
+    // MARK: - Public helpers for use by other systems
+
+    /// Public version of causal relation extraction
+    func extractCausalRelationsPublic(from text: String) -> [CausalRelation] {
+        return extractCausalRelations(from: text)
+    }
+
+    /// Public version of key concept extraction
+    func extractKeyConceptsPublic(from text: String) -> [String] {
+        return extractKeyConcepts(from: text)
+    }
+
     // MARK: - Private Helpers
 
     private func extractKeyConcepts(from text: String) -> [String] {

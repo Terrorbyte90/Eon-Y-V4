@@ -34,7 +34,7 @@ struct CreativeView: View {
                     VStack(spacing: 16) {
                         switch selectedSection {
                         case .problemSolver: ProblemSolverSection(engine: engine, brain: brain)
-                        case .letters: LetterSection(engine: engine)
+                        case .letters: LetterSection(engine: engine, brain: brain)
                         case .selfAwareness: SelfAwarenessSection(engine: engine, brain: brain)
                         case .emotions: EmotionSection(engine: engine, brain: brain)
                         case .drawing: DrawingSection(engine: engine)
@@ -448,6 +448,7 @@ struct ProblemSolverSection: View {
 
 struct LetterSection: View {
     @ObservedObject var engine: CreativeEngine
+    var brain: EonBrain
     @State private var isWriting = false
     @State private var letterSubject = ""
     @State private var letterBody = ""
@@ -474,7 +475,7 @@ struct LetterSection: View {
                     .buttonStyle(.plain)
                 }
 
-                Text("Skriv till Eon. Breven sparas och Eon svarar med substans.")
+                Text("Skriv till Eon. Breven sparas och Eon svarar med substans och eftertanke.")
                     .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.45))
 
@@ -499,7 +500,7 @@ struct LetterSection: View {
                             Spacer()
                             Button {
                                 guard !letterSubject.isEmpty && !letterBody.isEmpty else { return }
-                                engine.sendLetter(subject: letterSubject, body: letterBody)
+                                engine.sendLetter(subject: letterSubject, body: letterBody, brain: brain)
                                 letterSubject = ""
                                 letterBody = ""
                                 isWriting = false
@@ -523,6 +524,21 @@ struct LetterSection: View {
             }
             .padding(14)
             .glassMorphism(tint: EonColor.teal)
+
+            // Composing indicator
+            if engine.isComposingResponse {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .tint(EonColor.teal)
+                    Text("Eon funderar på sitt svar...")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(EonColor.teal)
+                    Spacer()
+                }
+                .padding(12)
+                .glassMorphism(tint: EonColor.teal)
+                .transition(.opacity.combined(with: .scale))
+            }
 
             // Letter list
             ForEach(engine.letters) { letter in
@@ -990,6 +1006,26 @@ struct DrawingSection: View {
                         .strokeBorder(engine.isDrawing ? EonColor.cyan.opacity(0.3) : Color.white.opacity(0.06), lineWidth: engine.isDrawing ? 1 : 0.5)
                 )
 
+                // Subject hints
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(["hjärta", "stjärna", "sol", "spiral", "träd", "hus", "öga"], id: \.self) { hint in
+                            Button {
+                                drawSubject = hint
+                            } label: {
+                                Text(hint)
+                                    .font(.system(size: 11, design: .rounded))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(Color.white.opacity(drawSubject == hint ? 0.12 : 0.04))
+                                    .cornerRadius(8)
+                                    .foregroundStyle(drawSubject == hint ? EonColor.cyan : Color.white.opacity(0.4))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
                 HStack {
                     TextField("Motiv (t.ex. hjärta, stjärna, cirkel)", text: $drawSubject)
                         .font(.system(size: 13, design: .rounded))
@@ -997,6 +1033,20 @@ struct DrawingSection: View {
                         .background(Color.white.opacity(0.04))
                         .cornerRadius(8)
                         .foregroundStyle(.white)
+
+                    if !engine.drawingCanvas.isEmpty && !engine.isDrawing {
+                        Button {
+                            engine.clearCanvas()
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 13))
+                                .padding(10)
+                                .background(Color.white.opacity(0.06))
+                                .cornerRadius(8)
+                                .foregroundStyle(Color.white.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
+                    }
 
                     Button {
                         guard !drawSubject.isEmpty else { return }
@@ -1013,11 +1063,43 @@ struct DrawingSection: View {
                     .buttonStyle(.plain)
                     .disabled(engine.isDrawing)
                 }
+
+                // Stroke count
+                if !engine.drawingCanvas.isEmpty {
+                    Text("\(engine.drawingCanvas.count) streck ritade\(engine.isDrawing ? "..." : "")")
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.3))
+                }
             }
             .padding(14)
             .glassMorphism(tint: EonColor.cyan)
             .onAppear { engine.isUserWatching = true }
             .onDisappear { engine.isUserWatching = false }
+
+            // Drawing history
+            if !engine.drawingHistory.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Rithistorik")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.5))
+                    ForEach(engine.drawingHistory.suffix(5).reversed()) { record in
+                        HStack {
+                            Image(systemName: "paintbrush.pointed")
+                                .font(.system(size: 10))
+                                .foregroundStyle(EonColor.cyan.opacity(0.6))
+                            Text(record.subject)
+                                .font(.system(size: 12, design: .rounded))
+                                .foregroundStyle(Color.white.opacity(0.5))
+                            Spacer()
+                            Text("\(record.strokeCount) streck")
+                                .font(.system(size: 10, design: .rounded))
+                                .foregroundStyle(Color.white.opacity(0.3))
+                        }
+                    }
+                }
+                .padding(12)
+                .glassMorphism(tint: EonColor.cyan)
+            }
         }
     }
 }

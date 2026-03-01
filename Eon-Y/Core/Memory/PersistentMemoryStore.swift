@@ -737,6 +737,59 @@ actor PersistentMemoryStore {
         }
         return true
     }
+
+    // MARK: - Public parameterised helpers for creative features
+
+    @discardableResult
+    func execute(_ sql: String, params: [Any]) -> Bool {
+        guard db != nil else { return false }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        for (i, param) in params.enumerated() {
+            let idx = Int32(i + 1)
+            switch param {
+            case let v as String: sqlite3_bind_text(stmt, idx, (v as NSString).utf8String, -1, nil)
+            case let v as Int:    sqlite3_bind_int64(stmt, idx, Int64(v))
+            case let v as Double: sqlite3_bind_double(stmt, idx, v)
+            default:              sqlite3_bind_text(stmt, idx, "\(param)", -1, nil)
+            }
+        }
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        return rc == SQLITE_DONE || rc == SQLITE_ROW
+    }
+
+    func query(_ sql: String, params: [Any] = []) -> [[Any]] {
+        guard db != nil else { return [] }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        for (i, param) in params.enumerated() {
+            let idx = Int32(i + 1)
+            switch param {
+            case let v as String: sqlite3_bind_text(stmt, idx, (v as NSString).utf8String, -1, nil)
+            case let v as Int:    sqlite3_bind_int64(stmt, idx, Int64(v))
+            case let v as Double: sqlite3_bind_double(stmt, idx, v)
+            default:              sqlite3_bind_text(stmt, idx, "\(param)", -1, nil)
+            }
+        }
+        var rows: [[Any]] = []
+        let colCount = sqlite3_column_count(stmt)
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            var row: [Any] = []
+            for col in 0..<colCount {
+                switch sqlite3_column_type(stmt, col) {
+                case SQLITE_INTEGER: row.append(Int(sqlite3_column_int64(stmt, col)))
+                case SQLITE_FLOAT:   row.append(sqlite3_column_double(stmt, col))
+                case SQLITE_TEXT:    row.append(String(cString: sqlite3_column_text(stmt, col)))
+                case SQLITE_NULL:    row.append("")
+                default:             row.append("")
+                }
+            }
+            rows.append(row)
+        }
+        sqlite3_finalize(stmt)
+        return rows
+    }
 }
 
 // MARK: - Data models
