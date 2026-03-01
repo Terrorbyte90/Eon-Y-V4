@@ -26,6 +26,7 @@ struct SettingsView: View {
     @AppStorage("eon_article_interval_minutes") private var articleIntervalMinutes = 60
     @AppStorage("eon_confidence")          private var showConfidence = true
     @AppStorage("eon_dev_mode")            private var devMode = false
+    @AppStorage("eon_motor_control")       private var eonMotorControl = false
 
     @State private var showResetAlert = false
     @State private var showCognitionLog = false
@@ -40,6 +41,20 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 14) {
+            // Eon Motor Control Mode
+            settingsGroup(title: "EON-LÄGE", icon: "engine.combustion.fill", color: Color(hex: "#EC4899")) {
+                settingToggle("Eon styr motorerna", icon: "brain.head.profile", binding: $eonMotorControl, color: Color(hex: "#EC4899"))
+                Divider().background(Color.white.opacity(0.06))
+                settingRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(eonMotorControl ? "Eon anpassar motorhastigheter baserat på kroppsbudget, valens och termisk status. Säkerhetsöverride skyddar mot missbruk." : "Alla motorer körs med fasta hastigheter.")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
             // Eon
             settingsGroup(title: "EON", icon: "brain.head.profile", color: Color(hex: "#A78BFA")) {
                 settingRow {

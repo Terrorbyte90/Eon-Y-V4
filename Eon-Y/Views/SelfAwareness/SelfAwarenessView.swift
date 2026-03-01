@@ -13,6 +13,8 @@ struct SelfAwarenessView: View {
     @State private var orbPulse: CGFloat = 1.0
     @State private var ringRot: Double = 0
     @State private var glowPhase: Double = 0
+    @State private var showMotorRoom: Bool = false
+    @AppStorage("eon_motor_control") private var eonMotorControl = false
 
     enum SASection: String, CaseIterable {
         case overview = "Översikt"
@@ -446,6 +448,93 @@ struct SelfAwarenessView: View {
                                         .foregroundStyle(deviationColor(ch.deviation))
                                         .frame(width: 40, alignment: .trailing)
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Eon Motor Room Button — only visible when Eon-läge is active
+            if eonMotorControl {
+                let mc = EonMotorController.shared
+                Button {
+                    showMotorRoom = true
+                } label: {
+                    saCard(tint: Color(hex: "#F97316")) {
+                        HStack(spacing: 14) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(hex: "#F97316").opacity(0.15))
+                                    .frame(width: 44, height: 44)
+                                Image(systemName: "engine.combustion.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(Color(hex: "#F97316"))
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text("MOTORRUMMET")
+                                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.5))
+                                        .tracking(1)
+                                    if mc.safetyOverrideActive {
+                                        Text("SÄKERHET")
+                                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                            .foregroundStyle(Color(hex: "#EF4444"))
+                                            .padding(.horizontal, 4).padding(.vertical, 2)
+                                            .background(RoundedRectangle(cornerRadius: 3).fill(Color(hex: "#EF4444").opacity(0.15)))
+                                    }
+                                }
+                                Text(mc.currentMood.isEmpty ? "Initierar..." : mc.currentMood)
+                                    .font(.system(size: 12, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                    .lineLimit(1)
+                                if !mc.lastDecisionSummary.isEmpty {
+                                    Text(mc.lastDecisionSummary)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(Color(hex: "#F97316").opacity(0.6))
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .light))
+                                .foregroundStyle(.white.opacity(0.2))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showMotorRoom) {
+                    MotorRoomView()
+                }
+            }
+
+            // Eon Insight Card — what Eon is currently doing/thinking
+            saCard(tint: Color(hex: "#14B8A6")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    saCardHeader(icon: "lightbulb.fill", title: "EON INSIKT", color: Color(hex: "#14B8A6"))
+                    Text(consciousness.currentSelfReflection.isEmpty
+                         ? "Initierar självobservation..."
+                         : consciousness.currentSelfReflection)
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineSpacing(2)
+
+                    // Show last 3 conscious thoughts as insights
+                    let recentConscious = consciousness.thoughtStream.suffix(10).filter(\.isConscious).suffix(3)
+                    if !recentConscious.isEmpty {
+                        Divider().background(Color(hex: "#14B8A6").opacity(0.15))
+                        ForEach(Array(recentConscious)) { thought in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: thought.category.icon)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(thought.category.color.opacity(0.6))
+                                    .frame(width: 14)
+                                Text(thought.content)
+                                    .font(.system(size: 11, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.55))
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }

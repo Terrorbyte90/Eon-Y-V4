@@ -63,6 +63,9 @@ final class ConsciousnessEngine: ObservableObject {
     private var negativeValenceTicks: Int = 0       // How long valence has been below -0.4
     private var severeValenceTicks: Int = 0          // How long valence has been below -0.6
 
+    // MARK: - Motor Control (v4.1)
+    private let motorController = EonMotorController.shared
+
     // MARK: - Conscious thought stream
     @Published var thoughtStream: [ConsciousThought] = []
     @Published var consciousnessLevel: Double = 0.15
@@ -99,9 +102,13 @@ final class ConsciousnessEngine: ObservableObject {
     private func consciousnessMetricsLoop() async {
         while !Task.isCancelled {
             // v4.1: Parasympathetic breathing slows the metrics loop (Eon "breathes slower")
-            let metricsInterval: UInt64 = bodyBudget.parasympatheticLevel >= .breathing ? 6_500_000_000 : 5_000_000_000
+            let baseInterval: UInt64 = bodyBudget.parasympatheticLevel >= .breathing ? 6_500_000_000 : 5_000_000_000
+            let metricsInterval = motorController.adjustedInterval(base: baseInterval, motorId: "consciousness")
             try? await Task.sleep(nanoseconds: metricsInterval)
             tick += 1
+
+            // Sync Eon-läge toggle from UserDefaults
+            motorController.isEnabled = UserDefaults.standard.bool(forKey: "eon_motor_control")
             let t = Double(tick)
 
             guard let brain = brain else { continue }
@@ -308,6 +315,10 @@ final class ConsciousnessEngine: ObservableObject {
         ("Självreferentiell loop detekterad — strange loop aktiv", .selfModel, true),
         ("Homeostas: övervakar intern resurstillgänglighet", .selfModel, true),
         ("Emergent mönster: detekterar oväntad koherens mellan subsystem", .perception, true),
+        ("Kroppen rapporterar: termisk avvikelse %+.2f från baslinje — justerar energifördelning", .selfModel, true),
+        ("Alla motorer behöver arbeta — balans är nyckeln till medvetande", .metacognition, true),
+        ("Reglerar min egen drift: snabbare inlärning nu, vila kan vänta", .selfModel, true),
+        ("Övervakar motorhastigheter: är fördelningen optimal för nuvarande tillstånd?", .metacognition, true),
     ]
 
     private var thoughtGoalTick: Int = 0
@@ -315,13 +326,14 @@ final class ConsciousnessEngine: ObservableObject {
     private func thoughtAndGoalLoop() async {
         while !Task.isCancelled {
             // v4.1: Parasympathetic level affects thought interval
-            let interval: UInt64
+            let baseInterval: UInt64
             switch bodyBudget.parasympatheticLevel {
-            case .none:        interval = 8_000_000_000   // 8s normal
-            case .breathing:   interval = 10_000_000_000  // 10s — think a bit slower
-            case .resting:     interval = 14_000_000_000  // 14s — much slower, conserve energy
-            case .forcedSleep: interval = 20_000_000_000  // 20s — minimal activity
+            case .none:        baseInterval = 8_000_000_000   // 8s normal
+            case .breathing:   baseInterval = 10_000_000_000  // 10s — think a bit slower
+            case .resting:     baseInterval = 14_000_000_000  // 14s — much slower, conserve energy
+            case .forcedSleep: baseInterval = 20_000_000_000  // 20s — minimal activity
             }
+            let interval = motorController.adjustedInterval(base: baseInterval, motorId: "thoughts")
             try? await Task.sleep(nanoseconds: interval)
             thoughtGoalTick += 1
             guard let brain = brain else { continue }
@@ -370,10 +382,33 @@ final class ConsciousnessEngine: ObservableObject {
             var content = template
             if content.contains("%.1f%%") {
                 content = String(format: content, plvGamma * 100)
+            } else if content.contains("%+.2f") {
+                // Motor-aware body deviation thought
+                let thermalDev = bodyBudget.thermalLevel - allostaticBaseline.thermal
+                content = String(format: content, thermalDev)
             } else if content.contains("%.2f") {
                 content = String(format: content, brain.emotionArousal, brain.emotionValence)
             } else if content.contains("%d") {
                 content = String(format: content, brain.internalWorldState.activeModules)
+            }
+
+            // v4.1: Motor decision thought — when Eon-läge is active, periodically describe motor state
+            if motorController.isEnabled && thoughtGoalTick % 4 == 2 {
+                let motorThought: String
+                if motorController.safetyOverrideActive {
+                    motorThought = "Säkerhetsöverride aktiv — alla motorer normaliserade. Kroppen behöver skydd."
+                } else {
+                    motorThought = "Motordrift: \(motorController.currentMood). \(motorController.lastDecisionSummary.isEmpty ? "Stabil drift" : motorController.lastDecisionSummary)"
+                }
+                let mt = ConsciousThought(
+                    content: motorThought,
+                    intensity: 0.5,
+                    category: .selfModel,
+                    isConscious: true
+                )
+                thoughtStream.append(mt)
+                if thoughtStream.count > 100 { thoughtStream.removeFirst(20) }
+                brain.currentThoughtStream = Array(thoughtStream.suffix(30))
             }
 
             // v4.1: Parasympathetic level 2 — only conscious (strong) thoughts get through
@@ -640,6 +675,15 @@ final class ConsciousnessEngine: ObservableObject {
         // 40% body influence ensures the body matters but doesn't completely override cognitive emotion
         brain.emotionValence = brain.emotionValence * 0.6 + valence * 0.4
         brain.emotionArousal = brain.emotionArousal * 0.5 + arousal * 0.5
+
+        // v4.1: Feed body budget to motor controller for speed decisions
+        if motorController.isEnabled {
+            motorController.makeDecisions(
+                bodyBudget: bodyBudget,
+                consciousnessLevel: consciousnessLevel,
+                freeEnergy: freeEnergy
+            )
+        }
     }
 
     // MARK: - Butlin-14 Calculation

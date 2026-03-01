@@ -120,14 +120,16 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
 
             // v4: Thermal-aware interval: 8s nominal → up to 50s critical (was 6s nominal)
             let thermalState = ProcessInfo.processInfo.thermalState
-            let interval: UInt64
+            let baseInterval: UInt64
             switch thermalState {
-            case .nominal:  interval = 8_000_000_000   // v4: 6s → 8s
-            case .fair:     interval = 12_000_000_000  // v4: 10s → 12s
-            case .serious:  interval = 30_000_000_000
-            case .critical: interval = 50_000_000_000
-            @unknown default: interval = 8_000_000_000
+            case .nominal:  baseInterval = 8_000_000_000   // v4: 6s → 8s
+            case .fair:     baseInterval = 12_000_000_000  // v4: 10s → 12s
+            case .serious:  baseInterval = 30_000_000_000
+            case .critical: baseInterval = 50_000_000_000
+            @unknown default: baseInterval = 8_000_000_000
             }
+            // v4.1: Motor speed multiplier — Eon can speed up or slow down orchestration
+            let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "orchestrator")
             try? await Task.sleep(nanoseconds: interval)
         }
     }
@@ -316,14 +318,16 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
 
             // Thermal-aware interval: 60s nominal → up to 480s critical
             let thermalState = ProcessInfo.processInfo.thermalState
-            let interval: UInt64
+            let baseInterval: UInt64
             switch thermalState {
-            case .nominal:  interval = 60_000_000_000
-            case .fair:     interval = 120_000_000_000
-            case .serious:  interval = 300_000_000_000
-            case .critical: interval = 480_000_000_000
-            @unknown default: interval = 60_000_000_000
+            case .nominal:  baseInterval = 60_000_000_000
+            case .fair:     baseInterval = 120_000_000_000
+            case .serious:  baseInterval = 300_000_000_000
+            case .critical: baseInterval = 480_000_000_000
+            @unknown default: baseInterval = 60_000_000_000
             }
+            // v4.1: Motor speed multiplier for metacognition
+            let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "metacognition")
             try? await Task.sleep(nanoseconds: interval)
         }
     }
@@ -387,14 +391,16 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
 
             // Thermal-aware interval between pillar work: 15s nominal → 120s critical
             let thermalState = ProcessInfo.processInfo.thermalState
-            let interval: UInt64
+            let baseInterval: UInt64
             switch thermalState {
-            case .nominal:  interval = 15_000_000_000
-            case .fair:     interval = 30_000_000_000
-            case .serious:  interval = 90_000_000_000
-            case .critical: interval = 120_000_000_000
-            @unknown default: interval = 15_000_000_000
+            case .nominal:  baseInterval = 15_000_000_000
+            case .fair:     baseInterval = 30_000_000_000
+            case .serious:  baseInterval = 90_000_000_000
+            case .critical: baseInterval = 120_000_000_000
+            @unknown default: baseInterval = 15_000_000_000
             }
+            // v4.1: Motor speed multiplier for pillar work
+            let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "pillars")
             try? await Task.sleep(nanoseconds: interval)
         }
     }

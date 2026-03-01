@@ -227,7 +227,9 @@ final class EonLiveAutonomy: ObservableObject {
                 brain.autonomousProcessLabel = "[\(currentPhase.rawValue)] \(ProcessLabels.label(for: brain.engineActivity.max(by: { $0.value < $1.value })?.key ?? "cognitive", brain: brain))"
             }
 
-            let interval = autoScaledInterval(base: 5_000_000_000)
+            let baseInterval = autoScaledInterval(base: 5_000_000_000)
+            // v4.1: Motor speed multiplier for autonomy heartbeat
+            let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "autonomy")
             try? await Task.sleep(nanoseconds: interval)
         }
     }
@@ -287,7 +289,9 @@ final class EonLiveAutonomy: ObservableObject {
             }
 
             // Sleep between work items (thermal-aware) — ökad bas för lägre termisk belastning
-            let workInterval = autoScaledInterval(base: 10_000_000_000)
+            let baseWorkInterval = autoScaledInterval(base: 10_000_000_000)
+            // v4.1: Motor speed multiplier for autonomy cognitive worker
+            let workInterval = EonMotorController.shared.adjustedInterval(base: baseWorkInterval, motorId: "autonomy")
             try? await Task.sleep(nanoseconds: workInterval)
         }
     }
@@ -646,7 +650,9 @@ final class EonLiveAutonomy: ObservableObject {
             }
 
             // Sleep 5 minutes between maintenance cycles (thermal-aware)
-            let interval = autoScaledInterval(base: 300_000_000_000)
+            let baseMaintenanceInterval = autoScaledInterval(base: 300_000_000_000)
+            // v4.1: Motor speed multiplier for learning/maintenance
+            let interval = EonMotorController.shared.adjustedInterval(base: baseMaintenanceInterval, motorId: "learning")
             try? await Task.sleep(nanoseconds: interval)
         }
     }
