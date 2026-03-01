@@ -60,8 +60,11 @@ final class EonBrain: ObservableObject {
     private var isPreviewInstance: Bool = false
 
     private init(preview: Bool = false) {
-        isPreviewInstance = preview
-        guard !preview else { return }
+        // Om vi körs i Xcodes Preview-sandbox (via @main eller direkt), behandla som preview
+        // för att undvika SQLite-krasch och BGTask-fel i sandboxen.
+        let inPreviewSandbox = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+        isPreviewInstance = preview || inPreviewSandbox
+        guard !isPreviewInstance else { return }
         // Seed innerMonologue direkt — UI ska aldrig vara tomt
         innerMonologue = [
             MonologueLine(text: "Kognitivt system aktiverat — alla 12 pelare initieras", type: .insight),

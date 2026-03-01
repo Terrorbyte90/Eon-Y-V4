@@ -8,12 +8,19 @@
 import SwiftUI
 import BackgroundTasks
 
+// Detekterar om koden körs inuti Xcodes Preview-motor.
+// Används för att skydda BGTask-registrering och motor-start mot Preview-sandboxen.
+private let isRunningInPreview: Bool = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+
 @main
 struct Eon_YApp: App {
     @StateObject private var brain = EonBrain.shared
     @StateObject private var userProfile = UserProfileEngine.shared
 
     init() {
+        // BGTask-registrering kraschar i Preview-sandboxen — skydda med guard
+        guard !isRunningInPreview else { return }
+
         let tabBarAppearance = UITabBarAppearance()
         tabBarAppearance.configureWithTransparentBackground()
         UITabBar.appearance().standardAppearance = tabBarAppearance
@@ -39,9 +46,11 @@ struct Eon_YApp: App {
 
     @MainActor
     private func bootEon() async {
-        let isPreview = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
-        if isPreview {
-            print("[Boot] ⚠️ XCODE_RUNNING_FOR_PREVIEWS=1 detekterat — kör ändå alla motorer (preview blockerar INTE längre)")
+        // Preview-sandboxen har ingen riktig bundle, ingen SQLite-sökväg och
+        // inga BGTask-rättigheter — avbryt omedelbart om vi körs i Preview.
+        guard !isRunningInPreview else {
+            print("[Boot] Preview-läge detekterat — motorer startas INTE. Använd EonPreviewContainer för UI-förhandsvisning.")
+            return
         }
 
         // 1. Ladda persisterad kognitiv state INNAN motorer startas

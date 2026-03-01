@@ -22,7 +22,13 @@ final class UserProfileEngine: ObservableObject {
     private let memory = PersistentMemoryStore.shared
     private var cancellables = Set<AnyCancellable>()
 
+    private var isPreviewInstance: Bool = false
+
     private init() {
+        // Skydda mot Preview-sandbox — UserDefaults är ok men Tasks mot DB kraschar
+        let inPreviewSandbox = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+        isPreviewInstance = inPreviewSandbox
+        guard !inPreviewSandbox else { return }
         loadProfile()
         Task { await loadWordStats() }
     }
@@ -71,7 +77,8 @@ final class UserProfileEngine: ObservableObject {
         // Uppdatera Eons beskrivning av användaren
         updateEonDescription()
 
-        // Spara till minne
+        // Spara till minne (ej i preview-sandbox)
+        guard !isPreviewInstance else { return }
         Task {
             await memory.saveMessage(role: "user", content: userMessage, sessionId: UUID().uuidString, confidence: confidence, emotion: emotion.rawValue)
         }
