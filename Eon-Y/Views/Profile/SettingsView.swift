@@ -29,6 +29,7 @@ struct SettingsView: View {
 
     @State private var showResetAlert = false
     @State private var showCognitionLog = false
+    @State private var showDiagnosticsLog = false
 
     let personalities = ["Standard", "Torr", "Varm", "Formell", "Lekfull"]
     let cognitiveModes = ["Djup", "Balanserat", "Snabbt"]
@@ -218,6 +219,52 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showCognitionLog) {
                 CognitionLogView()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+
+            // Resursdiagnostik
+            Button {
+                showDiagnosticsLog = true
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(hex: "#EF4444").opacity(0.15))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(hex: "#EF4444"))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Resursdiagnostik")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("CPU/värme/ANE/GPU — orsaker & rapport")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                    Spacer()
+                    Text(ResourceDiagnosticsLogger.shared.fileSizeString)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.25))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(hex: "#EF4444").opacity(0.04)))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color(hex: "#EF4444").opacity(0.2), lineWidth: 0.6))
+                )
+            }
+            .sheet(isPresented: $showDiagnosticsLog) {
+                DiagnosticsLogView()
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }

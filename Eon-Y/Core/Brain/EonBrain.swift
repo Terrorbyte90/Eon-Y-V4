@@ -152,7 +152,8 @@ final class EonBrain: ObservableObject {
         ]
         isAutonomouslyActive = true
         autonomousProcessLabel = "Startar kognitivt system..."
-        // Starta heartbeat och kognitiva system — nu är self fullt initialiserad
+        // Starta resursdiagnostik-loggning
+        ResourceDiagnosticsLogger.shared.start()
         startHeartbeat()
         startCognitiveSystems()
     }

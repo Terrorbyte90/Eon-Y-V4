@@ -166,14 +166,16 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
             await checkAndFireEvents(state: state, brain: brain)
 
             // Prestandaläge-anpassat intervall
-            let perfMode = PerformanceMode(rawValue: UserDefaults.standard.integer(forKey: "eon_performance_mode")) ?? .auto
+            let basePerfMode = PerformanceMode(rawValue: UserDefaults.standard.integer(forKey: "eon_performance_mode")) ?? .auto
+            let perfMode = CyclingModeEngine.shared.effectiveMode(base: basePerfMode)
             let interval: UInt64
             switch perfMode {
-            case .maximal:  interval = 1_500_000_000
-            case .balanced: interval = 2_000_000_000
-            case .sparse:   interval = 4_000_000_000
-            case .rest:     interval = 8_000_000_000
-            case .auto, .adaptive:
+            case .maximal:     interval = 1_500_000_000
+            case .balanced:    interval = 2_000_000_000
+            case .sparse:      interval = 4_000_000_000
+            case .rest:        interval = 8_000_000_000
+            case .autonomyOff: interval = 10_000_000_000
+            case .auto, .adaptive, .cycling:
                 let thermalState = ProcessInfo.processInfo.thermalState
                 switch thermalState {
                 case .nominal:  interval = 2_000_000_000
