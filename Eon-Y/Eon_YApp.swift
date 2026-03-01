@@ -7,6 +7,7 @@
 
 import SwiftUI
 import BackgroundTasks
+import UIKit
 
 // Detekterar om koden körs inuti Xcodes Preview-motor.
 // Används för att skydda BGTask-registrering och motor-start mot Preview-sandboxen.
@@ -38,6 +39,20 @@ struct Eon_YApp: App {
                 .preferredColorScheme(.dark)
                 .task {
                     await bootEon()
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
+                ) { _ in
+                    // Nödpersistering: spara state när appen lämnar förgrunden
+                    // Körs synkront innan iOS kan döda processen
+                    CognitiveState.shared.persistCurrentState()
+                    UserDefaults.standard.synchronize()
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)
+                ) { _ in
+                    CognitiveState.shared.persistCurrentState()
+                    UserDefaults.standard.synchronize()
                 }
         }
     }
