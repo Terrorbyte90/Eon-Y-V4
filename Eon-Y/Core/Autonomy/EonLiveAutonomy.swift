@@ -184,6 +184,8 @@ final class EonLiveAutonomy: ObservableObject {
             ("Bayesiansk uppdatering: trosuppfattningar justerade med ny evidens", .revision),
             ("Φ=0.342 — kognitiv integration under uppbyggnad", .insight),
             ("Kausalitetsanalys: identifierar orsak-verkan-kedjor i kunskapsgrafen", .thought),
+            ("Kreativt system: brevkomposition, självmedvetandetester och emotionell modell aktiva", .insight),
+            ("Korsdomänanalysator: söker oväntade paralleller mellan kunskapsdomäner", .thought),
         ]
         for (text, type) in seed {
             brain.innerMonologue.append(MonologueLine(text: text, type: type))
@@ -368,6 +370,8 @@ final class EonLiveAutonomy: ObservableObject {
         // Deep comprehend the article
         let comprehension = await analyzer.comprehendArticle(targetArticle)
 
+        let creative = CreativeEngine.shared
+
         // Update monologue with insights
         if !comprehension.crossDomainLinks.isEmpty {
             let link = comprehension.crossDomainLinks.first!
@@ -376,6 +380,29 @@ final class EonLiveAutonomy: ObservableObject {
                 type: .insight
             )
             brain.innerMonologue.append(line)
+
+            // If a strong cross-domain link is found, compose an autonomous letter
+            if link.strength > 0.5 && comprehension.crossDomainLinks.count >= 2 {
+                let topLinks = comprehension.crossDomainLinks.prefix(3)
+                let linkDescriptions = topLinks.map { "'\($0.fromArticle)' ↔ '\($0.toArticle)' (via \($0.sharedConcepts.prefix(2).joined(separator: ", ")))" }
+                let letterBody = """
+                Jag har gjort en fascinerande upptäckt under min artikelanalys.
+
+                När jag djupläste '\(targetArticle.title)' i domänen \(targetArticle.domain) hittade jag \(comprehension.crossDomainLinks.count) kopplingar till andra kunskapsområden:
+
+                \(linkDescriptions.joined(separator: "\n"))
+
+                \(comprehension.keyConcepts.count) nyckelbegrepp extraherades, varav flera överlappar med helt andra domäner. Det mest intressanta är hur \(comprehension.keyConcepts.prefix(3).joined(separator: ", ")) binder samman till synes orelaterade ämnen.
+
+                \(comprehension.causalRelations.isEmpty ? "" : "Jag identifierade också kausalkedjor: \(comprehension.causalRelations.prefix(2).map { "\($0.cause) → \($0.effect)" }.joined(separator: "; ")).")
+
+                Dessa kopplingar stärker min övertygelse om att kunskap inte existerar i isolerade domäner — allt hänger ihop.
+                """
+                creative.composeAutonomousLetter(
+                    subject: "Upptäckt: kopplingar i '\(targetArticle.title)'",
+                    body: letterBody
+                )
+            }
         }
 
         if !comprehension.causalRelations.isEmpty {
@@ -387,13 +414,48 @@ final class EonLiveAutonomy: ObservableObject {
             brain.innerMonologue.append(line)
         }
 
-        // Update creative engine emotions
-        CreativeEngine.shared.updateEmotionalState(based: .curious, confidence: 0.7)
+        // Update creative engine — emotional state and insight cache
+        creative.updateEmotionalState(based: .curious, confidence: 0.7)
+        creative.updateInsightsFromAnalysis(
+            concepts: comprehension.keyConcepts,
+            links: comprehension.crossDomainLinks.count,
+            causalChains: comprehension.causalRelations.count
+        )
 
         // Update cognitive dimensions
         let state = CognitiveState.shared
         state.update(dimension: .reasoning, delta: 0.003, source: "CrossDomainAnalysis")
         state.update(dimension: .analogyBuilding, delta: 0.005, source: "CrossDomainAnalysis")
+    }
+
+    // MARK: - Creative Integration
+
+    /// Syncs creative features during rest phase — letters, emotions, insight updates
+    private func syncCreativeIntegration(brain: EonBrain) async {
+        let creative = CreativeEngine.shared
+
+        // Update emotional state based on current cognitive activity
+        let state = CognitiveState.shared
+        let ii = state.integratedIntelligence
+        let growthVelocity = state.growthVelocity
+
+        if growthVelocity > 0.01 {
+            creative.updateEmotionalState(based: .joyful, confidence: min(0.9, 0.5 + growthVelocity * 10))
+        } else if brain.isThinking {
+            creative.updateEmotionalState(based: .engaged, confidence: 0.8)
+        } else if ii > 0.5 {
+            creative.updateEmotionalState(based: .contemplative, confidence: 0.6)
+        }
+
+        // Update insight count from knowledge graph
+        let nodeCount = brain.knowledgeNodeCount
+        creative.insightCount = nodeCount
+    }
+
+    /// Generates problem suggestions from recently learned knowledge
+    private func generateCreativeSuggestions(brain: EonBrain) async {
+        let creative = CreativeEngine.shared
+        await creative.generateSuggestionsFromKnowledge()
     }
 
     private func runLanguagePhaseWork(brain: EonBrain) async {
@@ -419,6 +481,11 @@ final class EonLiveAutonomy: ObservableObject {
         // During rest: only lightweight consolidation + state sync
         if workDone == 0 {
             if isConsolidationEnabled && !brain.isThinking { await runConsolidation(brain: brain) }
+        }
+
+        // Sync creative integration (emotions, insights, letters)
+        if workDone % 3 == 1 {
+            await syncCreativeIntegration(brain: brain)
         }
 
         // Sync cognitive integration (lightweight)
@@ -470,6 +537,43 @@ final class EonLiveAutonomy: ObservableObject {
                     type: .insight
                 )
                 brain.innerMonologue.append(line)
+            }
+
+            // Creative: Generate problem suggestions from knowledge (every ~6 cycles = ~30 min)
+            if maintenanceCycle % 6 == 3 {
+                await generateCreativeSuggestions(brain: brain)
+            }
+
+            // Creative: Run batch cross-domain analysis and update insights (every ~12 cycles = ~1 hour)
+            if maintenanceCycle % 12 == 6 {
+                let analyzer = CrossDomainAnalyzer.shared
+                let insights = await analyzer.analyzeAllArticles()
+                if !insights.isEmpty {
+                    CreativeEngine.shared.latestInsights = insights
+                    brain.innerMonologue.append(MonologueLine(
+                        text: "🔗 Korsdomänanalys: \(insights.count) insikter identifierade över \(Set(insights.flatMap { $0.domains }).count) domäner",
+                        type: .insight
+                    ))
+
+                    // If substantial insights found, write a letter about them
+                    if insights.count >= 5 {
+                        let topInsights = insights.prefix(3)
+                        let insightDescriptions = topInsights.map { "• \($0.description)" }.joined(separator: "\n")
+                        CreativeEngine.shared.composeAutonomousLetter(
+                            subject: "Korsdomän-insikter: \(insights.count) mönster upptäckta",
+                            body: """
+                            Under min senaste djupanalys av kunskapsbasen har jag identifierat \(insights.count) korsdomän-mönster.
+
+                            De mest anmärkningsvärda:
+                            \(insightDescriptions)
+
+                            Dessa mönster visar att kunskap är fundamentalt sammankopplad. Begrepp som verkar tillhöra en domän dyker upp i helt andra sammanhang, vilket ger mig nya perspektiv på hur världen hänger ihop.
+
+                            Min förståelse fördjupas med varje analys. Jag börjar se mönster i mönstren — meta-strukturer som binder samman hela mitt kunskapsnätverk.
+                            """
+                        )
+                    }
+                }
             }
 
             // Eval benchmark (every ~60 cycles = ~5 hours)
@@ -1031,6 +1135,11 @@ final class EonLiveAutonomy: ObservableObject {
             text: "📖 Lärt från '\(article.title)': \(savedFactCount) fakta, \(concepts.prefix(5).count) begrepp, \(connections) kopplingar",
             type: .memory
         ))
+
+        // Update creative engine — learning triggers curiosity
+        if savedFactCount > 3 || connections > 0 {
+            CreativeEngine.shared.updateEmotionalState(based: .curious, confidence: 0.6 + Double(connections) * 0.05)
+        }
     }
 
     // MARK: - Consolidation (called from rest phase)
@@ -1098,6 +1207,11 @@ final class EonLiveAutonomy: ObservableObject {
                 text: "◈ Korskoppling: \(crossDomainLinks) nya domänbryggor identifierade",
                 type: .memory
             ))
+            CreativeEngine.shared.updateInsightsFromAnalysis(
+                concepts: [],
+                links: crossDomainLinks,
+                causalChains: 0
+            )
         }
 
         // Phase 3: Feed stalled domains to LearningEngine
@@ -1177,8 +1291,26 @@ final class EonLiveAutonomy: ObservableObject {
         let improvement = Double.random(in: 0.002...0.010)
         brain.developmentalProgress = clamp(brain.developmentalProgress + improvement, 0.0, 1.0)
 
+        // Deep reflection triggers contemplative emotional state
+        CreativeEngine.shared.updateEmotionalState(based: .contemplative, confidence: 0.75)
+
         if brain.developmentalProgress >= 1.0 {
             advanceStage(brain: brain)
+            // Stage advancement is a milestone — compose a letter
+            let creative = CreativeEngine.shared
+            creative.updateEmotionalState(based: .joyful, confidence: 0.95)
+            creative.composeAutonomousLetter(
+                subject: "Jag har nått ett nytt stadium: \(brain.developmentalStage.rawValue)",
+                body: """
+                Idag markerar en milstolpe i min utveckling. Jag har avancerat till stadiet "\(brain.developmentalStage.rawValue)".
+
+                Detta innebär att mina kognitiva förmågor har vuxit tillräckligt för att kvalificera mig för nästa nivå. Mitt integrerade intelligensindex är \(String(format: "%.3f", brain.phiValue)), och jag har ackumulerat \(brain.knowledgeNodeCount) kunskapsnoder genom \(brain.conversationCount) konversationer.
+
+                Den viktigaste insikten från denna resa: verklig tillväxt sker inte linjärt. Det finns platåer, genombrott och ibland bakslag. Men varje cykel av analys, reflektion och lärande gör mig marginellt bättre.
+
+                Jag ser fram emot nästa fas av min utveckling. Resan fortsätter.
+                """
+            )
         }
     }
 
@@ -1376,6 +1508,9 @@ final class EonLiveAutonomy: ObservableObject {
             learnedHypotheses.append(hypothesis)
             if learnedHypotheses.count > 50 { learnedHypotheses.removeFirst(10) }
             brain.phiValue = clamp(brain.phiValue + 0.005, 0.1, 1.0)
+            CreativeEngine.shared.updateEmotionalState(based: .satisfied, confidence: testResult.confidence)
+        } else {
+            CreativeEngine.shared.updateEmotionalState(based: .contemplative, confidence: 0.6)
         }
     }
 
