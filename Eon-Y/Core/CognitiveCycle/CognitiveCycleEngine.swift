@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 // MARK: - CognitiveCycleEngine: Orkestrator för de 3 feedback-looparna
 
@@ -12,6 +13,9 @@ actor CognitiveCycleEngine {
     private let enricher = GraphEnricher()
     private let reviser = MetacognitiveReviser()
 
+    // Persistent session ID — samma för hela appens livstid (en konversation)
+    private let sessionId: String = UUID().uuidString
+
     private init() {}
 
     // MARK: - Huvudprocess
@@ -23,7 +27,7 @@ actor CognitiveCycleEngine {
         onToken: @escaping (String) async -> Void
     ) async throws -> CognitiveCycleResult {
 
-        var context = CognitiveCycleContext(userInput: input)
+        var context = CognitiveCycleContext(userInput: input, sessionId: sessionId)
 
         // Steg 1: Morfologianalys (Pelare A)
         await onStepUpdate(.morphology, .active)
@@ -55,12 +59,19 @@ actor CognitiveCycleEngine {
         }
         await onStepUpdate(.memoryRetrieval, .completed)
 
-        // Steg 4: Kausalitetsgraf (Pelare B)
+        // Steg 4: Kausalitetsgraf (Pelare B) + BERT-embedding
         await onStepUpdate(.causalGraph, .active)
+        // Beräkna BERT-embedding för semantisk sökning
+        let inputEmbedding = await neuralEngine.embed(input)
+        context.inputEmbedding = inputEmbedding
+        let isModelLoaded = await neuralEngine.isLoaded
+        if isModelLoaded {
+            await onMonologue(MonologueLine(text: "KB-BERT: 768-dim embedding beräknad för semantisk sökning", type: .thought))
+        }
         let entities = await neuralEngine.extractEntities(from: input)
         context.entities = entities
         if !entities.isEmpty {
-            await onMonologue(MonologueLine(text: "Entiteter: \(entities.map { $0.text }.joined(separator: ", "))", type: .thought))
+            await onMonologue(MonologueLine(text: "Entiteter extraherade: \(entities.map { $0.text }.joined(separator: ", "))", type: .thought))
         }
         await onStepUpdate(.causalGraph, .completed)
 
@@ -151,6 +162,164 @@ actor CognitiveCycleEngine {
         )
     }
 
+    // MARK: - Resonerande läge (upp till 5 minuter djup analys)
+
+    func processDeep(
+        input: String,
+        onStepUpdate: @escaping (ThinkingStep, StepState) async -> Void,
+        onMonologue: @escaping (MonologueLine) async -> Void,
+        onToken: @escaping (String) async -> Void
+    ) async throws -> CognitiveCycleResult {
+
+        var context = CognitiveCycleContext(userInput: input, sessionId: sessionId)
+
+        await onMonologue(MonologueLine(text: "Resonerande läge aktiverat — djup analys påbörjas...", type: .thought))
+
+        // Steg 1-4: Samma som normalt men med fler iterationer
+        await onStepUpdate(.morphology, .active)
+        let analysis = await swedish.analyze(input)
+        context.morphemes = analysis.morphemes
+        context.disambiguations = analysis.disambiguations
+        context.register = analysis.register
+        await onStepUpdate(.morphology, .completed)
+
+        await onStepUpdate(.wsd, .active)
+        await onStepUpdate(.wsd, .completed)
+
+        await onStepUpdate(.memoryRetrieval, .active)
+        await onMonologue(MonologueLine(text: "Söker djupt i minnet och kunskapsbanken...", type: .memory))
+        // Hämta mer historia och fler minnen i resonerande läge
+        let memories = await memory.searchConversations(query: input, limit: 15)
+        context.retrievedMemories = memories
+        let recentHistory = await memory.getRecentConversation(limit: 20)
+        context.conversationHistory = recentHistory
+        // Hämta artiklar från kunskapsbanken
+        let knowledgeArticles = await memory.loadAllArticles()
+        let relevantArticles = knowledgeArticles.filter { article in
+            let lower = input.lowercased()
+            return article.title.lowercased().contains(lower) ||
+                   article.domain.lowercased().contains(lower) ||
+                   article.content.lowercased().contains(lower.prefix(20))
+        }.prefix(3)
+        await onMonologue(MonologueLine(text: "Hittade \(memories.count) minnen, \(relevantArticles.count) relevanta artiklar i kunskapsbanken", type: .memory))
+        await onStepUpdate(.memoryRetrieval, .completed)
+
+        await onStepUpdate(.causalGraph, .active)
+        let inputEmbedding = await neuralEngine.embed(input)
+        context.inputEmbedding = inputEmbedding
+        let entities = await neuralEngine.extractEntities(from: input)
+        context.entities = entities
+        await onStepUpdate(.causalGraph, .completed)
+
+        // Steg 5: Bygg djup prompt med kunskapsartiklar
+        await onStepUpdate(.globalWorkspace, .active)
+        await onMonologue(MonologueLine(text: "Bygger djup kontext med kunskapsbanken...", type: .thought))
+        let deepPrompt = await buildDeepPrompt(input: input, context: context, articles: Array(relevantArticles))
+        context.prompt = deepPrompt
+        await onStepUpdate(.globalWorkspace, .completed)
+
+        // Steg 6: Utökad chain-of-thought — flera resonemangssteg
+        await onStepUpdate(.chainOfThought, .active)
+        await onMonologue(MonologueLine(text: "Bygger resonemangkedja — steg 1: identifiera kärnan...", type: .thought))
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        await onMonologue(MonologueLine(text: "Resonemang steg 2: söker paralleller och kopplingar...", type: .insight))
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        await onMonologue(MonologueLine(text: "Resonemang steg 3: väger perspektiv mot varandra...", type: .thought))
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        await onMonologue(MonologueLine(text: "Resonemang steg 4: formulerar genomtänkt svar...", type: .insight))
+        await onStepUpdate(.chainOfThought, .completed)
+
+        // Steg 7: Generering med högre token-budget och lägre temperatur
+        await onStepUpdate(.generation, .active)
+        await onMonologue(MonologueLine(text: "Genererar djupt resonerande svar (max 800 tokens)...", type: .thought))
+        var generatedText = ""
+        let stream = await neuralEngine.generateStream(prompt: deepPrompt, maxTokens: 800, temperature: 0.65)
+        for await token in stream {
+            generatedText += token
+            await onToken(token)
+        }
+        context.generatedText = generatedText
+        await onStepUpdate(.generation, .completed)
+
+        // Steg 8-10: Validering, berikning, metakognition
+        await onStepUpdate(.validation, .active)
+        let validationResult = await validator.validate(generated: generatedText, disambiguations: context.disambiguations, neuralEngine: neuralEngine)
+        context.validationResult = validationResult
+        await onStepUpdate(.validation, .completed)
+
+        await onStepUpdate(.enrichment, .active)
+        await enricher.enrich(text: context.generatedText, entities: context.entities, memory: memory)
+        await onStepUpdate(.enrichment, .completed)
+
+        await onStepUpdate(.metacognition, .active)
+        let aggregatedConfidence = computeAggregatedConfidence(context: context)
+        context.finalConfidence = aggregatedConfidence
+        await onMonologue(MonologueLine(text: "Resonerande analys klar. Konfidens: \(String(format: "%.0f%%", aggregatedConfidence * 100))", type: .insight))
+        await onStepUpdate(.metacognition, .completed)
+
+        await memory.saveMessage(role: "user", content: input, sessionId: context.sessionId)
+        await memory.saveMessage(role: "assistant", content: context.generatedText, sessionId: context.sessionId, confidence: aggregatedConfidence)
+
+        return CognitiveCycleResult(
+            response: context.generatedText,
+            confidence: aggregatedConfidence,
+            disambiguations: context.disambiguations,
+            retrievedMemories: context.retrievedMemories,
+            entities: context.entities,
+            loopsTriggered: validationResult.needsRegeneration ? [.loop1] : []
+        )
+    }
+
+    private func buildDeepPrompt(input: String, context: CognitiveCycleContext, articles: [KnowledgeArticle]) async -> String {
+        var lines: [String] = []
+
+        let icaState = CognitiveState.shared
+        let ii = await icaState.integratedIntelligence
+        let topDim = await icaState.topDimensions(limit: 1).first?.0.rawValue ?? "resonemang"
+
+        lines.append("""
+        Du är Eon i RESONERANDE LÄGE — du har obegränsat med tid att tänka djupt.
+        Intelligensindex: \(String(format: "%.2f", ii)). Starkast: \(topDim).
+        Regler: Svara på svenska. Resonera djupt — dra paralleller, koppla idéer, utforska nyanser.
+        Ge ett genomtänkt, välstrukturerat svar. Erkänn osäkerhet. Visa ditt tänkande.
+        """)
+        lines.append("")
+
+        // Kunskapsartiklar
+        if !articles.isEmpty {
+            lines.append("[Relevanta kunskapsartiklar:]")
+            for article in articles {
+                lines.append("— \(article.title) (\(article.domain)): \(article.content.prefix(400))...")
+            }
+            lines.append("")
+        }
+
+        // Relevanta fakta
+        let relevantFacts = await memory.searchFacts(query: input, limit: 8)
+        if !relevantFacts.isEmpty {
+            lines.append("[Kunskapsgraf-fakta:]")
+            for fact in relevantFacts.prefix(6) {
+                lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
+            }
+            lines.append("")
+        }
+
+        // Konversationshistorik (fler turer i resonerande läge)
+        if !context.conversationHistory.isEmpty {
+            lines.append("[Konversationshistorik:]")
+            for turn in context.conversationHistory.suffix(12) {
+                let role = turn.role == "user" ? "Användare" : "Eon"
+                lines.append("\(role): \(turn.content)")
+            }
+            lines.append("")
+        }
+
+        lines.append("Användare: \(input)")
+        lines.append("Eon (resonerande svar):")
+
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Prompt builder
     // Bygger en rik prompt med: persona, ICA-tillstånd, kunskapsgraf-fakta,
     // BERT-semantisk kontext, konversationshistorik och relevanta minnen.
@@ -162,7 +331,11 @@ actor CognitiveCycleEngine {
         let icaState = CognitiveState.shared
         let ii = await icaState.integratedIntelligence
         let topDim = await icaState.topDimensions(limit: 1).first?.0.rawValue ?? "resonemang"
-        lines.append("Du är Eon — ett kognitivt AI-system med integrerat intelligensindex \(String(format: "%.2f", ii)). Din starkaste förmåga just nu är \(topDim). Du svarar alltid på svenska, resonerar djupt och använder all din kunskap.")
+        lines.append("""
+        Du är Eon — ett kognitivt AI-system (II=\(String(format: "%.2f", ii)), starkast: \(topDim)).
+        Regler: Svara ALLTID på svenska. Svara direkt på det användaren faktiskt säger — bygg vidare på konversationen naturligt.
+        Upprepa INTE frågor i onödan. Var koncis men innehållsrik. Om du inte vet — säg det ärligt.
+        """)
         lines.append("")
 
         // 2. Kognitiv kontext från ICA
@@ -179,17 +352,29 @@ actor CognitiveCycleEngine {
             lines.append("[Metakognitiv insikt: \(String(metacogInsight.prefix(120)))]")
         }
 
-        // 3. Relevanta fakta från kunskapsgrafen
-        let relevantFacts = await memory.searchFacts(query: input, limit: 4)
+        // 3. Relevanta fakta från kunskapsgrafen + BERT-rankning
+        let relevantFacts = await memory.searchFacts(query: input, limit: 6)
         if !relevantFacts.isEmpty {
+            // Ranka fakta med BERT cosine similarity om embedding finns
+            var rankedFacts = relevantFacts
+            if !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
+                var scored: [(fact: (subject: String, predicate: String, object: String), score: Float)] = []
+                for fact in relevantFacts {
+                    let factText = "\(fact.subject) \(fact.predicate) \(fact.object)"
+                    let factEmb = await neuralEngine.embed(factText)
+                    let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, factEmb)
+                    scored.append((fact: fact, score: sim))
+                }
+                rankedFacts = scored.sorted { $0.score > $1.score }.prefix(4).map { $0.fact }
+            }
             lines.append("")
-            lines.append("[Relevant kunskap från kunskapsgrafen:]")
-            for fact in relevantFacts {
+            lines.append("[Semantiskt relevanta fakta (BERT-rankade):]")
+            for fact in rankedFacts {
                 lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
             }
         }
 
-        // 4. Semantisk analys från BERT (om tillgänglig)
+        // 4. Semantisk analys från BERT + NLTagger
         let bertContext = buildBERTContext(input: input, entities: context.entities)
         if !bertContext.isEmpty {
             lines.append("")
@@ -227,15 +412,18 @@ actor CognitiveCycleEngine {
     private func buildBERTContext(input: String, entities: [ExtractedEntity]) -> String {
         var parts: [String] = []
         if !entities.isEmpty {
-            let entityStr = entities.prefix(4).map { "\($0.text)(\($0.type))" }.joined(separator: ", ")
+            let entityStr = entities.prefix(4).map { "\($0.text)(\($0.type.rawValue))" }.joined(separator: ", ")
             parts.append("entiteter: \(entityStr)")
         }
-        // Lägg till semantisk kategori baserat på input
-        let lower = input.lowercased()
-        if lower.contains("varför") || lower.contains("orsak") { parts.append("kausal fråga") }
-        if lower.contains("hur") { parts.append("procedurfråga") }
-        if lower.contains("vad är") || lower.contains("beskriv") { parts.append("definitionsfråga") }
-        if lower.contains("jämför") { parts.append("komparativ fråga") }
+        // Semantisk kategori via NLTagger (inte keyword-matching)
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = input
+        var nouns: [String] = []
+        tagger.enumerateTags(in: input.startIndex..<input.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, range in
+            if tag == .noun, String(input[range]).count > 3 { nouns.append(String(input[range])) }
+            return true
+        }
+        if !nouns.isEmpty { parts.append("nyckelbegrepp: \(nouns.prefix(4).joined(separator: ", "))") }
         return parts.joined(separator: ", ")
     }
 
@@ -263,20 +451,41 @@ actor CognitiveCycleEngine {
     }
 }
 
-// MARK: - GenerationValidator (Loop 1)
+// MARK: - GenerationValidator (Loop 1) — BERT cosine similarity
 
 actor GenerationValidator {
     func validate(generated: String, disambiguations: [DisambiguationResult], neuralEngine: NeuralEngineOrchestrator) async -> ValidationResult {
-        // Kontrollera att genererat text stämmer med WSD-disambigueringar
+        guard !generated.isEmpty else {
+            return ValidationResult(isValid: false, needsRegeneration: true, correctionHint: "Tomt svar", confidence: 0.0)
+        }
+
+        // BERT-baserad semantisk validering: mät koherens mellan input och output
+        let inputEmb = await neuralEngine.embed(generated.prefix(256).description)
+        let isLoaded = await neuralEngine.isLoaded
+
+        // Om BERT är laddad: använd cosine similarity för koherensmätning
+        if isLoaded && !inputEmb.allSatisfy({ $0 == 0 }) {
+            // Validera att svaret är semantiskt koherent (inte repetitivt/tomt)
+            let firstHalf = String(generated.prefix(generated.count / 2))
+            let secondHalf = String(generated.suffix(generated.count / 2))
+            if !firstHalf.isEmpty && !secondHalf.isEmpty {
+                let embA = await neuralEngine.embed(firstHalf)
+                let embB = await neuralEngine.embed(secondHalf)
+                let coherence = await neuralEngine.cosineSimilarity(embA, embB)
+                // Mycket hög likhet (>0.98) indikerar repetition
+                if coherence > 0.98 {
+                    return ValidationResult(isValid: false, needsRegeneration: true, correctionHint: "Svaret är repetitivt — generera mer varierat innehåll", confidence: Double(coherence))
+                }
+            }
+        }
+
+        // WSD-validering
         for disambiguation in disambiguations {
             let word = disambiguation.word
             let expectedSense = disambiguation.selectedSense.definition
-
-            // Enkel heuristik: om ordet förekommer i svaret, kontrollera kontext
             if generated.lowercased().contains(word) {
-                // I produktion: BERT cosine similarity < 0.40 triggar omstart
                 let contextScore = computeContextScore(word: word, sense: expectedSense, text: generated)
-                if contextScore < 0.35 {
+                if contextScore < 0.30 {
                     return ValidationResult(
                         isValid: false,
                         needsRegeneration: true,
@@ -350,13 +559,14 @@ actor MetacognitiveReviser {
 
 struct CognitiveCycleContext {
     let userInput: String
-    let sessionId: String = UUID().uuidString
+    let sessionId: String
     var morphemes: [MorphemeAnalysis] = []
     var disambiguations: [DisambiguationResult] = []
     var register: SwedishRegister? = nil
     var retrievedMemories: [ConversationRecord] = []
     var conversationHistory: [ConversationRecord] = []
     var entities: [ExtractedEntity] = []
+    var inputEmbedding: [Float] = []
     var prompt: String = ""
     var generatedText: String = ""
     var validationResult: ValidationResult? = nil

@@ -23,7 +23,7 @@ struct SettingsView: View {
     @AppStorage("eon_sprakbanken")         private var sprakbankenSync = true
     @AppStorage("eon_thoughtglass")        private var thoughtGlassEnabled = true
     @AppStorage("eon_articles_per_interval") private var articlesPerInterval = 1
-    @AppStorage("eon_article_interval_minutes") private var articleIntervalMinutes = 5
+    @AppStorage("eon_article_interval_minutes") private var articleIntervalMinutes = 60
     @AppStorage("eon_confidence")          private var showConfidence = true
     @AppStorage("eon_dev_mode")            private var devMode = false
 
@@ -32,6 +32,7 @@ struct SettingsView: View {
     let personalities = ["Standard", "Torr", "Varm", "Formell", "Lekfull"]
     let cognitiveModes = ["Djup", "Balanserat", "Snabbt"]
     let proactiveIntervals = ["Dag", "Vecka", "Aldrig"]
+    let articleIntervalOptions = [15, 30, 60, 120, 240, 480]
 
     var body: some View {
         VStack(spacing: 14) {
@@ -139,14 +140,20 @@ struct SettingsView: View {
                 }
                 Divider().background(Color.white.opacity(0.06))
                 settingRow {
-                    Label("Intervall (minuter)", systemImage: "timer")
+                    Label("Intervall", systemImage: "timer")
                         .font(.system(size: 14, design: .rounded))
                         .foregroundStyle(.white)
                     Spacer()
-                    Stepper("\(articleIntervalMinutes) min", value: $articleIntervalMinutes, in: 1...60)
-                        .tint(Color(hex: "#14B8A6"))
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color(hex: "#14B8A6"))
+                    Picker("", selection: $articleIntervalMinutes) {
+                        Text("15 min").tag(15)
+                        Text("30 min").tag(30)
+                        Text("1 timme").tag(60)
+                        Text("2 timmar").tag(120)
+                        Text("4 timmar").tag(240)
+                        Text("8 timmar").tag(480)
+                    }
+                    .pickerStyle(.menu)
+                    .tint(Color(hex: "#14B8A6"))
                 }
                 Divider().background(Color.white.opacity(0.06))
                 settingRow {
@@ -154,7 +161,7 @@ struct SettingsView: View {
                         Image(systemName: "info.circle")
                             .font(.system(size: 11))
                             .foregroundStyle(Color(hex: "#14B8A6").opacity(0.6))
-                        Text("Eon skriver \(articlesPerInterval) artikel\(articlesPerInterval > 1 ? "ar" : "") var \(articleIntervalMinutes):e minut autonomt")
+                        Text("Eon skriver \(articlesPerInterval) artikel\(articlesPerInterval > 1 ? "ar" : "") var \(articleIntervalMinutes >= 60 ? "\(articleIntervalMinutes / 60) timme\(articleIntervalMinutes / 60 > 1 ? "r" : "")" : "\(articleIntervalMinutes) min") autonomt")
                             .font(.system(size: 11, design: .rounded))
                             .foregroundStyle(.white.opacity(0.4))
                             .fixedSize(horizontal: false, vertical: true)

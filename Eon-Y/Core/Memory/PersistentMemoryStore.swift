@@ -173,21 +173,39 @@ actor PersistentMemoryStore {
             )
         """)
 
+        // Artiklar — fullständigt schema med allt innehåll
+        execute("""
+            CREATE TABLE IF NOT EXISTS articles (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                is_autonomous INTEGER NOT NULL DEFAULT 1,
+                created_at REAL NOT NULL
+            )
+        """)
+
         // Index för performance
         execute("CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id)")
         execute("CREATE INDEX IF NOT EXISTS idx_conv_timestamp ON conversations(timestamp)")
         execute("CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts(subject)")
         execute("CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name)")
+        execute("CREATE INDEX IF NOT EXISTS idx_articles_domain ON articles(domain)")
+        execute("CREATE INDEX IF NOT EXISTS idx_articles_created ON articles(created_at)")
     }
 
     // MARK: - Conversation operations
 
-    func saveMessage(role: String, content: String, sessionId: String, confidence: Double = 0.75, emotion: String = "neutral") {
+    @discardableResult
+    func saveMessage(role: String, content: String, sessionId: String, confidence: Double = 0.75, emotion: String = "neutral") -> Bool {
         let sql = """
             INSERT INTO conversations (session_id, role, content, confidence, emotion, timestamp, importance)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
+        var success = false
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_text(stmt, 1, sessionId, -1, SQLITE_TRANSIENT_FUNC)
             sqlite3_bind_text(stmt, 2, role, -1, SQLITE_TRANSIENT_FUNC)
@@ -196,13 +214,22 @@ actor PersistentMemoryStore {
             sqlite3_bind_text(stmt, 5, emotion, -1, SQLITE_TRANSIENT_FUNC)
             sqlite3_bind_double(stmt, 6, Date().timeIntervalSince1970)
             sqlite3_bind_double(stmt, 7, 0.5)
-            sqlite3_step(stmt)
+            let stepResult = sqlite3_step(stmt)
+            success = (stepResult == SQLITE_DONE)
+            if !success {
+                print("[Memory] saveMessage misslyckades: \(String(cString: sqlite3_errmsg(db)))")
+            }
+        } else {
+            print("[Memory] saveMessage prepare misslyckades: \(String(cString: sqlite3_errmsg(db)))")
         }
         sqlite3_finalize(stmt)
 
-        // Uppdatera FTS
-        let rowId = sqlite3_last_insert_rowid(db)
-        execute("INSERT INTO conversations_fts(rowid, content) VALUES (\(rowId), '\(content.replacingOccurrences(of: "'", with: "''"))')")
+        if success {
+            // Uppdatera FTS
+            let rowId = sqlite3_last_insert_rowid(db)
+            execute("INSERT INTO conversations_fts(rowid, content) VALUES (\(rowId), '\(content.replacingOccurrences(of: "'", with: "''"))')")
+        }
+        return success
     }
 
     func searchConversations(query: String, limit: Int = 10) -> [ConversationRecord] {
@@ -262,12 +289,14 @@ actor PersistentMemoryStore {
 
     // MARK: - Knowledge graph operations
 
-    func saveFact(subject: String, predicate: String, object: String, confidence: Double = 0.7, source: String? = nil) {
+    @discardableResult
+    func saveFact(subject: String, predicate: String, object: String, confidence: Double = 0.7, source: String? = nil) -> Bool {
         let sql = """
             INSERT OR REPLACE INTO facts (subject, predicate, object, confidence, source, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
+        var success = false
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             let now = Date().timeIntervalSince1970
             sqlite3_bind_text(stmt, 1, subject, -1, SQLITE_TRANSIENT_FUNC)
@@ -281,9 +310,16 @@ actor PersistentMemoryStore {
             }
             sqlite3_bind_double(stmt, 6, now)
             sqlite3_bind_double(stmt, 7, now)
-            sqlite3_step(stmt)
+            let stepResult = sqlite3_step(stmt)
+            success = (stepResult == SQLITE_DONE)
+            if !success {
+                print("[Memory] saveFact misslyckades (\(subject)/\(predicate)): \(String(cString: sqlite3_errmsg(db)))")
+            }
+        } else {
+            print("[Memory] saveFact prepare misslyckades: \(String(cString: sqlite3_errmsg(db)))")
         }
         sqlite3_finalize(stmt)
+        return success
     }
 
     func factsAbout(subject: String) -> [(predicate: String, object: String, confidence: Double)] {
@@ -320,7 +356,12 @@ actor PersistentMemoryStore {
             sqlite3_bind_text(stmt, 1, word, -1, SQLITE_TRANSIENT_FUNC)
             sqlite3_bind_text(stmt, 2, sense, -1, SQLITE_TRANSIENT_FUNC)
             sqlite3_bind_double(stmt, 3, Date().timeIntervalSince1970)
-            sqlite3_step(stmt)
+            let result = sqlite3_step(stmt)
+            if result != SQLITE_DONE {
+                print("[Memory] updateWSDProfile misslyckades för '\(word)': \(String(cString: sqlite3_errmsg(db)))")
+            }
+        } else {
+            print("[Memory] updateWSDProfile prepare misslyckades: \(String(cString: sqlite3_errmsg(db)))")
         }
         sqlite3_finalize(stmt)
     }
@@ -351,22 +392,60 @@ actor PersistentMemoryStore {
         return count
     }
 
-    func knowledgeNodeCount() -> Int {
+    // Antal fakta sparade sedan ett visst datum (används för "lärde sig X fakta igår")
+    func factCountSince(_ date: Date) -> Int {
         var count = 0
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM entities", -1, &stmt, nil) == SQLITE_OK {
+        let sql = "SELECT COUNT(*) FROM facts WHERE created_at >= ?"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_double(stmt, 1, date.timeIntervalSince1970)
             if sqlite3_step(stmt) == SQLITE_ROW { count = Int(sqlite3_column_int(stmt, 0)) }
         }
         sqlite3_finalize(stmt)
         return count
     }
 
-    func saveEvalResult(correctness: Double, depth: Double, selfKnowledge: Double, adaptivity: Double, loraVersion: Int, config: String) {
+    // Totalt antal ord i alla sparade konversationer
+    func totalWordCount() -> Int {
+        var count = 0
+        var stmt: OpaquePointer?
+        let sql = "SELECT SUM(LENGTH(user_message) - LENGTH(REPLACE(user_message, ' ', '')) + 1 + LENGTH(eon_response) - LENGTH(REPLACE(eon_response, ' ', '')) + 1) FROM conversations"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW { count = Int(sqlite3_column_int(stmt, 0)) }
+        }
+        sqlite3_finalize(stmt)
+        return max(0, count)
+    }
+
+    // Räknar faktiska kunskapsnoder: fakta + artiklar (entities-tabellen är tom, facts är källan till sanning)
+    func knowledgeNodeCount() -> Int {
+        var factCount = 0
+        var articleCount = 0
+        var stmt: OpaquePointer?
+
+        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM facts", -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW { factCount = Int(sqlite3_column_int(stmt, 0)) }
+        }
+        sqlite3_finalize(stmt)
+        stmt = nil
+
+        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM articles", -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW { articleCount = Int(sqlite3_column_int(stmt, 0)) }
+        }
+        sqlite3_finalize(stmt)
+
+        // Varje artikel räknas som 10 kunskapsnoder (rik representation)
+        return factCount + articleCount * 10
+    }
+
+    @discardableResult
+    func saveEvalResult(correctness: Double, depth: Double, selfKnowledge: Double, adaptivity: Double, loraVersion: Int, config: String) -> Bool {
         let sql = """
             INSERT INTO eval_results (run_date, correctness, depth, self_knowledge, adaptivity, lora_version, config)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
+        var success = false
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
             sqlite3_bind_double(stmt, 2, correctness)
@@ -375,9 +454,16 @@ actor PersistentMemoryStore {
             sqlite3_bind_double(stmt, 5, adaptivity)
             sqlite3_bind_int(stmt, 6, Int32(loraVersion))
             sqlite3_bind_text(stmt, 7, config, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_step(stmt)
+            let stepResult = sqlite3_step(stmt)
+            success = (stepResult == SQLITE_DONE)
+            if !success {
+                print("[Memory] saveEvalResult misslyckades: \(String(cString: sqlite3_errmsg(db)))")
+            }
+        } else {
+            print("[Memory] saveEvalResult prepare misslyckades: \(String(cString: sqlite3_errmsg(db)))")
         }
         sqlite3_finalize(stmt)
+        return success
     }
 
     func recentEvalResults(limit: Int = 14) -> [EvalResult] {
@@ -401,39 +487,111 @@ actor PersistentMemoryStore {
         return results
     }
 
-    // MARK: - Article operations
+    // MARK: - Article operations (fullständigt schema)
 
-    func saveArticle(_ article: KnowledgeArticle) {
+    @discardableResult
+    func saveArticle(_ article: KnowledgeArticle) -> Bool {
         let sql = """
-            INSERT INTO facts (subject, predicate, object, confidence, source, created_at, updated_at)
-            VALUES (?, 'article_content', ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO articles
+                (id, title, content, summary, domain, source, is_autonomous, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
+        var success = false
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            let now = Date().timeIntervalSince1970
-            sqlite3_bind_text(stmt, 1, article.title, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_text(stmt, 2, article.content, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_double(stmt, 3, 0.9)
-            sqlite3_bind_text(stmt, 4, article.source, -1, SQLITE_TRANSIENT_FUNC)
-            sqlite3_bind_double(stmt, 5, now)
-            sqlite3_bind_double(stmt, 6, now)
-            sqlite3_step(stmt)
+            sqlite3_bind_text(stmt, 1, article.id.uuidString, -1, SQLITE_TRANSIENT_FUNC)
+            sqlite3_bind_text(stmt, 2, article.title, -1, SQLITE_TRANSIENT_FUNC)
+            sqlite3_bind_text(stmt, 3, article.content, -1, SQLITE_TRANSIENT_FUNC)
+            sqlite3_bind_text(stmt, 4, article.summary, -1, SQLITE_TRANSIENT_FUNC)
+            sqlite3_bind_text(stmt, 5, article.domain, -1, SQLITE_TRANSIENT_FUNC)
+            sqlite3_bind_text(stmt, 6, article.source, -1, SQLITE_TRANSIENT_FUNC)
+            sqlite3_bind_int(stmt, 7, article.isAutonomous ? 1 : 0)
+            sqlite3_bind_double(stmt, 8, article.date.timeIntervalSince1970)
+            let stepResult = sqlite3_step(stmt)
+            success = (stepResult == SQLITE_DONE)
+            if !success {
+                print("[Memory] saveArticle misslyckades ('\(article.title)'): \(String(cString: sqlite3_errmsg(db)))")
+            }
+        } else {
+            print("[Memory] saveArticle prepare misslyckades: \(String(cString: sqlite3_errmsg(db)))")
         }
         sqlite3_finalize(stmt)
+        return success
     }
 
-    func recentArticleTitles(limit: Int = 5) -> [String] {
-        var results: [String] = []
-        let sql = "SELECT subject FROM facts WHERE predicate = 'article_content' ORDER BY created_at DESC LIMIT ?"
+    func loadAllArticles(limit: Int = 500) -> [KnowledgeArticle] {
+        var results: [KnowledgeArticle] = []
+        let sql = "SELECT id, title, content, summary, domain, source, is_autonomous, created_at FROM articles ORDER BY created_at DESC LIMIT ?"
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_int(stmt, 1, Int32(limit))
             while sqlite3_step(stmt) == SQLITE_ROW {
-                results.append(String(cString: sqlite3_column_text(stmt, 0)))
+                let idStr   = String(cString: sqlite3_column_text(stmt, 0))
+                let title   = String(cString: sqlite3_column_text(stmt, 1))
+                let content = String(cString: sqlite3_column_text(stmt, 2))
+                let summary = String(cString: sqlite3_column_text(stmt, 3))
+                let domain  = String(cString: sqlite3_column_text(stmt, 4))
+                let source  = String(cString: sqlite3_column_text(stmt, 5))
+                let isAuto  = sqlite3_column_int(stmt, 6) == 1
+                let ts      = sqlite3_column_double(stmt, 7)
+                let uuid    = UUID(uuidString: idStr) ?? UUID()
+                results.append(KnowledgeArticle(
+                    id: uuid, title: title, content: content, summary: summary,
+                    domain: domain, source: source,
+                    date: Date(timeIntervalSince1970: ts),
+                    isAutonomous: isAuto
+                ))
             }
         }
         sqlite3_finalize(stmt)
         return results
+    }
+
+    func deleteArticle(title: String) {
+        let safe = title.replacingOccurrences(of: "'", with: "''")
+        execute("DELETE FROM articles WHERE title = '\(safe)'")
+    }
+
+    func articleCount() -> Int {
+        var count = 0
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM articles", -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW { count = Int(sqlite3_column_int(stmt, 0)) }
+        }
+        sqlite3_finalize(stmt)
+        return count
+    }
+
+    func factCount() -> Int {
+        var count = 0
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM facts", -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW { count = Int(sqlite3_column_int(stmt, 0)) }
+        }
+        sqlite3_finalize(stmt)
+        return count
+    }
+
+    // Rensa gamla fakta med låg konfidens — håller databasen snygg
+    func pruneOldFacts(olderThan days: Int, minConfidence: Double) {
+        let cutoff = Date().timeIntervalSince1970 - Double(days) * 86400
+        let sql = "DELETE FROM facts WHERE created_at < ? AND confidence < ?"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_double(stmt, 1, cutoff)
+            sqlite3_bind_double(stmt, 2, minConfidence)
+            let result = sqlite3_step(stmt)
+            if result == SQLITE_DONE {
+                let deleted = sqlite3_changes(db)
+                if deleted > 0 { print("[Memory] Rensade \(deleted) gamla fakta") }
+            }
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    // Bakåtkompatibilitet
+    func recentArticleTitles(limit: Int = 200) -> [String] {
+        loadAllArticles(limit: limit).map { $0.title }
     }
 
     func recentUserMessages(limit: Int = 10) -> [String] {
@@ -452,23 +610,25 @@ actor PersistentMemoryStore {
 
     func randomArticles(limit: Int = 3) -> [KnowledgeArticle] {
         var results: [KnowledgeArticle] = []
-        let sql = "SELECT subject, object, source, created_at FROM facts WHERE predicate = 'article_content' ORDER BY RANDOM() LIMIT ?"
+        let sql = "SELECT id, title, content, summary, domain, source, is_autonomous, created_at FROM articles ORDER BY RANDOM() LIMIT ?"
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_int(stmt, 1, Int32(limit))
             while sqlite3_step(stmt) == SQLITE_ROW {
-                let title = String(cString: sqlite3_column_text(stmt, 0))
-                let content = String(cString: sqlite3_column_text(stmt, 1))
-                let source = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "Eon"
-                let ts = sqlite3_column_double(stmt, 3)
+                let idStr   = String(cString: sqlite3_column_text(stmt, 0))
+                let title   = String(cString: sqlite3_column_text(stmt, 1))
+                let content = String(cString: sqlite3_column_text(stmt, 2))
+                let summary = String(cString: sqlite3_column_text(stmt, 3))
+                let domain  = String(cString: sqlite3_column_text(stmt, 4))
+                let source  = String(cString: sqlite3_column_text(stmt, 5))
+                let isAuto  = sqlite3_column_int(stmt, 6) == 1
+                let ts      = sqlite3_column_double(stmt, 7)
+                let uuid    = UUID(uuidString: idStr) ?? UUID()
                 results.append(KnowledgeArticle(
-                    title: title,
-                    content: content,
-                    summary: String(content.prefix(120)),
-                    domain: "AI & Teknik",
-                    source: source,
+                    id: uuid, title: title, content: content, summary: summary,
+                    domain: domain, source: source,
                     date: Date(timeIntervalSince1970: ts),
-                    isAutonomous: true
+                    isAutonomous: isAuto
                 ))
             }
         }

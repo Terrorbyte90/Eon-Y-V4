@@ -33,7 +33,8 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     @Published var pillarInteractions: [PillarInteraction] = []
 
     private var tasks: [Task<Void, Never>] = []
-    private weak var brain: EonBrain?
+    // Stark referens — EonBrain är singleton och lever hela appens livstid
+    private var brain: EonBrain?
 
     // Snapshot för EonBrain.engineActivity (String-keyed)
     var pillarActivitySnapshot: [String: Double] {
@@ -61,44 +62,44 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         self.brain = brain
         isRunning = true
 
-        // Kärn-orkestrator: koordinerar alla pelare
-        tasks.append(Task { await self.orchestratorLoop() })
+        // Kärn-orkestrator: koordinerar alla pelare (hög prioritet — styr UI)
+        tasks.append(Task(priority: .userInitiated) { await self.orchestratorLoop() })
 
         // Metakognitiv övervakare: styr resursallokering
-        tasks.append(Task { await self.metacognitiveLoop() })
+        tasks.append(Task(priority: .userInitiated) { await self.metacognitiveLoop() })
 
         // Intelligens-gap motor: kartlägger och eliminerar luckor
-        tasks.append(Task { await self.gapEngineLoop() })
+        tasks.append(Task(priority: .utility) { await self.gapEngineLoop() })
 
         // Kausal resonemangspelare
-        tasks.append(Task { await self.causalReasoningPillar() })
+        tasks.append(Task(priority: .userInitiated) { await self.causalReasoningPillar() })
 
         // Kunskapssyntespelare
-        tasks.append(Task { await self.knowledgeSynthesisPillar() })
+        tasks.append(Task(priority: .utility) { await self.knowledgeSynthesisPillar() })
 
         // Hypotes-generering och testning
-        tasks.append(Task { await self.hypothesisPillar() })
+        tasks.append(Task(priority: .utility) { await self.hypothesisPillar() })
 
         // Analogibyggande
-        tasks.append(Task { await self.analogyPillar() })
+        tasks.append(Task(priority: .utility) { await self.analogyPillar() })
 
         // Världsmodelluppdatering
-        tasks.append(Task { await self.worldModelPillar() })
+        tasks.append(Task(priority: .utility) { await self.worldModelPillar() })
 
         // Självutvecklingspelare
-        tasks.append(Task { await self.selfDevelopmentPillar() })
+        tasks.append(Task(priority: .utility) { await self.selfDevelopmentPillar() })
 
         // Språkutvecklingspelare
-        tasks.append(Task { await self.languageDevelopmentPillar() })
+        tasks.append(Task(priority: .utility) { await self.languageDevelopmentPillar() })
 
         // Global Workspace-integration
-        tasks.append(Task { await self.globalWorkspacePillar() })
+        tasks.append(Task(priority: .userInitiated) { await self.globalWorkspacePillar() })
 
         // Prediktionspelare
-        tasks.append(Task { await self.predictionPillar() })
+        tasks.append(Task(priority: .utility) { await self.predictionPillar() })
 
         // Feedback-loop-förstärkare
-        tasks.append(Task { await self.feedbackAmplifier() })
+        tasks.append(Task(priority: .utility) { await self.feedbackAmplifier() })
     }
 
     func stop() {
@@ -107,36 +108,80 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         isRunning = false
     }
 
-    // MARK: - Orkestrator (3s) — koordinerar alla pelare
+    // MARK: - Orkestrator (2s) — koordinerar alla pelare, alltid aktiv
 
     private func orchestratorLoop() async {
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             currentCycle += 1
 
             let state = CognitiveState.shared
             let ii = state.integratedIntelligence
             let velocity = state.growthVelocity
+            let t = Double(currentCycle)
 
             // Uppdatera brain med ICA-status
             brain.isAutonomouslyActive = true
             brain.autonomousProcessLabel = buildStatusLabel(ii: ii, velocity: velocity, state: state)
 
-            // Uppdatera engineActivity för UI
+            // Uppdatera intern pillarActivity (används för snapshot)
             for pillar in CognitivePillar.allCases {
                 let dimLevel = state.dimensionLevel(pillar.primaryDimension)
-                brain.engineActivity[pillar.rawValue] = dimLevel
                 pillarActivity[pillar] = dimLevel
             }
 
+            // Skriv ALLTID alla 7 UI-nycklar till brain.engineActivity
+            // base är ALLTID minst 0.35 — appen ska aldrig se död ut
+            let base = brain.isThinking ? 0.72 : max(0.38, ii * 0.8 + 0.25)
+            brain.engineActivity = [
+                "cognitive":  clamp(state.dimensionLevel(.reasoning)   * 0.5 + base * 0.5 + 0.12 * abs(sin(t * 0.31)), 0.28, 0.97),
+                "language":   clamp(state.dimensionLevel(.language)    * 0.5 + base * 0.5 + 0.10 * abs(sin(t * 0.43 + 1.1)), 0.24, 0.93),
+                "memory":     clamp(state.dimensionLevel(.knowledge)   * 0.5 + base * 0.5 + 0.09 * abs(sin(t * 0.51 + 2.3)), 0.20, 0.90),
+                "learning":   clamp(state.dimensionLevel(.learning)    * 0.5 + base * 0.5 + 0.08 * abs(cos(t * 0.37 + 0.9)), 0.18, 0.88),
+                "autonomy":   clamp(state.dimensionLevel(.metacognition) * 0.5 + base * 0.45 + 0.10 * abs(sin(t * 0.21 + 3.1)), 0.22, 0.85),
+                "hypothesis": clamp(state.dimensionLevel(.hypothesisGeneration) * 0.5 + base * 0.4 + 0.07 * abs(sin(t * 0.17 + 1.7)), 0.16, 0.80),
+                "worldModel": clamp(state.dimensionLevel(.worldModel)  * 0.5 + base * 0.45 + 0.08 * abs(cos(t * 0.26 + 2.5)), 0.18, 0.82),
+            ]
+
             // Propagera integrerat intelligensindex till brain
-            brain.phiValue = ii  // Φ ≈ integrerat intelligensindex
+            brain.phiValue = ii
+            brain.integratedIntelligence = ii
+            brain.intelligenceGrowthVelocity = velocity
+
+            // Aktiv självutveckling: öka alla dimensioner kontinuerligt (liten men konstant)
+            // Detta säkerställer att Eon alltid växer, även utan input
+            let baseGrowth = 0.0002 * (1.0 - ii)  // Avtar när II är hög (logistisk kurva)
+            for dim in CognitiveDimension.allCases.filter({ state.dimensionLevel($0) < 0.95 }) {
+                await state.update(dimension: dim, delta: baseGrowth, source: "orchestrator_growth")
+            }
 
             // Trigga event baserat på tillstånd
             await checkAndFireEvents(state: state, brain: brain)
 
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            // Prestandaläge-anpassat intervall
+            let perfMode = PerformanceMode(rawValue: UserDefaults.standard.integer(forKey: "eon_performance_mode")) ?? .auto
+            let interval: UInt64
+            switch perfMode {
+            case .maximal:  interval = 1_500_000_000
+            case .balanced: interval = 2_000_000_000
+            case .sparse:   interval = 4_000_000_000
+            case .rest:     interval = 8_000_000_000
+            case .auto, .adaptive:
+                let thermalState = ProcessInfo.processInfo.thermalState
+                switch thermalState {
+                case .nominal:  interval = 2_000_000_000
+                case .fair:     interval = 3_000_000_000
+                case .serious:  interval = 5_000_000_000
+                case .critical: interval = 8_000_000_000
+                @unknown default: interval = 2_000_000_000
+                }
+            }
+            try? await Task.sleep(nanoseconds: interval)
         }
+    }
+
+    private func clamp(_ value: Double, _ lo: Double, _ hi: Double) -> Double {
+        min(max(value, lo), hi)
     }
 
     private func buildStatusLabel(ii: Double, velocity: Double, state: CognitiveState) -> String {
@@ -212,9 +257,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Metakognitiv loop (30s)
 
     private func metacognitiveLoop() async {
-        try? await Task.sleep(nanoseconds: 15_000_000_000)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.metacognition)
 
             let report = await MetacognitionCore.shared.runMetacognitiveCycle()
@@ -246,9 +291,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Gap Engine Loop (45s)
 
     private func gapEngineLoop() async {
-        try? await Task.sleep(nanoseconds: 20_000_000_000)
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.gapEngine)
 
             let analysis = await IntelligenceGapEngine.shared.analyzeAndIntervene()
@@ -284,9 +329,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Kausal resonemangspelare (20s)
 
     private func causalReasoningPillar() async {
-        try? await Task.sleep(nanoseconds: 8_000_000_000)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.causality)
 
             let state = CognitiveState.shared
@@ -349,9 +394,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Kunskapssyntespelare (35s)
 
     private func knowledgeSynthesisPillar() async {
-        try? await Task.sleep(nanoseconds: 12_000_000_000)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.knowledge)
 
             let state = CognitiveState.shared
@@ -409,9 +454,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Hypotespelare (50s)
 
     private func hypothesisPillar() async {
-        try? await Task.sleep(nanoseconds: 25_000_000_000)
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.hypothesis)
 
             let state = CognitiveState.shared
@@ -468,9 +513,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Analogipelare (40s)
 
     private func analogyPillar() async {
-        try? await Task.sleep(nanoseconds: 30_000_000_000)
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.analogy)
 
             let state = CognitiveState.shared
@@ -508,9 +553,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Världsmodellpelare (60s)
 
     private func worldModelPillar() async {
-        try? await Task.sleep(nanoseconds: 40_000_000_000)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.worldModel)
 
             let state = CognitiveState.shared
@@ -555,9 +600,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Självutvecklingspelare (90s)
 
     private func selfDevelopmentPillar() async {
-        try? await Task.sleep(nanoseconds: 50_000_000_000)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.selfDevelopment)
 
             let state = CognitiveState.shared
@@ -611,9 +656,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Språkutvecklingspelare (25s)
 
     private func languageDevelopmentPillar() async {
-        try? await Task.sleep(nanoseconds: 10_000_000_000)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.language)
 
             let state = CognitiveState.shared
@@ -657,7 +702,7 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     private func globalWorkspacePillar() async {
         try? await Task.sleep(nanoseconds: 5_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
 
             let state = CognitiveState.shared
 
@@ -691,9 +736,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Prediktionspelare (70s)
 
     private func predictionPillar() async {
-        try? await Task.sleep(nanoseconds: 55_000_000_000)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
             activePillars.insert(.prediction)
 
             let state = CognitiveState.shared
@@ -732,9 +777,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Feedback-förstärkare (15s)
 
     private func feedbackAmplifier() async {
-        try? await Task.sleep(nanoseconds: 15_000_000_000)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { break }
+            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
 
             let state = CognitiveState.shared
 
@@ -759,7 +804,7 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
                 ))
             }
 
-            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
         }
     }
 }

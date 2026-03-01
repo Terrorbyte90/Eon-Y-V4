@@ -90,15 +90,15 @@ struct ProfileRootView: View {
                         .font(.system(size: 11, design: .rounded))
                         .foregroundStyle(.white.opacity(0.35))
 
-                    // Stats rad
+                    // Stats rad — alla värden från faktisk data
                     HStack(spacing: 0) {
                         ProfileStatItem(value: "\(userProfile.totalConversations)", label: "Samtal", color: Color(hex: "#F472B6"))
                         Divider().background(Color.white.opacity(0.1)).frame(height: 30)
-                        ProfileStatItem(value: "\(userProfile.totalConversations * 27)", label: "Ord totalt", color: Color(hex: "#A78BFA"))
+                        ProfileStatItem(value: wordCountLabel, label: "Ord totalt", color: Color(hex: "#A78BFA"))
                         Divider().background(Color.white.opacity(0.1)).frame(height: 30)
-                        ProfileStatItem(value: "\(min(100, userProfile.totalConversations * 2 + 15))%", label: "Engagemang", color: Color(hex: "#5EEAD4"))
+                        ProfileStatItem(value: engagementLabel, label: "Engagemang", color: Color(hex: "#5EEAD4"))
                         Divider().background(Color.white.opacity(0.1)).frame(height: 30)
-                        ProfileStatItem(value: "\(min(100, userProfile.totalConversations + 8))%", label: "Vokabulär", color: Color(hex: "#FBBF24"))
+                        ProfileStatItem(value: "\(userProfile.uniqueVocabularySize)", label: "Unika ord", color: Color(hex: "#FBBF24"))
                     }
                     .padding(.vertical, 10)
                     .background(
@@ -133,6 +133,20 @@ struct ProfileRootView: View {
                 .overlay(Color(hex: "#07050F").opacity(0.5))
                 .ignoresSafeArea(edges: .top)
         )
+    }
+
+    // Formatera ordantal: 1 234 → "1,2k" om > 999
+    private var wordCountLabel: String {
+        let n = userProfile.totalWordCount
+        if n >= 1000 { return String(format: "%.1fk", Double(n) / 1000.0) }
+        return "\(n)"
+    }
+
+    // Engagemang: baserat på kommunikationsstil (frågefrekvens + meddelandelängd)
+    private var engagementLabel: String {
+        let style = userProfile.communicationStyle
+        let score = min(1.0, style.questionFrequency * 0.5 + min(1.0, style.avgMessageLength / 40.0) * 0.5)
+        return "\(Int(score * 100))%"
     }
 
     private var userInitials: String {

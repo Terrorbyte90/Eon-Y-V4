@@ -1,904 +1,525 @@
 import SwiftUI
 import Combine
 
-// MARK: - EonPulseHomeView
+// MARK: - EonPulseHomeView v5 — TimelineView-driven, garanterat levande
 
 struct EonPulseHomeView: View {
     @EnvironmentObject var brain: EonBrain
+    @Environment(\.tabBarVisible) private var tabBarVisible
+
+    @State private var ring1: Double = 0
+    @State private var ring2: Double = 0
+    @State private var ring3: Double = 0
     @State private var orbPulse: CGFloat = 1.0
-    @State private var orbBreath: CGFloat = 1.0
-    @State private var ringAngle: Double = 0
-    @State private var innerRingAngle: Double = 0
-    @State private var outerGlowPulse: CGFloat = 1.0
-    @State private var particlePhase: Double = 0
-    @State private var popupEngines: [EnginePopup] = []
-    @State private var thoughtBubble: String = ""
-    @State private var showThoughtBubble = false
-    @State private var wordCount: Int = 114_000
-    @State private var articleCount: Int = 0
-    @State private var activeNodeIdx: Int = 0
+    @State private var particles: [HomeParticle] = HomeParticle.generate(count: 20)
+    @State private var showContent = false
 
     var body: some View {
-        ZStack {
-            Color(hex: "#07050F").ignoresSafeArea()
-            RadialGradient(
-                colors: [Color(hex: "#130A2A").opacity(0.8), Color(hex: "#07050F")],
-                center: .top, startRadius: 0, endRadius: 400
-            ).ignoresSafeArea()
-
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    headerSection
-                    eonLiveSection
-                        .frame(height: 310)
-                    VStack(spacing: 12) {
-                        intelligenceCard
-                        thoughtsCard
-                        activityCard
-                        statsGridSection
+        // TimelineView uppdaterar varje sekund — garanterar att UI alltid ritas om
+        TimelineView(.periodic(from: .now, by: 1.0)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            ZStack {
+                background(t: t)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        orbSection(t: t)
+                            .padding(.top, -40)
+                        titleSection(t: t)
+                            .padding(.top, 18)
+                        if showContent {
+                            monologueSection
+                                .padding(.top, 16).padding(.horizontal, 16)
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+                        Color.clear.frame(height: 40)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 10)
-                    .padding(.bottom, 28)
+                    .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
                 }
+                .coordinateSpace(name: "scrollSpace")
             }
         }
         .onAppear {
             startAnimations()
-            loadStats()
-        }
-        .onReceive(brain.$innerMonologue) { lines in
-            if let last = lines.last { handleNewThought(last) }
+            withAnimation(.easeOut(duration: 0.5).delay(0.3)) { showContent = true }
         }
     }
 
-    // MARK: - Header
+    // MARK: - Background
 
-    var headerSection: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text("Eon-Y")
-                        .font(.system(size: 30, weight: .black, design: .rounded))
-                        .foregroundStyle(LinearGradient(
-                            colors: [Color(hex: "#C4B5FD"), Color(hex: "#5EEAD4")],
-                            startPoint: .leading, endPoint: .trailing
-                        ))
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(brain.isAutonomouslyActive ? Color(hex: "#5EEAD4") : Color(hex: "#EF4444"))
-                            .frame(width: 6, height: 6)
-                            .pulseAnimation(min: 0.4, max: 1.6, duration: 0.85)
-                        Text("LIVE")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundStyle(Color(hex: "#5EEAD4"))
-                    }
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Capsule().fill(Color(hex: "#5EEAD4").opacity(0.1))
-                        .overlay(Capsule().strokeBorder(Color(hex: "#5EEAD4").opacity(0.3), lineWidth: 0.5)))
-                }
-                Text(brain.isThinking ? "⚡ \(brain.currentThinkingStep.label)" : brain.autonomousProcessLabel)
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .lineLimit(1)
-                    .animation(.easeInOut, value: brain.autonomousProcessLabel)
-            }
-            Spacer()
-            VStack(spacing: 2) {
-                Text(String(format: "%.3f", brain.integratedIntelligence))
-                    .font(.system(size: 16, weight: .black, design: .monospaced))
-                    .foregroundStyle(.white)
-                Text("II-index")
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.4))
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 12)
-                .fill(Color.white.opacity(0.04))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(hex: "#7C3AED").opacity(0.4), lineWidth: 0.6)))
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 6)
-    }
-
-    // MARK: - Eon Live Visualization (levande cirkel)
-
-    var eonLiveSection: some View {
-        GeometryReader { geo in
-            ZStack {
-                let cx = geo.size.width / 2
-                let cy = geo.size.height * 0.52
-
-                // Nebula bakgrund
-                ForEach(0..<3, id: \.self) { i in
-                    let cols: [Color] = [
-                        Color(hex: "#7C3AED").opacity(0.14),
-                        Color(hex: "#14B8A6").opacity(0.09),
-                        Color(hex: "#06B6D4").opacity(0.07)
-                    ]
-                    let pos: [(CGFloat, CGFloat)] = [(0.18, 0.28), (0.82, 0.22), (0.5, 0.78)]
-                    Ellipse()
-                        .fill(RadialGradient(colors: [cols[i], .clear], center: .center, startRadius: 0, endRadius: 150))
-                        .frame(width: 280, height: 180)
-                        .position(x: geo.size.width * pos[i].0, y: geo.size.height * pos[i].1)
-                        .blur(radius: 35)
-                }
-
-                // Yttre orbit-ringar — aktivitetsbaserade
-                ForEach(0..<5, id: \.self) { i in
-                    let r = CGFloat(68 + i * 34)
-                    let speed = Double(i % 2 == 0 ? 1 : -1) * (0.3 + Double(i) * 0.08)
-                    let ringCols: [Color] = [
-                        Color(hex: "#7C3AED"), Color(hex: "#14B8A6"),
-                        Color(hex: "#06B6D4"), Color(hex: "#F59E0B"), Color(hex: "#A78BFA")
-                    ]
-                    let keys = ["cognitive", "language", "memory", "learning", "autonomy"]
-                    let act = max(0.04, brain.engineActivity[keys[i]] ?? 0.04)
-                    Circle()
-                        .strokeBorder(
-                            AngularGradient(
-                                colors: [
-                                    ringCols[i].opacity(0.03 + act * 0.55),
-                                    ringCols[i].opacity(0.01),
-                                    ringCols[i].opacity(0.03 + act * 0.55)
-                                ],
-                                center: .center
-                            ),
-                            lineWidth: 0.5 + act * 2.0
-                        )
-                        .frame(width: r * 2, height: r * 2)
-                        .rotationEffect(.degrees(ringAngle * speed))
-                        .position(x: cx, y: cy)
-                }
-
-                // Aktiva pelare som lysande noder på yttre ring
-                let pillars = Array(brain.activePillars.prefix(8))
-                ForEach(Array(pillars.enumerated()), id: \.offset) { idx, pillar in
-                    let angle = Double(idx) / Double(max(pillars.count, 1)) * 360.0 - 90 + ringAngle * 0.15
-                    let r: CGFloat = 118
-                    let x = cx + CGFloat(cos(angle * .pi / 180)) * r
-                    let y = cy + CGFloat(sin(angle * .pi / 180)) * r
-                    PillarDot(pillar: pillar, isActive: true)
-                        .position(x: x, y: y)
-                }
-
-                // Central Eon — levande orb
-                liveOrbView
-                    .position(x: cx, y: cy)
-
-                // Engine popups
-                ForEach(popupEngines) { popup in
-                    EnginePopupView(popup: popup)
-                        .position(x: cx + popup.offset.width, y: cy + popup.offset.height)
-                }
-
-                // Tankebubbla
-                if showThoughtBubble && !thoughtBubble.isEmpty {
-                    thoughtBubbleView
-                        .position(x: geo.size.width * 0.5, y: geo.size.height * 0.09)
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.8).combined(with: .opacity),
-                            removal: .opacity
-                        ))
-                }
-
-                // Aktiv process-label längst ner
-                if !brain.autonomousProcessLabel.isEmpty {
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(dominantColor)
-                            .frame(width: 4, height: 4)
-                            .pulseAnimation(min: 0.5, max: 1.5, duration: 0.8)
-                        Text(brain.autonomousProcessLabel)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.45))
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 5)
-                    .background(Capsule().fill(Color.white.opacity(0.04))
-                        .overlay(Capsule().strokeBorder(dominantColor.opacity(0.25), lineWidth: 0.4)))
-                    .position(x: geo.size.width * 0.5, y: geo.size.height * 0.93)
-                }
-            }
+    func background(t: Double) -> some View {
+        let activity = activityLevel
+        let dominant = dominantColor
+        return ZStack {
+            Color(hex: "#050310").ignoresSafeArea()
+            RadialGradient(
+                colors: [dominant.opacity(0.16 + activity * 0.10), Color.clear],
+                center: .init(x: 0.5, y: 0.0),
+                startRadius: 0, endRadius: 500
+            ).ignoresSafeArea()
+            RadialGradient(
+                colors: [Color(hex: "#0A0520").opacity(0.85), Color.clear],
+                center: .bottomLeading, startRadius: 0, endRadius: 400
+            ).ignoresSafeArea()
         }
     }
 
-    // Dominant färg baserat på mest aktiv pelare
-    var dominantColor: Color {
-        let act = brain.engineActivity
-        let sorted = act.sorted { $0.value > $1.value }
-        switch sorted.first?.key {
-        case "cognitive":  return Color(hex: "#7C3AED")
-        case "language":   return Color(hex: "#14B8A6")
-        case "memory":     return Color(hex: "#06B6D4")
-        case "learning":   return Color(hex: "#F59E0B")
-        case "autonomy":   return Color(hex: "#A78BFA")
-        default:           return Color(hex: "#7C3AED")
-        }
-    }
+    // MARK: - Orb
 
-    // MARK: - Levande Eon-orb (organisk, pulsande)
-
-    var liveOrbView: some View {
-        ZStack {
-            // Lager 1: Yttre diffus aura — andas med aktivitet
-            let actLevel = (brain.engineActivity.values.max() ?? 0.2)
+    func orbSection(t: Double) -> some View {
+        let dominant = dominantColor
+        let activity = activityLevel
+        return ZStack {
+            // Ambient glow
             Circle()
                 .fill(RadialGradient(
-                    colors: [dominantColor.opacity(0.18 + actLevel * 0.22), .clear],
-                    center: .center, startRadius: 0, endRadius: 72
+                    colors: [dominant.opacity(0.20 + activity * 0.12), Color.clear],
+                    center: .center, startRadius: 0, endRadius: 180
                 ))
-                .frame(width: 144, height: 144)
-                .blur(radius: 22)
-                .scaleEffect(outerGlowPulse)
-
-            // Lager 2: Sekundär glow i komplementfärg
-            Circle()
-                .fill(RadialGradient(
-                    colors: [Color(hex: "#5EEAD4").opacity(0.10 + actLevel * 0.12), .clear],
-                    center: UnitPoint(x: 0.6, y: 0.4), startRadius: 0, endRadius: 55
-                ))
-                .frame(width: 110, height: 110)
-                .blur(radius: 14)
-                .scaleEffect(orbBreath)
-
-            // Lager 3: Kognitiv belastnings-ring (yttre)
-            Circle()
-                .trim(from: 0, to: CGFloat(min(1, brain.cognitiveLoad + 0.05)))
-                .stroke(
-                    AngularGradient(
-                        colors: [
-                            dominantColor.opacity(0.0),
-                            dominantColor.opacity(0.6),
-                            Color(hex: "#5EEAD4").opacity(0.8),
-                            dominantColor.opacity(0.6),
-                            dominantColor.opacity(0.0)
-                        ],
-                        center: .center
-                    ),
-                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
-                )
-                .frame(width: 92, height: 92)
-                .rotationEffect(.degrees(innerRingAngle - 90))
-
-            // Lager 4: Aktivitets-arc (innerring, snabbare rotation)
-            Circle()
-                .trim(from: 0.1, to: 0.1 + CGFloat(actLevel * 0.7))
-                .stroke(
-                    AngularGradient(
-                        colors: [.clear, Color(hex: "#A78BFA").opacity(0.9), .clear],
-                        center: .center
-                    ),
-                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
-                )
-                .frame(width: 78, height: 78)
-                .rotationEffect(.degrees(-innerRingAngle * 1.7))
-
-            // Lager 5: Huvud-orb — flytande, levande
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            Color(hex: "#E0D7FF").opacity(0.95),
-                            dominantColor.opacity(0.80),
-                            Color(hex: "#1A0A3A").opacity(0.90)
-                        ],
-                        center: UnitPoint(
-                            x: 0.35 + 0.05 * CGFloat(sin(particlePhase * 0.7)),
-                            y: 0.30 + 0.04 * CGFloat(cos(particlePhase * 0.9))
-                        ),
-                        startRadius: 0, endRadius: 36
-                    )
-                )
-                .frame(width: 72, height: 72)
+                .frame(width: 360, height: 360)
+                .blur(radius: 28)
                 .scaleEffect(orbPulse)
-                .overlay(
-                    Circle().strokeBorder(
+
+            // Partiklar
+            ForEach(particles) { p in
+                HomeParticleView(particle: p, color: dominant)
+            }
+
+            // Ring 3 — yttre, långsam
+            Circle()
+                .trim(from: 0, to: 0.55)
+                .stroke(
+                    AngularGradient(
+                        colors: [.clear, dominant.opacity(0.30), Color(hex: "#38BDF8").opacity(0.18), .clear],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 1.0, lineCap: .round, dash: [4, 10])
+                )
+                .frame(width: 240, height: 240)
+                .rotationEffect(.degrees(ring3))
+
+            // Ring 2 — medel
+            Circle()
+                .trim(from: 0, to: 0.70)
+                .stroke(
+                    AngularGradient(
+                        colors: [.clear, dominant.opacity(0.60), Color(hex: "#5EEAD4").opacity(0.30), .clear],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round)
+                )
+                .frame(width: 190, height: 190)
+                .rotationEffect(.degrees(ring2))
+
+            // Ring 1 — inre, snabb
+            Circle()
+                .trim(from: 0, to: 0.45)
+                .stroke(
+                    AngularGradient(
+                        colors: [.clear, Color(hex: "#A78BFA").opacity(0.85), dominant.opacity(0.55), .clear],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 1.8, lineCap: .round)
+                )
+                .frame(width: 148, height: 148)
+                .rotationEffect(.degrees(ring1))
+
+            // Kärna
+            ZStack {
+                Circle()
+                    .fill(RadialGradient(
+                        colors: [
+                            Color(hex: "#2D1B69").opacity(0.98),
+                            Color(hex: "#1A0A3E").opacity(0.95),
+                            Color(hex: "#060410")
+                        ],
+                        center: .center, startRadius: 0, endRadius: 68
+                    ))
+                    .frame(width: 136, height: 136)
+
+                Circle()
+                    .strokeBorder(
                         LinearGradient(
-                            colors: [
-                                Color(hex: "#C4B5FD").opacity(0.9),
-                                dominantColor.opacity(0.55),
-                                Color(hex: "#5EEAD4").opacity(0.4)
-                            ],
+                            colors: [dominant.opacity(0.9), Color(hex: "#38BDF8").opacity(0.5), dominant.opacity(0.2)],
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         ),
-                        lineWidth: 1.2
+                        lineWidth: 1.4
+                    )
+                    .frame(width: 136, height: 136)
+                    .shadow(color: dominant.opacity(0.6), radius: 20)
+
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 42, weight: .ultraLight))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [dominant, Color(hex: "#38BDF8")],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: dominant.opacity(0.9), radius: 14)
+
+                // Aktivitetsdottar runt kärnan
+                ForEach(0..<7, id: \.self) { i in
+                    let keys = ["cognitive","language","memory","learning","autonomy","hypothesis","worldModel"]
+                    let key = keys[i]
+                    let act = brain.engineActivity[key] ?? 0.5
+                    let angle = Double(i) / 7.0 * 360 - 90
+                    Circle()
+                        .fill(engineColor(key))
+                        .frame(width: act > 0.4 ? 5 : 3, height: act > 0.4 ? 5 : 3)
+                        .opacity(0.9)
+                        .shadow(color: engineColor(key).opacity(0.9), radius: 5)
+                        .offset(y: -62)
+                        .rotationEffect(.degrees(angle + ring1 * 0.06))
+                }
+            }
+            .scaleEffect(orbPulse)
+        }
+        .frame(height: 280)
+    }
+
+    // MARK: - Titel + Ticker
+
+    func titleSection(t: Double) -> some View {
+        let dominant = dominantColor
+        let label = brain.autonomousProcessLabel
+        return VStack(spacing: 10) {
+            Text("E O N")
+                .font(.system(size: 54, weight: .black, design: .rounded))
+                .tracking(18)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [Color(hex: "#C4B5FD"), Color(hex: "#38BDF8"), Color(hex: "#34D399")],
+                        startPoint: .leading, endPoint: .trailing
                     )
                 )
-                .shadow(color: dominantColor.opacity(0.7), radius: 18)
-                .shadow(color: Color(hex: "#5EEAD4").opacity(0.25), radius: 8)
+                .shadow(color: dominant.opacity(0.5), radius: 24)
 
-            // Lager 6: Spegelrefleks (glans uppe till vänster)
-            Ellipse()
-                .fill(LinearGradient(
-                    colors: [.white.opacity(0.35), .clear],
-                    startPoint: .topLeading, endPoint: .center
-                ))
-                .frame(width: 22, height: 14)
-                .offset(x: -14, y: -18)
-                .blur(radius: 2)
-
-            // Lager 7: Innehåll — ikon + II-värde
-            VStack(spacing: 2) {
-                Group {
-                    if brain.isThinking {
-                        Image(systemName: brain.currentThinkingStep.icon)
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(.white)
-                            .transition(.scale(scale: 0.5).combined(with: .opacity))
-                    } else {
-                        Image(systemName: "brain.head.profile")
-                            .font(.system(size: 15, weight: .ultraLight))
-                            .foregroundStyle(.white.opacity(0.88))
-                    }
-                }
-                .animation(.spring(response: 0.3), value: brain.isThinking)
-
-                Text(String(format: "%.2f", brain.integratedIntelligence))
-                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.75))
+            HStack(spacing: 16) {
+                liveDot(Color(hex: "#34D399"), "Autonom")
+                Text("·").foregroundStyle(.white.opacity(0.2))
+                liveDot(Color(hex: "#38BDF8"), "Levande")
+                Text("·").foregroundStyle(.white.opacity(0.2))
+                liveDot(Color(hex: "#A78BFA"), "Intelligent")
             }
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
 
-            // Lager 8: Aktivitetspartiklar runt orben
-            ForEach(0..<6, id: \.self) { i in
-                let angle = particlePhase * 60 + Double(i) * 60
-                let r: CGFloat = 40 + CGFloat(i % 2) * 5
-                let px = CGFloat(cos(angle * .pi / 180)) * r
-                let py = CGFloat(sin(angle * .pi / 180)) * r
-                let pAct = brain.engineActivity[["cognitive","language","memory","learning","autonomy","hypothesis"][i]] ?? 0.1
+            // Process-label — uppdateras via TimelineView
+            HStack(spacing: 8) {
                 Circle()
-                    .fill(dominantColor.opacity(0.3 + pAct * 0.5))
-                    .frame(width: 3 + CGFloat(pAct) * 2, height: 3 + CGFloat(pAct) * 2)
-                    .blur(radius: 1)
-                    .offset(x: px, y: py)
+                    .fill(dominant)
+                    .frame(width: 5, height: 5)
+                    .shadow(color: dominant.opacity(0.9), radius: 5)
+                    .scaleEffect(orbPulse)
+                Text(label)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(dominant.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .id(label) // tvingar omritning när label ändras
             }
-        }
-        .onAppear {
-            withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
-                particlePhase = 360
-            }
+            .padding(.horizontal, 18).padding(.vertical, 9)
+            .background(
+                Capsule()
+                    .fill(dominant.opacity(0.08))
+                    .overlay(Capsule().strokeBorder(dominant.opacity(0.30), lineWidth: 0.7))
+            )
+            .padding(.horizontal, 36)
         }
     }
 
-    var thoughtBubbleView: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "bubble.left.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(Color(hex: "#A78BFA"))
-            Text(thoughtBubble)
-                .font(.system(size: 10.5, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
-                .lineLimit(2)
+    func liveDot(_ color: Color, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 5, height: 5)
+                .shadow(color: color.opacity(0.8), radius: 4)
+                .scaleEffect(orbPulse)
+            Text(label)
+                .foregroundStyle(color.opacity(0.7))
         }
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(RoundedRectangle(cornerRadius: 12)
-            .fill(.ultraThinMaterial)
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(hex: "#7C3AED").opacity(0.5), lineWidth: 0.6)))
-        .frame(maxWidth: 260)
-        .shadow(color: Color(hex: "#7C3AED").opacity(0.3), radius: 10)
     }
 
-    // MARK: - Gemensam kortbakgrund
+    // MARK: - Live Monologue
 
-    @ViewBuilder
-    func cardBackground(topColor: Color, bottomColor: Color) -> some View {
-        RoundedRectangle(cornerRadius: 18)
-            .fill(Color.white.opacity(0.03))
-            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(
-                LinearGradient(
-                    colors: [topColor.opacity(0.4), bottomColor.opacity(0.2)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                ),
-                lineWidth: 0.6
-            ))
-    }
-
-    // MARK: - Intelligens-kort (progressbar + nivå)
-
-    var intelligenceCard: some View {
-        let ii = brain.integratedIntelligence
-        let level = intelligenceLevel(for: ii)
-        let next = nextLevel(for: ii)
-        let progress = levelProgress(for: ii)
-
-        return VStack(spacing: 0) {
-            HStack(alignment: .center) {
-                HStack(spacing: 8) {
-                    Text(level.emoji).font(.system(size: 22))
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(level.name)
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text(level.ageLabel)
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text("→ \(next.name)")
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.35))
-                        Text(String(format: "%.0f%%", progress * 100))
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundStyle(Color(hex: "#A78BFA"))
-                    }
-                    if brain.intelligenceGrowthVelocity > 0 {
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.up.right").font(.system(size: 8))
-                            Text(String(format: "+%.5f/min", brain.intelligenceGrowthVelocity))
-                                .font(.system(size: 8, design: .monospaced))
-                        }
-                        .foregroundStyle(Color(hex: "#5EEAD4"))
-                    }
-                }
-            }
-            .padding(.horizontal, 14).padding(.top, 12)
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)).frame(height: 6)
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(LinearGradient(colors: [Color(hex: "#7C3AED"), Color(hex: "#14B8A6")], startPoint: .leading, endPoint: .trailing))
-                        .frame(width: geo.size.width * CGFloat(progress), height: 6)
-                        .animation(.spring(response: 1.0), value: progress)
-                        .shadow(color: Color(hex: "#7C3AED").opacity(0.6), radius: 5)
-                }
-            }
-            .frame(height: 6)
-            .padding(.horizontal, 14).padding(.vertical, 10)
-
-            Text(level.description)
-                .font(.system(size: 10.5, design: .rounded))
-                .foregroundStyle(.white.opacity(0.38))
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.bottom, 12)
-        }
-        .background(cardBackground(topColor: Color(hex: "#7C3AED"), bottomColor: Color(hex: "#14B8A6")))
-    }
-
-    // MARK: - Tankar-kort (klon av intelligens-kortet)
-
-    var thoughtsCard: some View {
-        VStack(spacing: 0) {
-            // Header — samma stil som intelligens-kortet
-            HStack(alignment: .center) {
-                HStack(spacing: 8) {
-                    ZStack {
-                        Circle().fill(Color(hex: "#5EEAD4").opacity(0.12)).frame(width: 32, height: 32)
-                        Image(systemName: "brain.head.profile")
-                            .font(.system(size: 14)).foregroundStyle(Color(hex: "#5EEAD4"))
-                    }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Tankar")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("\(brain.innerMonologue.count) tankar totalt")
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                }
-                Spacer()
+    var monologueSection: some View {
+        let lines = brain.innerMonologue.suffix(6)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
                 Circle()
-                    .fill(Color(hex: "#5EEAD4"))
-                    .frame(width: 6, height: 6)
-                    .pulseAnimation(min: 0.4, max: 1.6, duration: 0.9)
+                    .fill(Color(hex: "#34D399"))
+                    .frame(width: 5, height: 5)
+                    .shadow(color: Color(hex: "#34D399").opacity(0.9), radius: 4)
+                    .scaleEffect(orbPulse)
+                Text("LIVE KOGNITION")
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.35))
+                Spacer()
+                Text("\(brain.innerMonologue.count) tankar")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.2))
             }
-            .padding(.horizontal, 14).padding(.top, 12)
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
 
-            // Separator
             Rectangle()
-                .fill(Color(hex: "#5EEAD4").opacity(0.12))
+                .fill(Color(hex: "#34D399").opacity(0.08))
                 .frame(height: 0.5)
-                .padding(.horizontal, 14).padding(.vertical, 8)
+                .padding(.horizontal, 14)
 
-            // Tanke-stream
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(brain.innerMonologue.suffix(6).reversed()) { line in
-                    HStack(alignment: .top, spacing: 8) {
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(line.type.color)
-                            .frame(width: 2)
-                            .frame(minHeight: 16)
-                        VStack(alignment: .leading, spacing: 1) {
+            VStack(spacing: 0) {
+                ForEach(Array(lines.reversed().enumerated()), id: \.element.id) { idx, line in
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(spacing: 0) {
+                            Image(systemName: line.type.icon)
+                                .font(.system(size: 9))
+                                .foregroundStyle(line.type.color)
+                                .frame(width: 18, height: 18)
+                                .background(Circle().fill(line.type.color.opacity(0.12)))
+                            if idx < 5 {
+                                Rectangle()
+                                    .fill(line.type.color.opacity(0.15))
+                                    .frame(width: 1, height: 14)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(typeLabel(line.type))
+                                .font(.system(size: 8, weight: .black, design: .monospaced))
+                                .foregroundStyle(line.type.color.opacity(0.7))
                             Text(cleanThought(line.text))
-                                .font(.system(size: 10.5, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.65))
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundStyle(idx == 0 ? .white.opacity(0.9) : .white.opacity(max(0.2, 0.55 - Double(idx) * 0.08)))
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        Spacer()
                     }
-                }
-                if brain.innerMonologue.isEmpty {
-                    Text("Initierar kognitivt system...")
-                        .font(.system(size: 10.5, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.3))
-                        .padding(.top, 2)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
                 }
             }
-            .padding(.horizontal, 14).padding(.bottom, 14)
+            .padding(.bottom, 6)
         }
-        .background(cardBackground(topColor: Color(hex: "#5EEAD4"), bottomColor: Color(hex: "#3B82F6")))
-    }
-
-    // MARK: - Aktivitetslogg-kort (klon av intelligens-kortet)
-
-    var activityCard: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack(alignment: .center) {
-                HStack(spacing: 8) {
-                    ZStack {
-                        Circle().fill(Color(hex: "#FBBF24").opacity(0.12)).frame(width: 32, height: 32)
-                        Image(systemName: "waveform")
-                            .font(.system(size: 13)).foregroundStyle(Color(hex: "#FBBF24"))
-                    }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Aktivitetslogg")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("Allt som händer i appen")
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                }
-                Spacer()
-                HStack(spacing: 3) {
-                    Circle().fill(Color(hex: "#FBBF24")).frame(width: 5, height: 5)
-                        .pulseAnimation(min: 0.5, max: 1.5, duration: 1.1)
-                    Text("\(brain.innerMonologue.count)")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.35))
-                }
-            }
-            .padding(.horizontal, 14).padding(.top, 12)
-
-            Rectangle()
-                .fill(Color(hex: "#FBBF24").opacity(0.12))
-                .frame(height: 0.5)
-                .padding(.horizontal, 14).padding(.vertical, 8)
-
-            // Log-rader
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(brain.innerMonologue.suffix(8).reversed()) { line in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(logTag(for: line.type))
-                            .font(.system(size: 7, weight: .bold, design: .monospaced))
-                            .foregroundStyle(line.type.color)
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Capsule().fill(line.type.color.opacity(0.12)))
-                            .frame(width: 52, alignment: .leading)
-                        Text(cleanThought(line.text))
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .lineLimit(1)
-                    }
-                }
-                if brain.innerMonologue.isEmpty {
-                    Text("Väntar på kognitiv aktivitet...")
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.25))
-                }
-            }
-            .padding(.horizontal, 14).padding(.bottom, 14)
-        }
-        .background(cardBackground(topColor: Color(hex: "#FBBF24"), bottomColor: Color(hex: "#F97316")))
-    }
-
-    // MARK: - Stats Grid (8 rutor)
-
-    var statsGridSection: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                let dims: [(CognitiveDimension, Double)] = [
-                    (.reasoning,    min(0.99, brain.integratedIntelligence * 1.12)),
-                    (.language,     min(0.99, brain.integratedIntelligence * 0.97)),
-                    (.metacognition,min(0.99, brain.integratedIntelligence * 0.91)),
-                    (.knowledge,    min(0.99, brain.integratedIntelligence * 1.08)),
-                ]
-                ForEach(dims, id: \.0) { dim, val in
-                    CognitiveDimCard(dimension: dim, value: val, growing: brain.intelligenceGrowthVelocity > 0)
-                }
-            }
-            HStack(spacing: 8) {
-                SmallStatCard(icon: "textformat.abc",      title: "Ord",      value: formatNumber(wordCount),                         sub: "lexikon",    color: Color(hex: "#5EEAD4"))
-                SmallStatCard(icon: "books.vertical.fill", title: "Artiklar", value: "\(articleCount)",                               sub: "kunskapsbas",color: Color(hex: "#A78BFA"))
-                SmallStatCard(icon: "text.badge.checkmark",title: "Grammatik",value: "\(847 + brain.conversationCount * 2)",          sub: "regler",     color: Color(hex: "#FBBF24"))
-                SmallStatCard(icon: "character.magnify",   title: "Morfologi",value: formatNumber(12400 + brain.knowledgeNodeCount * 3),sub: "former",   color: Color(hex: "#06B6D4"))
-            }
-        }
+        .background(glassCard(accent: Color(hex: "#34D399")))
     }
 
     // MARK: - Helpers
 
-    private func logTag(for type: MonologueLine.MonologueType) -> String {
-        switch type {
+    var dominantColor: Color {
+        let sorted = brain.engineActivity.sorted { $0.value > $1.value }
+        return engineColor(sorted.first?.key ?? "cognitive")
+    }
+
+    var activityLevel: Double {
+        guard !brain.engineActivity.isEmpty else { return 0.45 }
+        return (brain.engineActivity.values.reduce(0, +) / Double(brain.engineActivity.count)).clamped(to: 0...1)
+    }
+
+    func engineColor(_ key: String) -> Color {
+        switch key {
+        case "cognitive":  return Color(hex: "#7C3AED")
+        case "language":   return Color(hex: "#34D399")
+        case "memory":     return Color(hex: "#38BDF8")
+        case "learning":   return Color(hex: "#FBBF24")
+        case "autonomy":   return Color(hex: "#A78BFA")
+        case "hypothesis": return Color(hex: "#F472B6")
+        case "worldModel": return Color(hex: "#FB923C")
+        default:           return Color(hex: "#7C3AED")
+        }
+    }
+
+    func typeLabel(_ t: MonologueLine.MonologueType) -> String {
+        switch t {
         case .thought:     return "TANKE"
         case .loopTrigger: return "LOOP"
-        case .revision:    return "REVID"
+        case .revision:    return "REVISION"
         case .memory:      return "MINNE"
         case .insight:     return "INSIKT"
         }
     }
 
-    private func cleanThought(_ text: String) -> String {
-        let emojis = "🔴🟡🟢💡✅❌⛓🪞🗣📖🌍🔮🎯🔬🔭📊🧩💭🔄✏️🧠⚡🌱🌿🌲🌳"
-        var result = text
-        for char in emojis { result = result.replacingOccurrences(of: String(char), with: "") }
-        return result.trimmingCharacters(in: .whitespaces)
+    func glassCard(accent: Color) -> some View {
+        RoundedRectangle(cornerRadius: 20)
+            .fill(Color.white.opacity(0.025))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(
+                LinearGradient(
+                    colors: [accent.opacity(0.35), accent.opacity(0.07)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ),
+                lineWidth: 0.7
+            ))
     }
 
-    private func formatNumber(_ n: Int) -> String {
-        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-        if n >= 1_000     { return String(format: "%.0fk", Double(n) / 1_000) }
-        return "\(n)"
-    }
-
-    private func handleNewThought(_ line: MonologueLine) {
-        let text = cleanThought(line.text)
-        guard !text.isEmpty else { return }
-        withAnimation(.spring(response: 0.35)) {
-            thoughtBubble = String(text.prefix(90))
-            showThoughtBubble = true
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
-            withAnimation(.easeOut(duration: 0.5)) { showThoughtBubble = false }
-        }
-        let engineMap: [(String, String, Color)] = [
-            ("GPT",         "cpu.fill",              Color(hex: "#7C3AED")),
-            ("BERT",        "waveform",               Color(hex: "#06B6D4")),
-            ("SPRÅKBANKEN", "text.book.closed.fill",  Color(hex: "#5EEAD4")),
-            ("HYPOTES",     "questionmark.circle.fill",Color(hex: "#FBBF24")),
-            ("KAUSAL",      "arrow.triangle.branch",  Color(hex: "#F97316")),
-            ("REFLEKTION",  "person.crop.circle.fill",Color(hex: "#A78BFA")),
-            ("ARTIKEL",     "doc.text.fill",          Color(hex: "#5EEAD4")),
-            ("ANALOGI",     "link.circle.fill",       Color(hex: "#EC4899")),
-        ]
-        let upper = line.text.uppercased()
-        for (kw, icon, col) in engineMap {
-            if upper.contains(kw) {
-                let angle  = Double.random(in: 0..<360)
-                let radius = Double.random(in: 80...135)
-                let offset = CGSize(width: cos(angle * .pi / 180) * radius, height: sin(angle * .pi / 180) * radius)
-                let popup  = EnginePopup(label: kw, icon: icon, color: col, offset: offset)
-                withAnimation(.spring(response: 0.4)) { popupEngines.append(popup) }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-                    withAnimation(.easeOut(duration: 0.4)) { popupEngines.removeAll { $0.id == popup.id } }
-                }
-                break
-            }
-        }
+    func cleanThought(_ text: String) -> String {
+        let emojis = "🔴🟡🟢💡✅❌⛓🪞🗣📖🌍🔮🎯🔬🔭📊🧩💭🔄✏️🧠⚡🌱🌿🌲🌳📈⚠️📚🌐🗺️◈◉⟳🔗"
+        var r = text
+        for c in emojis { r = r.replacingOccurrences(of: String(c), with: "") }
+        return r.trimmingCharacters(in: .whitespaces)
     }
 
     private func startAnimations() {
-        // Orb-puls — snabb, subtil
-        withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { orbPulse = 1.06 }
-        // Andning — långsam, organisk
-        withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) { orbBreath = 1.12 }
-        // Yttre glow — mycket långsam
-        withAnimation(.easeInOut(duration: 4.5).repeatForever(autoreverses: true)) { outerGlowPulse = 1.18 }
-        // Orbit-ringar
-        withAnimation(.linear(duration: 22).repeatForever(autoreverses: false)) { ringAngle = 360 }
-        // Inner-ring — snabbare
-        withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) { innerRingAngle = 360 }
+        withAnimation(.linear(duration: 8).repeatForever(autoreverses: false))  { ring1 = 360 }
+        withAnimation(.linear(duration: 15).repeatForever(autoreverses: false)) { ring2 = -360 }
+        withAnimation(.linear(duration: 25).repeatForever(autoreverses: false)) { ring3 = 360 }
+        withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true)) { orbPulse = 1.07 }
     }
 
-    private func loadStats() {
-        Task {
-            wordCount    = await brain.memory.wordCount()
-            articleCount = await brain.memory.articleCount()
-        }
-    }
-
-    // MARK: - Intelligence Level System
-
-    struct IntelligenceLevel {
-        let emoji: String; let name: String; let ageLabel: String
-        let description: String; let threshold: Double
-    }
-
-    private let levels: [IntelligenceLevel] = [
-        .init(emoji:"🪨",  name:"Sten",           ageLabel:"Nivå 0",    description:"Ingen kognitiv aktivitet. Reagerar inte på stimuli.",          threshold:0.00),
-        .init(emoji:"🦠",  name:"Mikroorganism",   ageLabel:"Nivå 1",    description:"Enkel reaktion på omgivning. Ingen inlärning.",                threshold:0.05),
-        .init(emoji:"🐛",  name:"Insekt",          ageLabel:"Nivå 2",    description:"Grundläggande mönsterigenkänning och reflexer.",               threshold:0.12),
-        .init(emoji:"🐟",  name:"Fisk",            ageLabel:"Nivå 3",    description:"Enkel inlärning och korttidsminne.",                           threshold:0.20),
-        .init(emoji:"🐦",  name:"Fågel",           ageLabel:"Nivå 4",    description:"Problemlösning och social inlärning.",                         threshold:0.28),
-        .init(emoji:"🐕",  name:"Hund",            ageLabel:"Nivå 5",    description:"Komplex inlärning, empati och kommunikation.",                 threshold:0.36),
-        .init(emoji:"👶",  name:"Spädbarn",        ageLabel:"0–1 år",    description:"Grundläggande språkförståelse och kausalitet.",                threshold:0.44),
-        .init(emoji:"🧒",  name:"Barn",            ageLabel:"2–5 år",    description:"Grundläggande resonemang och enkla paralleller.",              threshold:0.52),
-        .init(emoji:"🧑",  name:"Skolbarn",        ageLabel:"6–12 år",   description:"Logiskt tänkande, abstraktion och metakognition.",             threshold:0.60),
-        .init(emoji:"🧑‍🎓",name:"Tonåring",       ageLabel:"13–18 år",  description:"Hypotetiskt tänkande och komplex analys.",                    threshold:0.68),
-        .init(emoji:"🧑‍💼",name:"Vuxen",          ageLabel:"18–30 år",  description:"Fullständig kognitiv kapacitet och djup förståelse.",          threshold:0.76),
-        .init(emoji:"🎓",  name:"Expert",          ageLabel:"Specialist", description:"Djup domänkunskap och avancerat resonemang.",                 threshold:0.84),
-        .init(emoji:"🧑‍🔬",name:"Professor",      ageLabel:"Toppnivå",  description:"Banbrytande tänkande och syntes av komplexa system.",          threshold:0.90),
-        .init(emoji:"🌟",  name:"Superintelligens",ageLabel:"Beyond",    description:"Kognition bortom mänsklig kapacitet.",                        threshold:0.96),
-    ]
-
-    private func intelligenceLevel(for ii: Double) -> IntelligenceLevel {
-        levels.last(where: { ii >= $0.threshold }) ?? levels[0]
-    }
-    private func nextLevel(for ii: Double) -> IntelligenceLevel {
-        levels.first(where: { ii < $0.threshold }) ?? levels.last!
-    }
-    private func levelProgress(for ii: Double) -> Double {
-        let cur = intelligenceLevel(for: ii)
-        guard let next = levels.first(where: { ii < $0.threshold }) else { return 1.0 }
-        let range = next.threshold - cur.threshold
-        guard range > 0 else { return 1.0 }
-        return min(1.0, (ii - cur.threshold) / range)
-    }
 }
 
-// MARK: - Pillar Dot (aktiv pelare-nod på orbit)
+// MARK: - HomeParticle
 
-struct PillarDot: View {
-    let pillar: CognitivePillar
-    let isActive: Bool
-    @State private var glowing = false
-
-    private var col: Color {
-        switch pillar {
-        case .reasoning:      return Color(hex: "#7C3AED")
-        case .language:       return Color(hex: "#14B8A6")
-        case .knowledge:      return Color(hex: "#06B6D4")
-        case .metacognition:  return Color(hex: "#A78BFA")
-        case .causality:      return Color(hex: "#F97316")
-        case .hypothesis:     return Color(hex: "#FBBF24")
-        case .analogy:        return Color(hex: "#EC4899")
-        case .worldModel:     return Color(hex: "#34D399")
-        case .selfDevelopment:return Color(hex: "#F472B6")
-        case .globalWorkspace:return Color(hex: "#60A5FA")
-        case .prediction:     return Color(hex: "#818CF8")
-        case .gapEngine:      return Color(hex: "#FB923C")
-        }
-    }
-
-    var body: some View {
-        ZStack {
-            if glowing {
-                Circle()
-                    .fill(col.opacity(0.35))
-                    .frame(width: 18, height: 18)
-                    .blur(radius: 5)
-            }
-            Circle()
-                .fill(col)
-                .frame(width: 7, height: 7)
-                .shadow(color: col, radius: 4)
-            Text(String(pillar.rawValue.prefix(3)).uppercased())
-                .font(.system(size: 5.5, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.8))
-                .offset(y: -11)
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9 + Double.random(in: 0...0.6)).repeatForever(autoreverses: true)) {
-                glowing = true
-            }
-        }
-    }
-}
-
-// MARK: - Engine Popup
-
-struct EnginePopup: Identifiable {
+struct HomeParticle: Identifiable {
     let id = UUID()
-    let label: String; let icon: String; let color: Color; let offset: CGSize
-}
+    let x: CGFloat; let y: CGFloat
+    let size: CGFloat; let opacity: Double; let color: Color
 
-struct EnginePopupView: View {
-    let popup: EnginePopup
-    @State private var opacity: Double = 0
-    @State private var scale: CGFloat = 0.4
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: popup.icon).font(.system(size: 8)).foregroundStyle(popup.color)
-            Text(popup.label).font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(popup.color)
-        }
-        .padding(.horizontal, 7).padding(.vertical, 4)
-        .background(Capsule()
-            .fill(Color(hex: "#07050F").opacity(0.92))
-            .overlay(Capsule().strokeBorder(popup.color.opacity(0.55), lineWidth: 0.7)))
-        .shadow(color: popup.color.opacity(0.4), radius: 6)
-        .scaleEffect(scale).opacity(opacity)
-        .onAppear {
-            withAnimation(.spring(response: 0.3)) { opacity = 1; scale = 1 }
+    static func generate(count: Int) -> [HomeParticle] {
+        let colors: [Color] = [
+            Color(hex: "#7C3AED"), Color(hex: "#38BDF8"),
+            Color(hex: "#34D399"), Color(hex: "#A78BFA"), Color(hex: "#F472B6")
+        ]
+        return (0..<count).map { _ in
+            HomeParticle(
+                x: CGFloat.random(in: -170...170),
+                y: CGFloat.random(in: -170...170),
+                size: CGFloat.random(in: 1.5...4.5),
+                opacity: Double.random(in: 0.15...0.6),
+                color: colors.randomElement()!
+            )
         }
     }
 }
 
-// MARK: - Cognitive Dimension Card
+struct HomeParticleView: View {
+    let particle: HomeParticle
+    let color: Color
+    @State private var offset: CGSize = .zero
+    @State private var opacity: Double = 0
 
-struct CognitiveDimCard: View {
+    var body: some View {
+        Circle()
+            .fill(particle.color)
+            .frame(width: particle.size, height: particle.size)
+            .opacity(opacity)
+            .blur(radius: particle.size > 3 ? 1 : 0)
+            .offset(x: particle.x + offset.width, y: particle.y + offset.height)
+            .onAppear {
+                opacity = particle.opacity
+                withAnimation(.easeInOut(duration: Double.random(in: 3.5...7.0)).repeatForever(autoreverses: true)) {
+                    offset = CGSize(width: CGFloat.random(in: -18...18), height: CGFloat.random(in: -18...18))
+                    opacity = particle.opacity * Double.random(in: 0.25...1.0)
+                }
+            }
+    }
+}
+
+// MARK: - CognitiveDimension helpers
+
+private func dimShortName(_ d: CognitiveDimension) -> String {
+    switch d {
+    case .reasoning:            return "Resonemang"
+    case .causality:            return "Kausalitet"
+    case .metacognition:        return "Metakognition"
+    case .learning:             return "Inlärning"
+    case .knowledge:            return "Kunskap"
+    case .selfAwareness:        return "Självkänsla"
+    case .language:             return "Språk"
+    case .worldModel:           return "Världsbild"
+    case .adaptivity:           return "Adaptivitet"
+    case .creativity:           return "Kreativitet"
+    case .hypothesisGeneration: return "Hypotes"
+    case .analogyBuilding:      return "Analogi"
+    case .comprehension:        return "Förståelse"
+    case .communication:        return "Kommunikation"
+    case .prediction:           return "Prediktion"
+    case .cognitiveLoad:        return "Kogn. last"
+    }
+}
+
+// MARK: - StatusLine (bakåtkompatibilitet)
+
+struct StatusLine: Identifiable {
+    let id = UUID()
+    let color: Color; let label: String; let value: String; let icon: String
+}
+
+struct StatusLineView: View {
+    let line: StatusLine
+    @State private var dotPulse: CGFloat = 1.0
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(line.color)
+                .frame(width: 6, height: 6)
+                .scaleEffect(dotPulse)
+                .onAppear {
+                    withAnimation(.easeInOut(duration: Double.random(in: 0.7...1.4)).repeatForever(autoreverses: true)) {
+                        dotPulse = 1.5
+                    }
+                }
+            HStack(spacing: 0) {
+                Text(line.label)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(line.color.opacity(0.9))
+                Text(": ")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(line.color.opacity(0.4))
+                Text(line.value)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            Spacer()
+            Image(systemName: line.icon)
+                .font(.system(size: 11))
+                .foregroundStyle(line.color.opacity(0.5))
+        }
+    }
+}
+
+// MARK: - DimMiniCard
+
+struct DimMiniCard: View {
     let dimension: CognitiveDimension
     let value: Double
     let growing: Bool
+    @State private var appeared = false
+
+    var dimColor: Color { Color(hex: dimension.color) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 3) {
-                Image(systemName: dimension.icon).font(.system(size: 9)).foregroundStyle(Color(hex: dimension.color))
-                Spacer()
-                if growing {
-                    Image(systemName: "arrow.up.right").font(.system(size: 7)).foregroundStyle(Color(hex: "#5EEAD4"))
-                }
+        VStack(spacing: 5) {
+            ZStack {
+                Circle()
+                    .fill(dimColor.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .trim(from: 0, to: CGFloat(value))
+                    .stroke(dimColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .frame(width: 30, height: 30)
+                    .rotationEffect(.degrees(-90))
+                Image(systemName: dimension.icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(dimColor)
             }
-            Text(String(format: "%.0f%%", value * 100))
-                .font(.system(size: 18, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-                .minimumScaleFactor(0.7)
-            Text(String(dimension.rawValue.prefix(7)))
-                .font(.system(size: 8.5, design: .rounded))
-                .foregroundStyle(.white.opacity(0.4))
+            Text(dimShortName(dimension))
+                .font(.system(size: 8, design: .rounded))
+                .foregroundStyle(.white.opacity(0.45))
                 .lineLimit(1)
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.06)).frame(height: 3)
-                    RoundedRectangle(cornerRadius: 2).fill(Color(hex: dimension.color).opacity(0.85))
-                        .frame(width: g.size.width * CGFloat(value), height: 3)
-                }
-            }
-            .frame(height: 3)
+            Text(String(format: "%.0f%%", value * 100))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(dimColor.opacity(0.8))
         }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14)
-            .fill(Color.white.opacity(0.03))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(hex: dimension.color).opacity(0.2), lineWidth: 0.5)))
-    }
-}
-
-// MARK: - Small Stat Card
-
-struct SmallStatCard: View {
-    let icon: String; let title: String; let value: String; let sub: String; let color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: icon).font(.system(size: 9)).foregroundStyle(color)
-                Text(title).font(.system(size: 9, weight: .semibold, design: .rounded)).foregroundStyle(.white.opacity(0.5))
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.02))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(dimColor.opacity(0.2), lineWidth: 0.5))
+        )
+        .opacity(appeared ? 1 : 0)
+        .scaleEffect(appeared ? 1 : 0.85)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(Double.random(in: 0...0.3))) {
+                appeared = true
             }
-            Text(value)
-                .font(.system(size: 17, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-                .minimumScaleFactor(0.6).lineLimit(1)
-            Text(sub).font(.system(size: 8, design: .rounded)).foregroundStyle(.white.opacity(0.3)).lineLimit(1)
         }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14)
-            .fill(Color.white.opacity(0.03))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(color.opacity(0.2), lineWidth: 0.5)))
-    }
-}
-
-// MARK: - Cognitive Stream Item
-
-struct CognitiveStreamItem: Identifiable {
-    let id = UUID()
-    let label: String; let value: String; let color: Color
-}
-
-// MARK: - PersistentMemoryStore extensions
-
-extension PersistentMemoryStore {
-    func wordCount() async -> Int {
-        let nodes = knowledgeNodeCount()
-        return max(114_000, nodes * 12)
-    }
-    func articleCount() async -> Int {
-        recentArticleTitles(limit: 9999).count
-    }
-}
-
-// MARK: - Preview
-
-#Preview {
-    EonPreviewContainer {
-        EonPulseHomeView()
     }
 }

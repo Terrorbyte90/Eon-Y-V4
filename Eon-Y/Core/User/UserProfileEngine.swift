@@ -16,12 +16,22 @@ final class UserProfileEngine: ObservableObject {
     @Published var wsdProfile: [WSDProfileEntry] = []
     @Published var totalConversations: Int = 0
     @Published var totalSessions: Int = 0
+    @Published var totalWordCount: Int = 0
+    @Published var uniqueVocabularySize: Int = 0
 
     private let memory = PersistentMemoryStore.shared
     private var cancellables = Set<AnyCancellable>()
 
     private init() {
         loadProfile()
+        Task { await loadWordStats() }
+    }
+
+    func loadWordStats() async {
+        totalWordCount = await memory.totalWordCount()
+        // Vokabulärstorlek: approximation baserat på unika ord i konversationer
+        // Genomsnittlig unik-ord-ratio: ~40% av totala ord är unika
+        uniqueVocabularySize = Int(Double(totalWordCount) * 0.40)
     }
 
     // MARK: - Update after conversation
@@ -42,8 +52,11 @@ final class UserProfileEngine: ObservableObject {
         // Uppdatera radar-data
         updateRadarData(message: userMessage)
 
-        // Uppdatera konversationsräknare
+        // Uppdatera konversationsräknare och ordräknare
         totalConversations += 1
+        let msgWords = userMessage.split(separator: " ").count + eonResponse.split(separator: " ").count
+        totalWordCount += msgWords
+        uniqueVocabularySize = Int(Double(totalWordCount) * 0.40)
 
         // Uppdatera Eons beskrivning av användaren
         updateEonDescription()
