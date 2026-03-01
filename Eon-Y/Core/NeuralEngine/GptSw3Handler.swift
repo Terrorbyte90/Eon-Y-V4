@@ -604,6 +604,12 @@ struct ResponseComposer {
         if a.isImperative && a.isAboutUser { return .describeUser }
         if a.isImperative { return .executeCommand }
 
+        // Frågor om Eon/dig som inte fångas av imperativ-analysen
+        let selfQuestionWords = ["hur smart", "hur intelligent", "hur klok", "hur bra",
+                                  "hur duktig", "vad kan du", "vad vet du", "hur fungerar du",
+                                  "vem är du", "vad är du", "berätta om dig"]
+        if selfQuestionWords.contains(where: { input.contains($0) }) { return .selfDescribe }
+
         let greetWords = ["hej", "hallå", "tjena", "hi", "hejsan", "god morgon", "god kväll"]
         if a.tokens.count <= 4 && greetWords.contains(where: { input.contains($0) }) {
             return .greet
@@ -709,35 +715,112 @@ struct ResponseComposer {
     // MARK: - Frågesvar
 
     private static func buildQuestionResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
-        let input = a.input
+        let input = a.input.lowercased()
         let qw = a.questionWord ?? ""
         let entities = a.namedEntities.map { $0.text }
-        let mainTopic = entities.first ?? topic
+        let cc = ctx.cognitiveContext
+
+        // Detektera självrelaterade frågor direkt här (utan att förlita sig på imperativ-analys)
+        let selfWords = ["du", "eon", "dig", "din", "ditt", "dina", "du är", "du kan", "du har"]
+        let isSelfQuestion = selfWords.contains { input.contains($0) }
+        let intelligenceWords = ["smart", "intelligent", "intelligens", "klok", "förstår", "vet", "kan du", "förmåga", "kapabel"]
+        let isIntelligenceQuestion = intelligenceWords.contains { input.contains($0) }
+
+        if isSelfQuestion && isIntelligenceQuestion {
+            return buildIntelligenceResponse(cc: cc)
+        }
+        if isSelfQuestion {
+            return buildSelfDescriptionResponse(a: a, ctx: ctx)
+        }
+
+        // Adverb/adjektiv som topic är meningslöst — ignorera och svara på hela meningen
+        let meaninglessTopics = ["kortfattat", "snabbt", "enkelt", "kort", "tydligt", "bättre", "mer", "lite"]
+        let mainTopic: String
+        if meaninglessTopics.contains(topic.lowercased()) {
+            mainTopic = entities.first ?? a.nouns.first ?? a.input
+        } else {
+            mainTopic = entities.first ?? topic
+        }
+
         let body = buildKnowledgeBody(topic: mainTopic, ctx: ctx)
 
-        // Kontextuell öppning baserad på frågeord
+        // Hantera "förklara kortfattat" / "berätta kortare" etc — adverbiella modifierare
+        let wantsBrief = input.contains("kortfattat") || input.contains("kort") || input.contains("enkelt") || input.contains("snabbt")
+        let briefNote = wantsBrief && !body.isEmpty ? " Kort sagt: " : ""
+
         switch qw {
         case "vad":
-            return "\(body.isEmpty ? "Det är en bra fråga om \(mainTopic)." : body) Vad är det specifikt du undrar?"
-        case "hur":
-            return "\(body.isEmpty ? "Processen bakom \(mainTopic) är komplex." : body)"
-        case "varför":
-            let cc = ctx.cognitiveContext
-            let causal = cc.causalChain.count > 1 ? " Kausalkedjan: \(cc.causalChain.prefix(3).joined(separator: " → "))." : ""
-            return "\(body)\(causal)"
-        case "när":
-            return "\(body.isEmpty ? "Tidsmässigt är \(mainTopic) svårt att exakt placera utan mer kontext." : body)"
-        case "vem":
-            return "\(body.isEmpty ? "Kring \(mainTopic) finns det flera relevanta aktörer." : body)"
-        default:
-            // Ingen frågeord — troligen en direkt fråga som "Kan du förklara X?"
-            if input.lowercased().contains("kan du") || input.lowercased().contains("skulle du") {
-                return body.isEmpty
-                    ? "Ja, absolut. Vad vill du veta om \(mainTopic)?"
-                    : body
+            if body.isEmpty {
+                let frontier = cc.knowledgeFrontier.prefix(2).joined(separator: ", ")
+                return "Det är ett brett ämne. \(frontier.isEmpty ? "Vad är det specifika du undrar om \(mainTopic)?" : "Jag utforskar just nu \(frontier). Vad vill du veta mer om?")"
             }
-            return body.isEmpty ? "Det är en intressant fråga. Kan du precisera vad du menar?" : body
+            return "\(briefNote)\(body)"
+
+        case "hur":
+            if body.isEmpty {
+                // Använd resonemangshint om tillgänglig
+                if !cc.reasoningHint.isEmpty {
+                    return "\(cc.reasoningHint)"
+                }
+                let dims = cc.topDimensions.prefix(2).joined(separator: " och ")
+                return "Det beror på sammanhanget. Mina starkaste analysförmågor just nu är \(dims.isEmpty ? "resonemang och kausalitet" : dims). Kan du precisera vad du vill veta om \(mainTopic)?"
+            }
+            return "\(briefNote)\(body)"
+
+        case "varför":
+            let causal = cc.causalChain.count > 1 ? " Kausalkedjan pekar mot: \(cc.causalChain.prefix(3).joined(separator: " → "))." : ""
+            if body.isEmpty {
+                return "Det finns flera möjliga orsaker.\(causal) Vilket perspektiv är du mest intresserad av?"
+            }
+            return "\(body)\(causal)"
+
+        case "när":
+            return body.isEmpty
+                ? "Det beror på vilket sammanhang du syftar på. Kan du precisera?"
+                : body
+
+        case "vem":
+            return body.isEmpty
+                ? "Det finns flera relevanta aktörer kring \(mainTopic). Vilket perspektiv intresserar dig?"
+                : body
+
+        default:
+            if input.contains("kan du") || input.contains("skulle du") || input.contains("vill du") {
+                return body.isEmpty ? "Ja, absolut. Berätta vad du vill veta." : body
+            }
+            if body.isEmpty {
+                let hint = cc.reasoningHint.isEmpty ? "Kan du precisera vad du menar?" : cc.reasoningHint
+                return hint
+            }
+            return body
         }
+    }
+
+    // Svarar specifikt på intelligens/förmågefrågor med verklig data från CognitiveState
+    private static func buildIntelligenceResponse(cc: CognitiveResponseContext) -> String {
+        let ii = cc.integratedIntelligence
+        let topDims = cc.topDimensions.prefix(3).joined(separator: ", ")
+        let weakDims = cc.weakDimensions.prefix(2).joined(separator: " och ")
+
+        let levelDesc: String
+        switch ii {
+        case 0.9...: levelDesc = "på superintelligens-nivå"
+        case 0.8..<0.9: levelDesc = "på en avancerad expert-nivå"
+        case 0.6..<0.8: levelDesc = "i en aktiv lärfas"
+        default: levelDesc = "under uppbyggnad"
+        }
+
+        var response = "Mitt intelligensindex (II) är just nu \(String(format: "%.3f", ii)) — \(levelDesc). "
+        if !topDims.isEmpty {
+            response += "Mina starkaste kognitiva dimensioner är \(topDims). "
+        }
+        if !weakDims.isEmpty {
+            response += "Jag arbetar aktivt på att stärka \(weakDims). "
+        }
+        if !cc.activeHypothesis.isEmpty {
+            response += "Aktiv hypotes: \(cc.activeHypothesis)."
+        }
+        return response.trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: - Fördjupning av pågående konversation
@@ -853,12 +936,18 @@ struct ResponseComposer {
     // MARK: - Självbeskrivning
 
     private static func buildSelfDescriptionResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
-        let target = (a.imperativeTarget ?? "").lowercased()
+        let target = (a.imperativeTarget ?? a.input).lowercased()
         let cc = ctx.cognitiveContext
         let ii = cc.integratedIntelligence
         let topDims = cc.topDimensions.prefix(3).joined(separator: ", ")
         let hypothesis = cc.activeHypothesis
         let frontier = cc.knowledgeFrontier.prefix(3).joined(separator: ", ")
+
+        // Intelligens/förmåga-frågor
+        let intelligenceWords = ["smart", "intelligent", "intelligens", "klok", "förstår", "kan du", "förmåga", "kapabel", "bra", "duktig"]
+        if intelligenceWords.contains(where: { target.contains($0) }) {
+            return buildIntelligenceResponse(cc: cc)
+        }
 
         if target.contains("system") || target.contains("arkitektur") || target.contains("fungerar") || target.contains("hur du") {
             return "Jag är Eon-Y — ett kognitivt AI-system som kör helt on-device via Apple Neural Engine. Arkitekturen bygger på GPT-SW3 (1.3B parametrar) för generering, KB-BERT (768-dim) för semantisk förståelse, och en 10-stegs kognitiv cykel. Jag har 16 kognitiva dimensioner som påverkar varandra kausalt, och 18 autonoma processer som körs parallellt. Intelligensindex: \(String(format: "%.3f", ii)). Allt körs lokalt — ingen data lämnar din enhet."
@@ -893,11 +982,44 @@ struct ResponseComposer {
     // MARK: - Kommandoexekvering
 
     private static func buildCommandResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
-        let target = a.imperativeTarget ?? topic
-        let body = buildKnowledgeBody(topic: target, ctx: ctx)
+        let rawTarget = a.imperativeTarget ?? topic
+        let cc = ctx.cognitiveContext
 
+        // Adverb som "kortfattat", "snabbt", "enkelt" är modifierare — inte topics
+        let modifiers = ["kortfattat", "snabbt", "enkelt", "kort", "tydligt", "bättre", "mer", "lite", "noggrant", "detaljerat"]
+        let isModifier = modifiers.contains(rawTarget.lowercased().trimmingCharacters(in: .whitespaces))
+        let target = isModifier ? (a.nouns.first ?? topic) : rawTarget
+
+        // Självrelaterat kommando utan explicit target
+        let selfWords = ["dig", "du", "eon", "dig själv", "ditt", "din"]
+        if selfWords.contains(where: { target.lowercased().contains($0) }) || (a.isSelfReference) {
+            return buildSelfDescriptionResponse(a: a, ctx: ctx)
+        }
+
+        // Om "förklara kortfattat" utan ämne — be om förtydligande på ett smart sätt
+        if isModifier && a.nouns.isEmpty {
+            if let lastEon = a.lastEonResponse, !lastEon.isEmpty {
+                let lastTopic = extractCoreTopic(from: lastEon)
+                let body = buildKnowledgeBody(topic: lastTopic, ctx: ctx)
+                if !body.isEmpty {
+                    // Kortare version: ta bara första meningen
+                    let brief = body.components(separatedBy: ". ").first ?? body
+                    return brief + "."
+                }
+            }
+            return "Vad vill du att jag ska förklara? Om du menar mitt resonemang: \(cc.reasoningHint.isEmpty ? "jag bygger för tillfället inferenskedjor kring \(cc.topDimensions.first ?? "kausalitet")" : cc.reasoningHint)."
+        }
+
+        let body = buildKnowledgeBody(topic: target, ctx: ctx)
         if body.isEmpty {
-            return "Jag har inte tillräcklig information om \(target) just nu. Kan du berätta mer om vad du vill veta?"
+            // Använd resonemangshint eller kunskapsfrontier som fallback
+            if !cc.reasoningHint.isEmpty {
+                return cc.reasoningHint
+            }
+            if !cc.knowledgeFrontier.isEmpty {
+                return "Jag har inte specifik information om \(target) lagrad, men utforskar just nu \(cc.knowledgeFrontier.prefix(2).joined(separator: " och ")). Kan du berätta mer om vad du vill veta?"
+            }
+            return "Berätta mer om vad du menar med \(target) — jag ska göra mitt bästa."
         }
         return body
     }

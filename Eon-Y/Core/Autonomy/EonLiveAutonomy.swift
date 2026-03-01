@@ -496,7 +496,8 @@ final class EonLiveAutonomy {
             """
             let generated = await neo.generate(prompt: prompt, maxTokens: 35, temperature: 0.8)
             let cleaned = generated.trimmingCharacters(in: .whitespacesAndNewlines)
-            if cleaned.count > 10 {
+            // Filtrera bort chattliknande fallback-svar som inte hör hemma i revisionsloggning
+            if cleaned.count > 10 && !isChatFallback(cleaned) {
                 brain.innerMonologue.append(MonologueLine(text: cleaned, type: .revision))
                 try? await Task.sleep(nanoseconds: 800_000_000)
             }
@@ -510,7 +511,7 @@ final class EonLiveAutonomy {
             version: selfModelVersion
         )
 
-        for reflection in reflections.prefix(2) {
+        for reflection in reflections.prefix(2) where !isChatFallback(reflection) {
             brain.innerMonologue.append(MonologueLine(text: reflection, type: .revision))
             try? await Task.sleep(nanoseconds: 900_000_000)
         }
@@ -521,6 +522,26 @@ final class EonLiveAutonomy {
         if brain.developmentalProgress >= 1.0 {
             advanceStage(brain: brain)
         }
+    }
+
+    // Identifierar chattliknande fallback-svar som inte ska visas som kognitiva revisioner
+    private func isChatFallback(_ text: String) -> Bool {
+        let lower = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        // Kortare svar som är frågor riktade till användaren
+        let chatPatterns = [
+            "vad vill du prata om", "vad är det du", "vad tänker du",
+            "vad vill du veta", "kan du berätta", "vad menar du",
+            "berätta mer", "okej, vad", "okej. vad",
+            "processen bakom", "är komplex",
+            "det är en intressant fråga", "ja, absolut",
+            "jag har inte tillräcklig information",
+        ]
+        for pattern in chatPatterns {
+            if lower.contains(pattern) { return true }
+        }
+        // Svar som slutar med "?" och är korta (<60 tecken) — troligen chattfråga
+        if lower.hasSuffix("?") && text.count < 60 { return true }
+        return false
     }
 
     // MARK: - Language Development Loop (20s)
