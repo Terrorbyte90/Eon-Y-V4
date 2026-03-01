@@ -19,6 +19,7 @@ extension EnvironmentValues {
 enum EonTab: Int, CaseIterable {
     case home = 0
     case chat
+    case creative
     case mind
     case knowledge
     case progress
@@ -28,6 +29,7 @@ enum EonTab: Int, CaseIterable {
         switch self {
         case .home:      return "Hem"
         case .chat:      return "Chatt"
+        case .creative:  return "Kreativ"
         case .mind:      return "Hjärna"
         case .knowledge: return "Kunskap"
         case .progress:  return "Framsteg"
@@ -39,6 +41,7 @@ enum EonTab: Int, CaseIterable {
         switch self {
         case .home:      return "circle.hexagongrid.fill"
         case .chat:      return "bubble.left.and.bubble.right.fill"
+        case .creative:  return "sparkles"
         case .mind:      return "brain.head.profile"
         case .knowledge: return "books.vertical.fill"
         case .progress:  return "chart.line.uptrend.xyaxis"
@@ -50,6 +53,7 @@ enum EonTab: Int, CaseIterable {
         switch self {
         case .home:      return Color(hex: "#A78BFA")
         case .chat:      return Color(hex: "#34D399")
+        case .creative:  return Color(hex: "#EC4899")
         case .mind:      return Color(hex: "#60A5FA")
         case .knowledge: return Color(hex: "#FBBF24")
         case .progress:  return Color(hex: "#FB923C")
@@ -111,6 +115,11 @@ struct TabContentView: View {
                 .environment(\.tabBarVisible, $tabBarVisible)
                 .opacity(selectedTab == .chat ? 1 : 0)
                 .allowsHitTesting(selectedTab == .chat)
+
+            CreativeView()
+                .environment(\.tabBarVisible, $tabBarVisible)
+                .opacity(selectedTab == .creative ? 1 : 0)
+                .allowsHitTesting(selectedTab == .creative)
 
             MindView()
                 .environment(\.tabBarVisible, $tabBarVisible)
@@ -243,6 +252,7 @@ struct EonTabBar: View {
         .onReceive(brain.$engineActivity) { activity in
             tabActivity[.mind]      = activity["cognitive"] ?? 0
             tabActivity[.chat]      = activity["language"] ?? 0
+            tabActivity[.creative]  = activity["hypothesis"] ?? 0
             tabActivity[.knowledge] = activity["memory"] ?? 0
         }
     }
