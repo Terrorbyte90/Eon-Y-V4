@@ -57,8 +57,11 @@ final class EonBrain: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var liveAutonomy: EonLiveAutonomy?
     private var ica: IntegratedCognitiveArchitecture?
+    private var isPreviewInstance: Bool = false
 
-    private init() {
+    private init(preview: Bool = false) {
+        isPreviewInstance = preview
+        guard !preview else { return }
         // Seed innerMonologue direkt — UI ska aldrig vara tomt
         innerMonologue = [
             MonologueLine(text: "Kognitivt system aktiverat — alla 12 pelare initieras", type: .insight),
@@ -76,8 +79,26 @@ final class EonBrain: ObservableObject {
         loadPersistedState()
     }
 
+    // Lätt preview-instans — inga motorer, ingen DB, ingen SQLite
+    static func preview() -> EonBrain {
+        let b = EonBrain(preview: true)
+        b.knowledgeNodeCount = 142
+        b.conversationCount = 7
+        b.integratedIntelligence = 0.38
+        b.developmentalStage = .child
+        b.developmentalProgress = 0.45
+        b.isAutonomouslyActive = true
+        b.autonomousProcessLabel = "Preview-läge"
+        b.engineActivity = [
+            "cognitive": 0.68, "language": 0.61, "memory": 0.54,
+            "learning": 0.49, "autonomy": 0.43, "hypothesis": 0.38, "worldModel": 0.41,
+        ]
+        return b
+    }
+
     // Kallas från Eon_YApp.body (.task) — garanterar att MainActor är fullt redo
     func launchIfNeeded() {
+        guard !isPreviewInstance else { return }
         guard liveAutonomy == nil else { return }
         engineActivity = [
             "cognitive": 0.72, "language": 0.65, "memory": 0.58,
@@ -307,6 +328,7 @@ final class EonBrain: ObservableObject {
     }
 
     private func loadPersistedState() {
+        guard !isPreviewInstance else { return }
         Task { @MainActor in
             self.conversationCount = await self.memory.conversationCount()
             self.knowledgeNodeCount = await self.memory.knowledgeNodeCount()
@@ -315,6 +337,7 @@ final class EonBrain: ObservableObject {
 
     // Kallas från bootEon() — laddar all persisterad kognitiv state innan motorer startas
     func loadPersistedCognitiveState() async {
+        guard !isPreviewInstance else { return }
         let convCount = await memory.conversationCount()
         let kbCount   = await memory.knowledgeNodeCount()
         let artCount  = await memory.articleCount()

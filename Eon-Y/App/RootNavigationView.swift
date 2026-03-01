@@ -318,8 +318,8 @@ struct EonTabItem: View {
 // MARK: - Preview Container (shared across all views)
 
 struct EonPreviewContainer<Content: View>: View {
-    @StateObject private var brain = EonBrain.shared
-    @StateObject private var profile = UserProfileEngine.shared
+    @StateObject private var brain = EonBrain.preview()
+    @StateObject private var profile = UserProfileEngine.preview()
     let content: () -> Content
 
     init(@ViewBuilder content: @escaping () -> Content) {
