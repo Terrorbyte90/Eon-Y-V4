@@ -587,6 +587,9 @@ struct PerformanceModeSelector: View {
 
 // MARK: - Riktiga systemvärden via iOS API:er
 
+// THREAD_BASIC_INFO_COUNT är ett C-makro — beräkna manuellt som Swift-konstant
+private let kTHREAD_BASIC_INFO_COUNT = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
+
 private func realCPUUsage() -> Double {
     var threadList: thread_act_array_t?
     var threadCount: mach_msg_type_number_t = 0
@@ -595,7 +598,7 @@ private func realCPUUsage() -> Double {
     var totalUsage: Double = 0
     for i in 0..<Int(threadCount) {
         var info = thread_basic_info()
-        var infoCount = mach_msg_type_number_t(THREAD_BASIC_INFO_COUNT)
+        var infoCount = kTHREAD_BASIC_INFO_COUNT
         let result = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) {
                 thread_info(threads[i], thread_flavor_t(THREAD_BASIC_INFO), $0, &infoCount)
