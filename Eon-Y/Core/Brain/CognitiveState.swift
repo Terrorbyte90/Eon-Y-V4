@@ -78,6 +78,9 @@ final class CognitiveState: ObservableObject {
 
     private var dimensionHistory: [CognitiveDimension: [Double]] = [:]
     private var lastSnapshot: Date = Date()
+    private var lastPersistDate: Date = .distantPast
+    // Skyddar mot decay direkt efter uppstart — ger motorer tid att ladda
+    private var startupProtectionUntil: Date = Date().addingTimeInterval(90)
 
     private init() {
         buildCausalInfluences()
@@ -299,11 +302,10 @@ final class CognitiveState: ObservableObject {
             if intelligenceHistory.count > 200 { intelligenceHistory.removeFirst(50) }
         }
 
-        // Auto-persistera kognitiv state var 60s — säkerställer att lärande överlever omstarter
-        let lastPersistTs = UserDefaults.standard.double(forKey: "eon_persisted_timestamp")
-        if Date().timeIntervalSince1970 - lastPersistTs > 60 {
+        // Auto-persistera kognitiv state var 15s — minimerar förlust vid krasch
+        if Date().timeIntervalSince(lastPersistDate) > 15 {
             persistCurrentState()
-            // Spara developmental stage och progress
+            lastPersistDate = Date()
             UserDefaults.standard.set(DevelopmentalStage.fromIntelligence(newII).rawValue, forKey: "eon_persisted_stage")
             UserDefaults.standard.set(DevelopmentalStage.progressToNext(newII), forKey: "eon_persisted_progress")
         }
@@ -325,16 +327,22 @@ final class CognitiveState: ObservableObject {
     // MARK: - Homeostas: dimensioner sjunker sakta mot baslinjen om de inte aktivt tränas
     // Förhindrar att II alltid konvergerar mot 0.99 utan verklig aktivitet.
     private func applyHomeostaticDecay() {
-        let baseline: Double = 0.35          // Naturlig vilonivå
-        let decayRate: Double = 0.00015      // Per 5s-cykel — mycket litet men konstant
-        let activeThreshold: Double = 0.75   // Dimensioner under detta decayas mot baseline
+        // Skyddsperiod efter uppstart — låt motorer ladda och återställa state
+        guard Date() > startupProtectionUntil else { return }
+
+        // Baseline är dynamisk: aldrig lägre än 80% av sparat II-värde.
+        // Det säkerställer att inlärning inte raderas av decay.
+        let savedII = UserDefaults.standard.double(forKey: "eon_persisted_ii")
+        let baseline: Double = savedII > 0.1 ? max(0.30, savedII * 0.80) : 0.35
+
+        // Mycket låg decay — bara ett litet tryck mot baseline, inte en radering
+        let decayRate: Double = 0.00008      // Halverat från tidigare 0.00015
 
         for dim in CognitiveDimension.allCases where dim != .cognitiveLoad {
             guard let current = dimensions[dim] else { continue }
             if current > baseline {
-                // Decay mot baseline, snabbare ju högre över baseline
                 let excess = current - baseline
-                let decay = decayRate * (1.0 + excess * 2.0)
+                let decay = decayRate * (1.0 + excess * 1.0)  // Reducerat från 2.0
                 dimensions[dim] = max(baseline, current - decay)
             }
         }
@@ -438,23 +446,34 @@ final class CognitiveState: ObservableObject {
     }
 
     func restoreFromPersisted(ii: Double) {
-        // Återställ dimensioner från UserDefaults
-        if let dimDict = UserDefaults.standard.dictionary(forKey: "eon_persisted_dimensions") as? [String: Double] {
+        // Förlängt uppstartsskydd — 90s från nu, ger alla motorer tid att ladda
+        startupProtectionUntil = Date().addingTimeInterval(90)
+
+        if let dimDict = UserDefaults.standard.dictionary(forKey: "eon_persisted_dimensions") as? [String: Double],
+           !dimDict.isEmpty {
+            // Återställ exakt sparade dimensionsvärden
             for (rawValue, val) in dimDict {
                 if let dim = CognitiveDimension(rawValue: rawValue) {
                     dimensions[dim] = max(0.01, min(0.99, val))
                 }
             }
+            print("[CognitiveState] Återställd: \(dimDict.count) dimensioner, II=\(String(format: "%.3f", ii))")
         } else {
-            // Ingen sparad state — starta på låg men deterministisk bas (0.05), byggs upp via riktig inlärning
-            let baseLevel = max(0.05, min(0.3, ii * 0.4))
-            for dim in CognitiveDimension.allCases {
+            // Ingen sparad state alls — härled dimensioner från II-värdet
+            // Undviker att börja på 0.3 om II faktiskt var högre
+            let baseLevel = max(0.30, min(0.75, ii * 0.85))
+            for dim in CognitiveDimension.allCases where dim != .cognitiveLoad {
                 dimensions[dim] = baseLevel
             }
+            print("[CognitiveState] Ingen sparad dimensionsdata — härlett från II=\(String(format: "%.3f", ii)), bas=\(String(format: "%.3f", baseLevel))")
         }
+
         integratedIntelligence = ii
         recalculateIntegratedIntelligence()
-        print("[CognitiveState] Återställd från persistens: II=\(String(format: "%.3f", ii))")
+
+        // Spara omedelbart så att ett eventuellt tidigt krasch inte förlorar restore-state
+        persistCurrentState()
+        lastPersistDate = Date()
     }
 
     // Snapshot av alla dimensioner för checkpoint-sparning
