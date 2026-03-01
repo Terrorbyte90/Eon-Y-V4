@@ -239,34 +239,23 @@ final class EonBrain: ObservableObject {
         heartbeatStarted = true
         Task { @MainActor in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 600_000_000)  // 0.6s — snabb puls
+                // v4: 0.6s → 3s — 80% reduction. SwiftUI animations drive visuals;
+                // heartbeat only needs to update data values periodically.
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
                 self.heartbeatTick += 1
                 let t = Double(self.heartbeatTick)
 
                 self.isAutonomouslyActive = true
 
-                // Beräkna levande engineActivity — ALLTID höga värden
-                let base: Double = self.isThinking ? 0.72 : 0.42
-                let newActivity: [String: Double] = [
-                    "cognitive":  min(0.97, base + 0.22 * abs(sin(t * 0.29))),
-                    "language":   min(0.93, base + 0.18 * abs(sin(t * 0.43 + 1.1))),
-                    "memory":     min(0.90, base + 0.15 * abs(sin(t * 0.51 + 2.3))),
-                    "learning":   min(0.88, base + 0.14 * abs(cos(t * 0.37 + 0.9))),
-                    "autonomy":   min(0.85, 0.34 + 0.18 * abs(sin(t * 0.21 + 3.1))),
-                    "hypothesis": min(0.80, 0.28 + 0.16 * abs(sin(t * 0.17 + 1.7))),
-                    "worldModel": min(0.82, 0.30 + 0.14 * abs(cos(t * 0.26 + 2.5))),
-                ]
-                self.engineActivity = newActivity
-
-                // Rotera process-label var 2s (3 ticks à 0.6s)
-                if self.heartbeatTick % 3 == 0 && !self.isThinking {
-                    let idx = (self.heartbeatTick / 3) % self.processLabels.count
+                // Rotate process-label every heartbeat tick when idle
+                if !self.isThinking {
+                    let idx = self.heartbeatTick % self.processLabels.count
                     self.autonomousProcessLabel = self.processLabels[idx]
                 }
 
-                // Lägg till spontan tanke var ~8s (13 ticks à 0.6s)
-                if self.heartbeatTick % 13 == 0 {
-                    let idx = (self.heartbeatTick / 13) % self.spontaneousThoughts.count
+                // Spontaneous thought every ~4th tick (~12s) — reduced frequency
+                if self.heartbeatTick % 4 == 0 {
+                    let idx = (self.heartbeatTick / 4) % self.spontaneousThoughts.count
                     let (text, type) = self.spontaneousThoughts[idx]
                     self.innerMonologue.append(MonologueLine(text: text, type: type))
                     if self.innerMonologue.count > 300 { self.innerMonologue.removeFirst(50) }
@@ -278,11 +267,15 @@ final class EonBrain: ObservableObject {
     // Alias för bakåtkompatibilitet
     func startLiveAutonomy() { startCognitiveSystems() }
 
+    private var dbQueryTick: Int = 0
+
     private func bindCognitiveState() {
-        // Synka CognitiveState → EonBrain @Published properties var 1s
+        // v4: Split into fast UI sync (5s) and slow DB queries (30s).
+        // Was: 1s with SQLite queries every tick — caused constant disk I/O.
         Task { @MainActor in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 5_000_000_000)  // v4: 1s → 5s
+                dbQueryTick += 1
                 let state = CognitiveState.shared
 
                 // Intelligens
@@ -304,13 +297,14 @@ final class EonBrain: ObservableObject {
                 self.activePillars = IntegratedCognitiveArchitecture.shared.activePillars
 
                 // Synka developmentalStage baserat på integrerat intelligensindex
-                // (samma 14-nivå system som hemvyn — konsistent data)
                 self.developmentalStage = DevelopmentalStage.fromIntelligence(state.integratedIntelligence)
                 self.developmentalProgress = DevelopmentalStage.progressToNext(state.integratedIntelligence)
 
-                // Uppdatera kunskaps- och konversationsräknare varje cykel (1s) — håller UI levande
-                self.knowledgeNodeCount = await memory.knowledgeNodeCount()
-                self.conversationCount = await memory.conversationCount()
+                // v4: DB queries only every 6th tick (~30s) instead of every second
+                if dbQueryTick % 6 == 0 {
+                    self.knowledgeNodeCount = await memory.knowledgeNodeCount()
+                    self.conversationCount = await memory.conversationCount()
+                }
             }
         }
     }

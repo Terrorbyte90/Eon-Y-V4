@@ -17,7 +17,7 @@ struct MindView: View {
     ]
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 2.0)) { tl in
+        TimelineView(.periodic(from: .now, by: 4.0)) { tl in // v4: 2s → 4s — reduces GPU redraws
             let _ = tl.date
             ZStack(alignment: .top) {
                 mindBackground

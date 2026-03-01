@@ -23,7 +23,7 @@ struct SelfAwarenessView: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.5)) { tl in
+        TimelineView(.periodic(from: .now, by: 3.0)) { tl in // v4: 1.5s → 3s — matches data update frequency
             let _ = tl.date
             ZStack(alignment: .top) {
                 saBackground

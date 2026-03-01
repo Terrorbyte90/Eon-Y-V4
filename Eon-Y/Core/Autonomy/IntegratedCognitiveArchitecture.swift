@@ -118,15 +118,15 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
                 await checkAndFireEvents(state: state, brain: brain)
             }
 
-            // Thermal-aware interval: 6s nominal → up to 50s critical
+            // v4: Thermal-aware interval: 8s nominal → up to 50s critical (was 6s nominal)
             let thermalState = ProcessInfo.processInfo.thermalState
             let interval: UInt64
             switch thermalState {
-            case .nominal:  interval = 6_000_000_000
-            case .fair:     interval = 10_000_000_000
+            case .nominal:  interval = 8_000_000_000   // v4: 6s → 8s
+            case .fair:     interval = 12_000_000_000  // v4: 10s → 12s
             case .serious:  interval = 30_000_000_000
             case .critical: interval = 50_000_000_000
-            @unknown default: interval = 6_000_000_000
+            @unknown default: interval = 8_000_000_000
             }
             try? await Task.sleep(nanoseconds: interval)
         }
