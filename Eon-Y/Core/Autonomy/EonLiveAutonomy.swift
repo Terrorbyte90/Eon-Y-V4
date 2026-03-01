@@ -437,7 +437,7 @@ final class EonLiveAutonomy {
             content = generateFallbackEonContent(topic: topic, ii: ii, topDims: topDims, stage: stage)
         }
 
-        let article = KnowledgeArticle(
+        var article = KnowledgeArticle(
             id: UUID(),
             title: topic,
             content: content,
@@ -445,11 +445,9 @@ final class EonLiveAutonomy {
             domain: "Eon",
             source: "Eon-självreflektion",
             date: Date(),
-            isGenerating: false,
-            wordCount: content.split(separator: " ").count,
-            generatedAt: Date(),
             isAutonomous: true
         )
+        article.wordCount = content.split(separator: " ").count
 
         Task.detached(priority: .background) {
             await PersistentMemoryStore.shared.saveArticle(article)
@@ -1234,10 +1232,12 @@ final class EonLiveAutonomy {
             let mode = performanceMode
             let interval: UInt64
             switch mode {
-            case .maximal:  interval = 10_000_000_000
-            case .balanced: interval = 15_000_000_000
-            case .sparse:   interval = 30_000_000_000
-            case .rest:     interval = 60_000_000_000
+            case .maximal:     interval = 10_000_000_000
+            case .balanced:    interval = 15_000_000_000
+            case .sparse:      interval = 30_000_000_000
+            case .rest:        interval = 60_000_000_000
+            case .autonomyOff: interval = 60_000_000_000
+            case .cycling:     interval = autoScaledInterval(base: 15_000_000_000)
             case .auto, .adaptive: interval = autoScaledInterval(base: 15_000_000_000)
             }
             try? await Task.sleep(nanoseconds: interval)

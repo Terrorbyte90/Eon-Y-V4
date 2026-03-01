@@ -610,7 +610,7 @@ actor PersistentMemoryStore {
     // MARK: - Search facts by keyword
 
     func searchFacts(query: String, limit: Int = 5) -> [(subject: String, predicate: String, object: String)] {
-        guard isReady else { return [] }
+        guard isReady, let db else { return [] }
         var results: [(String, String, String)] = []
         let keywords = Array(query.lowercased()
             .split(separator: " ")
@@ -621,24 +621,22 @@ actor PersistentMemoryStore {
 
         let likeClause = keywords.map { _ in "(subject LIKE ? OR object LIKE ?)" }.joined(separator: " OR ")
         let sql = "SELECT subject, predicate, object FROM facts WHERE \(likeClause) ORDER BY confidence DESC LIMIT ?"
-        let patterns: [String] = keywords.map { "%\($0)%" }
+        // Bygg patterns som NSString för att garantera giltig C-sträng-livstid under hela bind-sekvensen
+        let patterns: [NSString] = keywords.map { "%\($0)%" as NSString }
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            print("[Memory] searchFacts prepare fel: \(String(cString: sqlite3_errmsg(db)))")
+            if let errMsg = sqlite3_errmsg(db) {
+                print("[Memory] searchFacts prepare fel: \(String(cString: errMsg))")
+            }
             return []
         }
 
         var idx: Int32 = 1
         for pattern in patterns {
-            pattern.withCString { ptr in
-                sqlite3_bind_text(stmt, idx, ptr, -1, SQLITE_TRANSIENT_FUNC)
-            }
-            idx += 1
-            pattern.withCString { ptr in
-                sqlite3_bind_text(stmt, idx, ptr, -1, SQLITE_TRANSIENT_FUNC)
-            }
-            idx += 1
+            sqlite3_bind_text(stmt, idx,     pattern.utf8String, -1, SQLITE_TRANSIENT_FUNC)
+            sqlite3_bind_text(stmt, idx + 1, pattern.utf8String, -1, SQLITE_TRANSIENT_FUNC)
+            idx += 2
         }
         sqlite3_bind_int(stmt, idx, Int32(limit))
 
