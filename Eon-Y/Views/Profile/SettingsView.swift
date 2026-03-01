@@ -28,6 +28,7 @@ struct SettingsView: View {
     @AppStorage("eon_dev_mode")            private var devMode = false
 
     @State private var showResetAlert = false
+    @State private var showCognitionLog = false
 
     let personalities = ["Standard", "Torr", "Varm", "Formell", "Lekfull"]
     let cognitiveModes = ["Djup", "Balanserat", "Snabbt"]
@@ -176,6 +177,49 @@ struct SettingsView: View {
                 settingToggle("Konfidenspoäng", icon: "shield.fill", binding: $showConfidence, color: Color(hex: "#EC4899"))
                 Divider().background(Color.white.opacity(0.06))
                 settingToggle("Utvecklarläge", icon: "terminal", binding: $devMode, color: Color(hex: "#EC4899"))
+            }
+
+            // Kognitionslogg
+            Button {
+                showCognitionLog = true
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(hex: "#A78BFA").opacity(0.15))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "doc.text.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(hex: "#A78BFA"))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Kognitionslogg")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("Alla Eons tankar sparade lokalt")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(hex: "#A78BFA").opacity(0.04)))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color(hex: "#A78BFA").opacity(0.2), lineWidth: 0.6))
+                )
+            }
+            .sheet(isPresented: $showCognitionLog) {
+                CognitionLogView()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
             }
 
             // Reset

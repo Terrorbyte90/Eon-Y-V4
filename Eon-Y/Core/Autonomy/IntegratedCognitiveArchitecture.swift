@@ -36,6 +36,13 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // Stark referens — EonBrain är singleton och lever hela appens livstid
     private var brain: EonBrain?
 
+    // Cooldown-tidsstämplar för att förhindra event-spam
+    private var lastStagnationEvent: Date = .distantPast
+    private var lastGapEventKey: String = ""
+    private var lastGapEventDate: Date = .distantPast
+    private static let stagnationCooldown: TimeInterval = 300   // 5 min
+    private static let gapCooldown: TimeInterval = 180          // 3 min
+
     // Snapshot för EonBrain.engineActivity (String-keyed)
     var pillarActivitySnapshot: [String: Double] {
         var result: [String: Double] = [:]
@@ -194,19 +201,28 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Event-system
 
     private func checkAndFireEvents(state: CognitiveState, brain: EonBrain) async {
-        // Event: Kunskapslucka identifierad
+        let now = Date()
+
+        // Event: Kunskapslucka identifierad — max en gång per 3 min per unik lucka
         if let urgentGap = state.urgentGap {
-            let event = CognitiveEvent(
-                type: .gapIdentified,
-                source: .metacognition,
-                target: urgentGap.dimension.pillar,
-                payload: "Lucka i \(urgentGap.dimension.rawValue): \(String(format: "%.0f", urgentGap.currentLevel * 100))% → \(String(format: "%.0f", urgentGap.targetLevel * 100))%",
-                priority: urgentGap.urgency > 2.0 ? .high : .medium
-            )
-            await fireEvent(event, brain: brain)
+            let gapKey = "\(urgentGap.dimension.rawValue)_\(Int(urgentGap.currentLevel * 100))"
+            let isNewGap = gapKey != lastGapEventKey
+            let cooldownPassed = now.timeIntervalSince(lastGapEventDate) > Self.gapCooldown
+            if isNewGap || cooldownPassed {
+                lastGapEventKey = gapKey
+                lastGapEventDate = now
+                let event = CognitiveEvent(
+                    type: .gapIdentified,
+                    source: .metacognition,
+                    target: urgentGap.dimension.pillar,
+                    payload: "Lucka i \(urgentGap.dimension.rawValue): \(String(format: "%.0f", urgentGap.currentLevel * 100))% → \(String(format: "%.0f", urgentGap.targetLevel * 100))%",
+                    priority: urgentGap.urgency > 2.0 ? .high : .medium
+                )
+                await fireEvent(event, brain: brain)
+            }
         }
 
-        // Event: Hög resonemangsnivå → trigga djupare kausalanalys
+        // Event: Hög resonemangsnivå → trigga djupare kausalanalys (slumpmässigt, 1/10 chans)
         let reasoningLevel = state.dimensionLevel(.reasoning)
         if reasoningLevel > 0.6 && Int.random(in: 0...10) == 0 {
             let event = CognitiveEvent(
@@ -219,17 +235,20 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
             await fireEvent(event, brain: brain)
         }
 
-        // Event: Metakognition detekterar stagnation
+        // Event: Metakognition detekterar stagnation — max en gång per 5 min
         let velocity = state.growthVelocity
         if abs(velocity) < 0.00005 && currentCycle > 20 {
-            let event = CognitiveEvent(
-                type: .stagnationDetected,
-                source: .metacognition,
-                target: .knowledge,
-                payload: "Stagnation detekterad (v=\(String(format: "%.6f", velocity))). Introducerar kognitiv störning.",
-                priority: .high
-            )
-            await fireEvent(event, brain: brain)
+            if now.timeIntervalSince(lastStagnationEvent) > Self.stagnationCooldown {
+                lastStagnationEvent = now
+                let event = CognitiveEvent(
+                    type: .stagnationDetected,
+                    source: .metacognition,
+                    target: .knowledge,
+                    payload: "Stagnation detekterad (v=\(String(format: "%.6f", velocity))). Introducerar kognitiv störning.",
+                    priority: .high
+                )
+                await fireEvent(event, brain: brain)
+            }
         }
     }
 
@@ -239,10 +258,13 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
 
         // Logga i brain monologue för UI
         let emoji = event.priority == .high ? "🔴" : event.priority == .medium ? "🟡" : "🟢"
+        let monologueText = "\(emoji) ICA[\(event.source.rawValue)→\(event.target.rawValue)]: \(event.payload)"
         brain.innerMonologue.append(MonologueLine(
-            text: "\(emoji) ICA[\(event.source.rawValue)→\(event.target.rawValue)]: \(event.payload)",
+            text: monologueText,
             type: .loopTrigger
         ))
+
+        // Loggning till fil sker automatiskt via EonBrain.$innerMonologue Combine-observer
 
         // Registrera interaktion
         pillarInteractions.append(PillarInteraction(
