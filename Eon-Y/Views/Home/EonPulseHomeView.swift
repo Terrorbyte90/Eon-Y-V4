@@ -14,6 +14,7 @@ struct EonPulseHomeView: View {
     @State private var particles: [HomeParticle] = HomeParticle.generate(count: 20)
     @State private var showContent = false
     @State private var showCognitionLog = false
+    @State private var showFullLog = false
 
     var body: some View {
         // TimelineView uppdaterar varje sekund — garanterar att UI alltid ritas om
@@ -124,56 +125,78 @@ struct EonPulseHomeView: View {
                 .frame(width: 148, height: 148)
                 .rotationEffect(.degrees(ring1))
 
-            // Kärna
-            ZStack {
-                Circle()
-                    .fill(RadialGradient(
-                        colors: [
-                            Color(hex: "#2D1B69").opacity(0.98),
-                            Color(hex: "#1A0A3E").opacity(0.95),
-                            Color(hex: "#060410")
-                        ],
-                        center: .center, startRadius: 0, endRadius: 68
-                    ))
-                    .frame(width: 136, height: 136)
-
-                Circle()
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [dominant.opacity(0.9), Color(hex: "#38BDF8").opacity(0.5), dominant.opacity(0.2)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.4
-                    )
-                    .frame(width: 136, height: 136)
-                    .shadow(color: dominant.opacity(0.6), radius: 20)
-
-                Image(systemName: "brain.head.profile")
-                    .font(.system(size: 42, weight: .ultraLight))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [dominant, Color(hex: "#38BDF8")],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .shadow(color: dominant.opacity(0.9), radius: 14)
-
-                // Aktivitetsdottar runt kärnan
-                ForEach(0..<7, id: \.self) { i in
-                    let keys = ["cognitive","language","memory","learning","autonomy","hypothesis","worldModel"]
-                    let key = keys[i]
-                    let act = brain.engineActivity[key] ?? 0.5
-                    let angle = Double(i) / 7.0 * 360 - 90
+            // Kärna — tryckbar → öppnar Full-log
+            Button {
+                showFullLog = true
+            } label: {
+                ZStack {
                     Circle()
-                        .fill(engineColor(key))
-                        .frame(width: act > 0.4 ? 5 : 3, height: act > 0.4 ? 5 : 3)
-                        .opacity(0.9)
-                        .shadow(color: engineColor(key).opacity(0.9), radius: 5)
-                        .offset(y: -62)
-                        .rotationEffect(.degrees(angle + ring1 * 0.06))
+                        .fill(RadialGradient(
+                            colors: [
+                                Color(hex: "#2D1B69").opacity(0.98),
+                                Color(hex: "#1A0A3E").opacity(0.95),
+                                Color(hex: "#060410")
+                            ],
+                            center: .center, startRadius: 0, endRadius: 68
+                        ))
+                        .frame(width: 136, height: 136)
+
+                    Circle()
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [dominant.opacity(0.9), Color(hex: "#38BDF8").opacity(0.5), dominant.opacity(0.2)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.4
+                        )
+                        .frame(width: 136, height: 136)
+                        .shadow(color: dominant.opacity(0.6), radius: 20)
+
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 42, weight: .ultraLight))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [dominant, Color(hex: "#38BDF8")],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .shadow(color: dominant.opacity(0.9), radius: 14)
+
+                    // Aktivitetsdottar runt kärnan
+                    ForEach(0..<7, id: \.self) { i in
+                        let keys = ["cognitive","language","memory","learning","autonomy","hypothesis","worldModel"]
+                        let key = keys[i]
+                        let act = brain.engineActivity[key] ?? 0.5
+                        let angle = Double(i) / 7.0 * 360 - 90
+                        Circle()
+                            .fill(engineColor(key))
+                            .frame(width: act > 0.4 ? 5 : 3, height: act > 0.4 ? 5 : 3)
+                            .opacity(0.9)
+                            .shadow(color: engineColor(key).opacity(0.9), radius: 5)
+                            .offset(y: -62)
+                            .rotationEffect(.degrees(angle + ring1 * 0.06))
+                    }
+
+                    // Liten "log"-indikator längst ner på kärnan
+                    VStack {
+                        Spacer()
+                        Text("FULL-LOG")
+                            .font(.system(size: 6, weight: .black, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.35))
+                            .tracking(1)
+                            .padding(.bottom, 14)
+                    }
+                    .frame(width: 136, height: 136)
                 }
             }
+            .buttonStyle(.plain)
             .scaleEffect(orbPulse)
+            .sheet(isPresented: $showFullLog) {
+                FullLogView()
+                    .environmentObject(brain)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
+            }
         }
         .frame(height: 280)
     }
