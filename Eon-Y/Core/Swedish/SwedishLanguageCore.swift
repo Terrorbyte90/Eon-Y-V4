@@ -27,14 +27,155 @@ actor SwedishLanguageCore {
         let disambiguations = await wsdEngine.disambiguate(text)
         let register = detectRegister(text)
         let modalParticles = extractModalParticles(text)
+        let idioms = detectIdioms(text)
+        let clauses = segmentClauses(text)
+        let resolvedPronouns = resolveAnaphora(text, morphemes: morphemes)
 
         return SwedishAnalysis(
             originalText: text,
             morphemes: morphemes,
             disambiguations: disambiguations,
             register: register,
-            modalParticles: modalParticles
+            modalParticles: modalParticles,
+            detectedIdioms: idioms,
+            clauses: clauses,
+            anaphoraResolutions: resolvedPronouns
         )
+    }
+
+    // MARK: - Idiom Detection
+    // Swedish idioms change meaning of the whole phrase — crucial for understanding
+
+    private static let idiomDatabase: [(pattern: [String], meaning: String, literal: String)] = [
+        // Common Swedish idioms
+        (["lägga", "korten", "på", "bordet"], "vara ärlig, avslöja sanningen", "put cards on the table"),
+        (["det", "finns", "inga", "gratisluncher"], "allt har ett pris", "there are no free lunches"),
+        (["ha", "tummen", "mitt", "i", "handen"], "vara klumpig", "have thumb in middle of hand"),
+        (["gå", "som", "katten", "kring", "het", "gröt"], "undvika att ta tag i något", "walk like the cat around hot porridge"),
+        (["bita", "ihop"], "stå ut med smärta/svårigheter", "bite together"),
+        (["dra", "en", "lansen"], "överge, ge upp på", "break a lance"),
+        (["ha", "is", "i", "magen"], "vara lugn och tålmodig", "have ice in the stomach"),
+        (["kasta", "in", "handduken"], "ge upp", "throw in the towel"),
+        (["slå", "huvudet", "på", "spiken"], "ha helt rätt", "hit the nail on the head"),
+        (["ta", "tjuren", "vid", "hornen"], "möta problem direkt", "take the bull by the horns"),
+        (["det", "var", "droppen"], "den sista provokationen", "it was the drop"),
+        (["gå", "som", "på", "räls"], "fungera perfekt", "go as on rails"),
+        (["hålla", "tummarna"], "önska lycka till", "hold the thumbs"),
+        (["sitta", "i", "samma", "båt"], "ha samma problem", "sit in the same boat"),
+        (["lägga", "alla", "ägg", "i", "samma", "korg"], "satsa allt på ett kort", "put all eggs in one basket"),
+        (["dra", "sitt", "strå", "till", "stacken"], "bidra med sin del", "pull your straw to the haystack"),
+        (["vara", "ute", "och", "cyklar"], "ha fel, missförstå helt", "be out cycling"),
+        (["inte", "alla", "hästar", "hemma"], "inte riktigt klok", "not all horses at home"),
+        (["ta", "med", "en", "nypa", "salt"], "vara skeptisk", "take with a pinch of salt"),
+        (["göra", "en", "höna", "av", "en", "fjäder"], "överdriva", "make a hen of a feather"),
+    ]
+
+    private func detectIdioms(_ text: String) -> [DetectedIdiom] {
+        let words = text.lowercased().components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { !$0.isEmpty }
+        var found: [DetectedIdiom] = []
+
+        for (pattern, meaning, literal) in Self.idiomDatabase {
+            // Check if all pattern words appear in order (with gaps allowed)
+            var patternIdx = 0
+            for word in words {
+                if patternIdx < pattern.count && word.hasPrefix(pattern[patternIdx].prefix(4)) {
+                    patternIdx += 1
+                }
+            }
+            if patternIdx >= pattern.count {
+                found.append(DetectedIdiom(
+                    phrase: pattern.joined(separator: " "),
+                    meaning: meaning,
+                    literalTranslation: literal
+                ))
+            }
+        }
+        return found
+    }
+
+    // MARK: - Clause Segmentation
+    // Split Swedish sentences into clauses (huvudsats/bisats)
+
+    private static let subordinators: Set<String> = [
+        "att", "som", "om", "när", "medan", "eftersom", "trots", "fast", "innan",
+        "efter", "tills", "såvida", "huruvida", "ifall", "emedan", "ehuru",
+        "för att", "så att", "även om", "trots att", "i stället för att"
+    ]
+
+    private func segmentClauses(_ text: String) -> [ClauseSegment] {
+        // Split on punctuation and subordinating conjunctions
+        var clauses: [ClauseSegment] = []
+        let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?"))
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        for sentence in sentences {
+            // Split on commas and subordinators
+            let parts = sentence.components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+
+            for part in parts {
+                let lower = part.lowercased()
+                let words = lower.components(separatedBy: .whitespaces)
+                let firstWord = words.first ?? ""
+
+                let isSubordinate = Self.subordinators.contains(firstWord) ||
+                    Self.subordinators.contains(words.prefix(2).joined(separator: " "))
+                let clauseType: ClauseSegment.ClauseType = isSubordinate ? .subordinate : .main
+
+                clauses.append(ClauseSegment(
+                    text: part,
+                    type: clauseType,
+                    startWord: firstWord
+                ))
+            }
+        }
+        return clauses
+    }
+
+    // MARK: - Anaphora Resolution (basic pronoun resolution)
+    // Resolves "den", "det", "han", "hon", "de" to their likely referents
+
+    private func resolveAnaphora(_ text: String, morphemes: [MorphemeAnalysis]) -> [AnaphoraResolution] {
+        let words = text.lowercased().components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+        let pronouns: Set<String> = ["den", "det", "han", "hon", "de", "dem", "dessa", "detta"]
+
+        // Find all nouns as potential antecedents
+        let nouns = morphemes.filter { $0.pos == "noun" || $0.pos == "propernoun" }
+        var resolutions: [AnaphoraResolution] = []
+
+        for (idx, word) in words.enumerated() {
+            guard pronouns.contains(word) else { continue }
+
+            // Find the closest preceding noun as the likely antecedent
+            var bestAntecedent: String?
+            var bestDistance = Int.max
+
+            for noun in nouns {
+                if let nounIdx = words.firstIndex(of: noun.word.lowercased()), nounIdx < idx {
+                    let distance = idx - nounIdx
+                    if distance < bestDistance {
+                        bestDistance = distance
+                        bestAntecedent = noun.word
+                    }
+                }
+            }
+
+            if let antecedent = bestAntecedent, bestDistance <= 10 {
+                let confidence = max(0.3, 1.0 - Double(bestDistance) * 0.08)
+                resolutions.append(AnaphoraResolution(
+                    pronoun: word,
+                    antecedent: antecedent,
+                    distance: bestDistance,
+                    confidence: confidence
+                ))
+            }
+        }
+        return resolutions
     }
 
     // MARK: - Register-detektion
@@ -125,12 +266,48 @@ actor SwedishMorphologyEngine {
         }
     }
 
+    // Swedish inflection suffixes for stemming back to base forms
+    private static let inflectionPatterns: [(suffix: String, baseSuffix: String, pos: String)] = [
+        // Verb inflections
+        ("ade", "a", "verb"),       // pratade → prata
+        ("ades", "a", "verb"),      // pratades → prata
+        ("ande", "a", "verb"),      // pratande → prata
+        ("ar", "a", "verb"),        // pratar → prata
+        ("arna", "a", "verb"),      // pratarna → prata (noun form)
+        ("ade", "a", "verb"),       // cyklade → cykla
+        ("er", "a", "verb"),        // springer → springa (irregular but common)
+        ("de", "", "verb"),         // sprangde → sprang
+        ("t", "a", "verb"),         // pratat → prata
+        ("s", "", "verb"),          // skrivs → skriv
+
+        // Noun inflections (definite/plural)
+        ("en", "", "noun"),         // bilen → bil
+        ("et", "", "noun"),         // huset → hus
+        ("arna", "a", "noun"),      // bilarna → bila?
+        ("erna", "", "noun"),       // männerna → männ
+        ("orna", "", "noun"),       // flickorna → flick
+        ("ar", "", "noun"),         // bilar → bil
+        ("or", "", "noun"),         // flickor → flick
+        ("er", "", "noun"),         // platser → plats
+        ("na", "", "noun"),         // husen → hus (already covered by -en)
+        ("ns", "", "noun"),         // bilens → bil (genitive)
+        ("s", "", "noun"),          // bils → bil (genitive)
+
+        // Adjective inflections
+        ("are", "", "adjective"),   // snabbare → snabb
+        ("ast", "", "adjective"),   // snabbast → snabb
+        ("aste", "", "adjective"),  // snabbaste → snabb
+        ("a", "", "adjective"),     // snabba → snabb
+        ("t", "", "adjective"),     // snabbt → snabb
+    ]
+
     func analyze(_ text: String) async -> [MorphemeAnalysis] {
         let words = text.components(separatedBy: .whitespacesAndNewlines)
             .map { $0.trimmingCharacters(in: .punctuationCharacters).lowercased() }
             .filter { !$0.isEmpty }
 
         return words.compactMap { word in
+            // Direct lexicon lookup
             if let entry = lexicon[word] {
                 return MorphemeAnalysis(
                     word: word,
@@ -142,8 +319,13 @@ actor SwedishMorphologyEngine {
                 )
             }
 
-            // Compound analysis: try to split unknown words (Swedish compounds can be short)
-            if word.count > 6 {
+            // Try inflection stripping: remove known suffixes and check lexicon
+            if let inflected = resolveInflection(word) {
+                return inflected
+            }
+
+            // Compound analysis: try to split unknown words
+            if word.count > 5 { // Lowered from 6 — Swedish has short compounds like "sjöman" (6)
                 let compoundResult = analyzeCompound(word)
                 if compoundResult.isCompound || compoundResult.pos != "unknown" {
                     return compoundResult
@@ -152,6 +334,26 @@ actor SwedishMorphologyEngine {
 
             return MorphemeAnalysis(word: word, baseForm: word, pos: "unknown", morphemes: [word], isCompound: false, forms: [:])
         }
+    }
+
+    /// Try stripping Swedish inflection suffixes to find base form in lexicon
+    private func resolveInflection(_ word: String) -> MorphemeAnalysis? {
+        for pattern in Self.inflectionPatterns {
+            guard word.count > pattern.suffix.count + 2, // Base must be at least 3 chars
+                  word.hasSuffix(pattern.suffix) else { continue }
+            let stem = String(word.dropLast(pattern.suffix.count)) + pattern.baseSuffix
+            if let entry = lexicon[stem] {
+                return MorphemeAnalysis(
+                    word: word,
+                    baseForm: stem,
+                    pos: entry.pos.isEmpty ? pattern.pos : entry.pos,
+                    morphemes: [stem, pattern.suffix],
+                    isCompound: false,
+                    forms: entry.forms
+                )
+            }
+        }
+        return nil
     }
 
     /// Common Swedish compound linking morphemes ("fog")
@@ -253,24 +455,76 @@ actor SwedishWSDEngine {
     private func loadBuiltInSenses() {
         senseDatabase = [
             "band": [
-                WordSense(id: "band.1", definition: "musikgrupp", examples: ["rockband", "spelat i band"], confidence: 0.0),
-                WordSense(id: "band.2", definition: "remsa, tejp", examples: ["tejpband", "magnetband"], confidence: 0.0),
-                WordSense(id: "band.3", definition: "bindning, förbindning", examples: ["blodband", "vänskapsband"], confidence: 0.0)
+                WordSense(id: "band.1", definition: "musikgrupp", examples: ["rockband", "spelat i band", "bandet spelade"], confidence: 0.0),
+                WordSense(id: "band.2", definition: "remsa, tejp", examples: ["tejpband", "magnetband", "löpande band"], confidence: 0.0),
+                WordSense(id: "band.3", definition: "bindning, förbindning", examples: ["blodband", "vänskapsband", "familjens band"], confidence: 0.0)
             ],
             "rätt": [
-                WordSense(id: "rätt.1", definition: "korrekt, riktigt", examples: ["rätt svar", "det är rätt"], confidence: 0.0),
-                WordSense(id: "rätt.2", definition: "maträtt", examples: ["varmrätt", "förrätt"], confidence: 0.0),
-                WordSense(id: "rätt.3", definition: "juridisk rätt", examples: ["mänskliga rättigheter"], confidence: 0.0)
+                WordSense(id: "rätt.1", definition: "korrekt, riktigt", examples: ["rätt svar", "det är rätt", "helt rätt"], confidence: 0.0),
+                WordSense(id: "rätt.2", definition: "maträtt", examples: ["varmrätt", "förrätt", "huvudrätt", "god rätt"], confidence: 0.0),
+                WordSense(id: "rätt.3", definition: "juridisk rätt", examples: ["mänskliga rättigheter", "rätten att", "laglig rätt"], confidence: 0.0)
             ],
             "lös": [
-                WordSense(id: "lös.1", definition: "inte fastbunden", examples: ["löst hår", "lös knut"], confidence: 0.0),
-                WordSense(id: "lös.2", definition: "lösa upp, lösa problem", examples: ["lösa ekvationen"], confidence: 0.0)
+                WordSense(id: "lös.1", definition: "inte fastbunden", examples: ["löst hår", "lös knut", "lös skruv"], confidence: 0.0),
+                WordSense(id: "lös.2", definition: "lösa upp, lösa problem", examples: ["lösa ekvationen", "lösa problemet", "lös gåtan"], confidence: 0.0)
             ],
             "spel": [
-                WordSense(id: "spel.1", definition: "datorspel, brädspel", examples: ["spela spel", "tv-spel"], confidence: 0.0),
-                WordSense(id: "spel.2", definition: "musikspelande", examples: ["pianospel", "gitarrspel"], confidence: 0.0),
-                WordSense(id: "spel.3", definition: "teater, skådespeleri", examples: ["skådespelarens spel"], confidence: 0.0)
-            ]
+                WordSense(id: "spel.1", definition: "datorspel, brädspel", examples: ["spela spel", "tv-spel", "dataspel"], confidence: 0.0),
+                WordSense(id: "spel.2", definition: "musikspelande", examples: ["pianospel", "gitarrspel", "hennes spel"], confidence: 0.0),
+                WordSense(id: "spel.3", definition: "teater, skådespeleri", examples: ["skådespelarens spel", "dramatiskt spel"], confidence: 0.0)
+            ],
+            "slag": [
+                WordSense(id: "slag.1", definition: "fysiskt slag", examples: ["ett hårt slag", "slag i ansiktet"], confidence: 0.0),
+                WordSense(id: "slag.2", definition: "typ, sort", examples: ["alla slag", "ett slag av", "olika slag"], confidence: 0.0),
+                WordSense(id: "slag.3", definition: "militärt slag", examples: ["slaget vid", "fältslag"], confidence: 0.0)
+            ],
+            "mål": [
+                WordSense(id: "mål.1", definition: "syfte, ändamål", examples: ["uppnå målet", "mitt mål", "långsiktigt mål"], confidence: 0.0),
+                WordSense(id: "mål.2", definition: "sportmål", examples: ["göra mål", "målvakt", "poängen gick i mål"], confidence: 0.0),
+                WordSense(id: "mål.3", definition: "rättsfall", examples: ["brottmål", "målet i rätten", "civilmål"], confidence: 0.0),
+                WordSense(id: "mål.4", definition: "språk, dialekt", examples: ["östgötamål", "skånska mål"], confidence: 0.0)
+            ],
+            "ställe": [
+                WordSense(id: "ställe.1", definition: "plats", examples: ["ett fint ställe", "på det stället"], confidence: 0.0),
+                WordSense(id: "ställe.2", definition: "i stället för", examples: ["i stället", "istället för"], confidence: 0.0)
+            ],
+            "drag": [
+                WordSense(id: "drag.1", definition: "egenskap, karaktärsdrag", examples: ["typiska drag", "personlighetsdrag"], confidence: 0.0),
+                WordSense(id: "drag.2", definition: "rörelse, att dra", examples: ["ett snabbt drag", "schackdrag"], confidence: 0.0),
+                WordSense(id: "drag.3", definition: "luftdrag", examples: ["det drar", "kallt drag"], confidence: 0.0)
+            ],
+            "fall": [
+                WordSense(id: "fall.1", definition: "händelse, situation", examples: ["i detta fall", "i alla fall"], confidence: 0.0),
+                WordSense(id: "fall.2", definition: "fysiskt fall", examples: ["falla ner", "ett högt fall"], confidence: 0.0),
+                WordSense(id: "fall.3", definition: "sjukdomsfall", examples: ["smittfall", "antalet fall"], confidence: 0.0)
+            ],
+            "verk": [
+                WordSense(id: "verk.1", definition: "konstverk", examples: ["ett stort verk", "litterärt verk", "hans verk"], confidence: 0.0),
+                WordSense(id: "verk.2", definition: "myndighet", examples: ["naturvårdsverket", "statligt verk"], confidence: 0.0),
+                WordSense(id: "verk.3", definition: "anläggning, fabrik", examples: ["kraftverk", "elverk"], confidence: 0.0)
+            ],
+            "grund": [
+                WordSense(id: "grund.1", definition: "bas, fundament", examples: ["på goda grunder", "grunden för"], confidence: 0.0),
+                WordSense(id: "grund.2", definition: "orsak", examples: ["av den grunden", "grund till"], confidence: 0.0),
+                WordSense(id: "grund.3", definition: "ytligt vatten", examples: ["gå på grund", "grundet i viken"], confidence: 0.0)
+            ],
+            "rad": [
+                WordSense(id: "rad.1", definition: "linje, serie", examples: ["på rad", "en rad av", "i en rad"], confidence: 0.0),
+                WordSense(id: "rad.2", definition: "textrad", examples: ["rad för rad", "första raden"], confidence: 0.0)
+            ],
+            "rik": [
+                WordSense(id: "rik.1", definition: "förmögen", examples: ["en rik man", "bli rik"], confidence: 0.0),
+                WordSense(id: "rik.2", definition: "riklig, full av", examples: ["rik på", "vitaminrik", "kunskapsrik"], confidence: 0.0)
+            ],
+            "värde": [
+                WordSense(id: "värde.1", definition: "ekonomiskt värde", examples: ["högt värde", "marknadsvärde"], confidence: 0.0),
+                WordSense(id: "värde.2", definition: "moraliskt värde", examples: ["mänskligt värde", "värderingar"], confidence: 0.0),
+                WordSense(id: "värde.3", definition: "matematiskt värde", examples: ["variabelns värde", "numeriskt värde"], confidence: 0.0)
+            ],
+            "del": [
+                WordSense(id: "del.1", definition: "bit, stycke", examples: ["en del av", "första delen"], confidence: 0.0),
+                WordSense(id: "del.2", definition: "ganska mycket", examples: ["en hel del", "en del människor"], confidence: 0.0)
+            ],
         ]
     }
 
@@ -383,6 +637,48 @@ struct SwedishAnalysis {
     let disambiguations: [DisambiguationResult]
     let register: SwedishRegister
     let modalParticles: [ModalParticle]
+    var detectedIdioms: [DetectedIdiom] = []
+    var clauses: [ClauseSegment] = []
+    var anaphoraResolutions: [AnaphoraResolution] = []
+
+    /// Quick summary for prompt building
+    var analysisSummary: String {
+        var parts: [String] = []
+        if register != .neutral { parts.append("Register: \(register.label)") }
+        if !modalParticles.isEmpty { parts.append("Partiklar: \(modalParticles.map { $0.word }.joined(separator: ", "))") }
+        if !detectedIdioms.isEmpty { parts.append("Idiom: \(detectedIdioms.map { $0.meaning }.joined(separator: "; "))") }
+        if clauses.count > 1 { parts.append("\(clauses.count) satser") }
+        let unknowns = morphemes.filter { $0.pos == "unknown" }.count
+        if unknowns > 0 { parts.append("\(unknowns) okända ord") }
+        return parts.isEmpty ? "Standard analys" : parts.joined(separator: " · ")
+    }
+}
+
+struct DetectedIdiom: Identifiable {
+    let id = UUID()
+    let phrase: String
+    let meaning: String
+    let literalTranslation: String
+}
+
+struct ClauseSegment: Identifiable {
+    let id = UUID()
+    let text: String
+    let type: ClauseType
+    let startWord: String
+
+    enum ClauseType {
+        case main       // Huvudsats
+        case subordinate // Bisats (inleds med subjunktion)
+    }
+}
+
+struct AnaphoraResolution: Identifiable {
+    let id = UUID()
+    let pronoun: String
+    let antecedent: String
+    let distance: Int       // Words between pronoun and antecedent
+    let confidence: Double  // 0..1
 }
 
 enum SwedishRegister {

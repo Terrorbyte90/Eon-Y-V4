@@ -22,10 +22,13 @@ final class GlobalWorkspaceEngine: ObservableObject {
     // Registrerade moduler som tar emot broadcasts
     private var registeredModules: [CognitiveModule] = []
 
-    // Tävlingsparametrar
-    private let maxActiveThoughts = 7       // Miller's Law: 7±2
-    private let broadcastThreshold = 0.65   // Minsta aktivering för broadcast
-    private let decayRate = 0.08            // Aktiveringsförfall per cykel
+    // Tävlingsparametrar (adaptive)
+    private var maxActiveThoughts = 7       // Miller's Law: 7±2 — adjusted based on cognitive load
+    private let broadcastThreshold = 0.60   // Minsta aktivering för broadcast (lowered for more broadcasts)
+    private let baseDecayRate = 0.08        // Baseline decay rate
+    private var consecutiveBroadcasts: Int = 0 // Track consecutive broadcasts for focus detection
+    @Published var dominantCategory: WorkspaceThoughtCategory = .general
+    @Published var focusStrength: Double = 0.0 // How focused the workspace is (0=scattered, 1=laser)
 
     private init() {
         setupDefaultModules()
@@ -69,33 +72,47 @@ final class GlobalWorkspaceEngine: ObservableObject {
     func runCompetition() {
         competitionRound += 1
 
-        // Phase 1: Decay + resonance boost
+        // Phase 0: Thought Coalescence — merge highly similar thoughts into stronger combined ones
+        coalesceThoughts()
+
+        // Phase 1: Adaptive decay — older thoughts decay faster, focused thoughts decay slower
+        let decayRate = baseDecayRate * (focusStrength > 0.7 ? 0.6 : 1.0) // Slower decay when focused
         for i in activeThoughts.indices {
-            activeThoughts[i].activation *= (1.0 - decayRate)
+            let age = Date().timeIntervalSince(activeThoughts[i].timestamp) / 60.0 // minutes
+            let ageFactor = 1.0 + min(0.5, age * 0.02) // Older thoughts decay up to 1.5x faster
+            activeThoughts[i].activation *= (1.0 - decayRate * ageFactor)
             activeThoughts[i].activation += calculateResonance(activeThoughts[i])
         }
 
         // Phase 2: Lateral inhibition — competing thoughts suppress each other
-        // This prevents too many similar thoughts from dominating the workspace
         for i in activeThoughts.indices {
             var inhibition: Double = 0
             for j in activeThoughts.indices where i != j {
                 let similarity = calculateSimilarity(activeThoughts[i], activeThoughts[j])
-                // High similarity + lower activation = gets suppressed
-                if similarity > 0.4 && activeThoughts[j].activation > activeThoughts[i].activation {
-                    inhibition += similarity * 0.03
+                if similarity > 0.35 && activeThoughts[j].activation > activeThoughts[i].activation {
+                    // Stronger inhibition for very similar thoughts (prevents redundancy)
+                    let inhibitionStrength = similarity > 0.7 ? 0.06 : 0.03
+                    inhibition += similarity * inhibitionStrength
                 }
             }
             activeThoughts[i].activation = max(0, activeThoughts[i].activation - inhibition)
         }
 
         // Phase 3: Remove dead thoughts
-        activeThoughts.removeAll { $0.activation < 0.1 }
+        activeThoughts.removeAll { $0.activation < 0.08 }
+
+        // Phase 4: Adaptive capacity — expand workspace when diverse, contract when focused
+        let categoryCount = Set(activeThoughts.map { $0.category }).count
+        maxActiveThoughts = categoryCount >= 4 ? 9 : 7 // Miller's 7±2
+
+        // Update dominant category and focus strength
+        updateFocusMetrics()
 
         // Hitta vinnaren
         guard let winner = activeThoughts.max(by: { $0.activation < $1.activation }),
               winner.activation >= broadcastThreshold else {
             currentFocus = nil
+            consecutiveBroadcasts = 0
             updateIntegrationLevel()
             return
         }
@@ -103,41 +120,115 @@ final class GlobalWorkspaceEngine: ObservableObject {
         // Broadcast vinnaren om det är en ny tanke
         if currentFocus?.id != winner.id {
             broadcast(winner)
+            consecutiveBroadcasts += 1
         }
 
         currentFocus = winner
         updateIntegrationLevel()
     }
 
+    // MARK: - Thought Coalescence
+    // Merge highly similar thoughts into a single stronger thought
+
+    private func coalesceThoughts() {
+        guard activeThoughts.count >= 3 else { return }
+
+        var merged = false
+        var i = 0
+        while i < activeThoughts.count && !merged {
+            var j = i + 1
+            while j < activeThoughts.count {
+                let similarity = calculateSimilarity(activeThoughts[i], activeThoughts[j])
+                if similarity > 0.65 { // Very similar — merge
+                    // Create merged thought with combined activation and richer content
+                    let combined = activeThoughts[i].activation > activeThoughts[j].activation
+                        ? activeThoughts[i] : activeThoughts[j]
+                    let weaker = activeThoughts[i].activation > activeThoughts[j].activation
+                        ? activeThoughts[j] : activeThoughts[i]
+
+                    // Boost the stronger thought with energy from the weaker
+                    let mergeBonus = weaker.activation * 0.4
+                    activeThoughts[activeThoughts[i].activation > activeThoughts[j].activation ? i : j].activation =
+                        min(1.0, combined.activation + mergeBonus)
+
+                    // Remove the weaker thought
+                    activeThoughts.remove(at: activeThoughts[i].activation > activeThoughts[j].activation ? j : i)
+                    merged = true
+                    break
+                }
+                j += 1
+            }
+            i += 1
+        }
+    }
+
+    // MARK: - Focus Metrics
+
+    private func updateFocusMetrics() {
+        guard !activeThoughts.isEmpty else {
+            focusStrength = 0
+            dominantCategory = .general
+            return
+        }
+
+        // Find dominant category
+        var categoryCounts: [WorkspaceThoughtCategory: Double] = [:]
+        for thought in activeThoughts {
+            categoryCounts[thought.category, default: 0] += thought.activation
+        }
+        dominantCategory = categoryCounts.max(by: { $0.value < $1.value })?.key ?? .general
+
+        // Focus strength: how much activation is concentrated in the dominant category
+        let totalActivation = activeThoughts.map { $0.activation }.reduce(0, +)
+        let dominantActivation = categoryCounts[dominantCategory] ?? 0
+        focusStrength = totalActivation > 0 ? dominantActivation / totalActivation : 0
+    }
+
     // MARK: - Broadcast
 
     private func broadcast(_ thought: WorkspaceThought) {
+        // Select receiving modules based on thought category — targeted broadcast
+        let relevantModules = registeredModules.filter { module in
+            if module.priority > 0.85 { return true } // High-priority always receives
+            switch thought.category {
+            case .reasoning: return ["reasoning", "metacognition", "attention"].contains(module.id)
+            case .memory:    return ["memory", "language", "reasoning"].contains(module.id)
+            case .language:  return ["language", "memory", "creativity"].contains(module.id)
+            case .emotion:   return ["emotion", "metacognition", "memory"].contains(module.id)
+            default:         return module.priority > 0.7
+            }
+        }
+
         let event = BroadcastEvent(
             thought: thought,
-            receivingModules: registeredModules.filter { $0.priority > 0.7 }.map { $0.name },
+            receivingModules: relevantModules.map { $0.name },
             timestamp: Date()
         )
 
         broadcastHistory.append(event)
         if broadcastHistory.count > 100 { broadcastHistory.removeFirst(20) }
 
-        // Boost alla relaterade tankar
+        // Boost related thoughts — amount proportional to semantic relevance
         for i in activeThoughts.indices {
             if activeThoughts[i].id != thought.id {
                 let similarity = calculateSimilarity(activeThoughts[i], thought)
-                activeThoughts[i].activation += similarity * 0.15
+                let boostAmount = similarity * 0.15 * (thought.activation / max(1.0, activeThoughts[i].activation + thought.activation))
+                activeThoughts[i].activation = min(1.0, activeThoughts[i].activation + boostAmount)
             }
         }
 
-        // Notifiera moduler
+        // Notify modules — cross-module feedback
         notifyModules(event: event)
     }
 
     private func notifyModules(event: BroadcastEvent) {
-        // I produktion: skicka till varje registrerad modul via callbacks
-        // Här uppdaterar vi integration-level som proxy
-        let moduleCount = Double(event.receivingModules.count)
-        integrationLevel = min(1.0, integrationLevel + moduleCount * 0.02)
+        // Module feedback: each module's priority contributes to integration
+        let totalModulePriority = registeredModules
+            .filter { event.receivingModules.contains($0.name) }
+            .map { $0.priority }
+            .reduce(0, +)
+        let feedbackStrength = totalModulePriority / Double(registeredModules.count)
+        integrationLevel = min(1.0, integrationLevel * 0.95 + feedbackStrength * 0.1)
     }
 
     // MARK: - Beräkningar
@@ -250,14 +341,46 @@ final class GlobalWorkspaceEngine: ObservableObject {
     // MARK: - Convenience
 
     func addThoughtFromText(_ text: String, source: String, priority: Double = 0.5) {
+        let category = classifyThoughtCategory(text)
+        let emotionalValence = estimateEmotionalValence(text)
+
         let thought = WorkspaceThought(
             content: text,
             source: source,
             baseActivation: priority,
-            emotionalValence: 0.0,
-            category: WorkspaceThoughtCategory.general
+            emotionalValence: emotionalValence,
+            category: category
         )
         addThought(thought)
+    }
+
+    /// Classify a thought's category based on content keywords
+    private func classifyThoughtCategory(_ text: String) -> WorkspaceThoughtCategory {
+        let lower = text.lowercased()
+        let categorySignals: [(WorkspaceThoughtCategory, [String])] = [
+            (.reasoning,  ["resonerar", "slutsats", "kausal", "hypotes", "logik", "bevis", "analys", "samband"]),
+            (.memory,     ["minne", "kommer ihåg", "episodisk", "konsolidering", "lagrar", "hämtar", "databas"]),
+            (.language,   ["språk", "morfologi", "syntax", "semantik", "ord", "grammatik", "böjning", "mening"]),
+            (.emotion,    ["känsla", "emotion", "glad", "ledsen", "orolig", "arg", "mår", "ångest"]),
+            (.perception, ["observerar", "uppfattar", "signal", "input", "registrerar", "noterar"]),
+        ]
+        var bestCategory: WorkspaceThoughtCategory = .general
+        var bestScore = 0
+        for (category, keywords) in categorySignals {
+            let score = keywords.filter { lower.contains($0) }.count
+            if score > bestScore { bestScore = score; bestCategory = category }
+        }
+        return bestCategory
+    }
+
+    /// Estimate emotional valence from text (-1 negative to +1 positive)
+    private func estimateEmotionalValence(_ text: String) -> Double {
+        let lower = text.lowercased()
+        let positive = ["framgång", "förbättring", "stark", "lyckas", "bra", "utmärkt", "tillväxt", "positiv", "löst", "framsteg", "✓", "✅"]
+        let negative = ["problem", "svag", "stagnation", "misslyckades", "bristfällig", "regression", "fel", "låg", "⚠️", "❌"]
+        let posScore = Double(positive.filter { lower.contains($0) }.count) * 0.15
+        let negScore = Double(negative.filter { lower.contains($0) }.count) * 0.15
+        return min(1.0, max(-1.0, posScore - negScore))
     }
 
     func clearWorkspace() {

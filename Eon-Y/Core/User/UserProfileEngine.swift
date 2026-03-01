@@ -58,6 +58,13 @@ final class UserProfileEngine: ObservableObject {
         }
     }
 
+    // Track emotional patterns across conversations
+    private var emotionHistory: [(emotion: String, date: Date)] = []
+    // Track session continuity
+    private var currentSessionId: String = UUID().uuidString
+    private var sessionStartTime: Date = Date()
+    private var sessionMessageCount: Int = 0
+
     // MARK: - Update after conversation
 
     func updateAfterConversation(userMessage: String, eonResponse: String, emotion: EonEmotion, confidence: Double) async {
@@ -67,22 +74,31 @@ final class UserProfileEngine: ObservableObject {
             if let idx = domainKnowledge.firstIndex(where: { $0.domain == domain }) {
                 domainKnowledge[idx].mentionCount += 1
                 domainKnowledge[idx].lastMentioned = Date()
+                // Update estimated level based on mention frequency and conversation depth
+                updateDomainLevel(at: idx)
             }
         }
 
-        // Uppdatera kommunikationsstil
+        // Apply temporal decay to radar data — inactive interests slowly fade
+        applyInterestDecay()
+
+        // Uppdatera kommunikationsstil (enhanced)
         updateCommunicationStyle(message: userMessage)
 
         // Uppdatera radar-data
         updateRadarData(message: userMessage)
 
+        // Track emotion patterns
+        emotionHistory.append((emotion.rawValue, Date()))
+        if emotionHistory.count > 100 { emotionHistory.removeFirst(50) }
+
         // Uppdatera konversationsräknare och ordräknare
         totalConversations += 1
+        sessionMessageCount += 1
         let userWords = userMessage.lowercased().split(separator: " ").map(String.init)
         let eonWords = eonResponse.lowercased().split(separator: " ").map(String.init)
         let msgWords = userWords.count + eonWords.count
         totalWordCount += msgWords
-        // Track actual unique words from user messages
         for word in userWords where word.count > 2 {
             knownUniqueWords.insert(word)
         }
@@ -90,49 +106,143 @@ final class UserProfileEngine: ObservableObject {
             ? Int(30.0 * pow(Double(totalWordCount), 0.5))
             : knownUniqueWords.count
 
-        // Uppdatera Eons beskrivning av användaren
+        // Uppdatera Eons beskrivning av användaren (enhanced)
         updateEonDescription()
+
+        // Auto-detect response length preference from user behavior
+        inferResponsePreferences(userMessage: userMessage, eonResponse: eonResponse)
 
         // Spara till minne (ej i preview-sandbox)
         guard !isPreviewInstance else { return }
-        Task {
-            await memory.saveMessage(role: "user", content: userMessage, sessionId: UUID().uuidString, confidence: confidence, emotion: emotion.rawValue)
+        // Reset session after 30 min inactivity
+        if Date().timeIntervalSince(sessionStartTime) > 1800 {
+            currentSessionId = UUID().uuidString
+            sessionStartTime = Date()
+            sessionMessageCount = 0
+            totalSessions += 1
         }
+        Task {
+            await memory.saveMessage(role: "user", content: userMessage, sessionId: currentSessionId, confidence: confidence, emotion: emotion.rawValue)
+        }
+    }
+
+    /// Infer user preferences from their behavior
+    private func inferResponsePreferences(userMessage: String, eonResponse: String) {
+        let msgLength = userMessage.split(separator: " ").count
+        // Users who write long messages likely want detailed responses
+        if msgLength > 40 && profile.preferredResponseLength != .detailed {
+            profile.preferredResponseLength = .detailed
+        } else if msgLength < 8 && totalConversations > 10 && profile.preferredResponseLength == .detailed {
+            // Consistently short messages suggest preference for brevity
+            profile.preferredResponseLength = .balanced
+        }
+    }
+
+    /// Decay inactive interests so radar reflects current interests
+    private func applyInterestDecay() {
+        for idx in interestRadarData.indices {
+            // Small decay each conversation — inactive interests slowly decrease
+            let matchingDomain = domainKnowledge.first { $0.domain == interestRadarData[idx].label }
+            let daysSinceLastMention = matchingDomain.map { Date().timeIntervalSince($0.lastMentioned) / 86400.0 } ?? 30.0
+            if daysSinceLastMention > 3 {
+                let decayAmount = min(0.01, daysSinceLastMention * 0.001)
+                interestRadarData[idx].value = max(0.05, interestRadarData[idx].value - decayAmount)
+            }
+        }
+    }
+
+    /// Update domain knowledge level based on accumulated mentions
+    private func updateDomainLevel(at idx: Int) {
+        let mentions = domainKnowledge[idx].mentionCount
+        let newLevel: DomainKnowledge.KnowledgeLevel
+        switch mentions {
+        case 0..<3:   newLevel = .novice
+        case 3..<10:  newLevel = .beginner
+        case 10..<25: newLevel = .intermediate
+        case 25..<50: newLevel = .advanced
+        default:      newLevel = .expert
+        }
+        domainKnowledge[idx].estimatedLevel = newLevel
     }
 
     // MARK: - Domain detection
 
     private func detectDomains(in text: String) -> [String] {
-        let domainKeywords: [String: [String]] = [
-            "Teknik": ["kod", "programmering", "algoritm", "dator", "app", "software", "ai", "maskininlärning"],
-            "Vetenskap": ["forskning", "studie", "experiment", "teori", "hypotes", "biologi", "fysik", "kemi"],
-            "Historia": ["historia", "historisk", "forntid", "krig", "revolution", "antiken", "medeltid"],
-            "Psykologi": ["psykologi", "beteende", "emotion", "känsla", "ångest", "depression", "terapi"],
-            "Ekonomi": ["ekonomi", "pengar", "investering", "aktier", "marknad", "inflation", "budget"],
-            "Kultur": ["kultur", "konst", "musik", "film", "litteratur", "teater", "design"],
-            "Språk": ["språk", "grammatik", "ord", "svenska", "engelska", "lingvistik", "etymologi"],
-            "Filosofi": ["filosofi", "etik", "moral", "existens", "medvetande", "fri vilja"]
+        let domainKeywords: [String: [(keyword: String, weight: Int)]] = [
+            "Teknik": [("kod", 2), ("programmering", 3), ("algoritm", 3), ("dator", 2), ("app", 2), ("software", 3),
+                       ("ai", 2), ("maskininlärning", 3), ("neural", 2), ("databas", 2), ("server", 2), ("swift", 3),
+                       ("python", 3), ("javascript", 3), ("api", 2), ("ramverk", 2), ("bugg", 2)],
+            "Vetenskap": [("forskning", 3), ("studie", 2), ("experiment", 3), ("teori", 2), ("hypotes", 3),
+                         ("biologi", 3), ("fysik", 3), ("kemi", 3), ("molekyl", 2), ("evolution", 3), ("gen", 2)],
+            "Historia": [("historia", 3), ("historisk", 2), ("forntid", 2), ("krig", 2), ("revolution", 2),
+                        ("antiken", 3), ("medeltid", 3), ("civilisation", 2), ("monarki", 2), ("arkeologi", 3)],
+            "Psykologi": [("psykologi", 3), ("beteende", 2), ("emotion", 2), ("känsla", 2), ("ångest", 2),
+                         ("depression", 2), ("terapi", 2), ("kognitiv", 2), ("personlighet", 2), ("trauma", 2)],
+            "Ekonomi": [("ekonomi", 3), ("pengar", 2), ("investering", 3), ("aktier", 2), ("marknad", 2),
+                       ("inflation", 2), ("budget", 2), ("finans", 3), ("skatt", 2), ("handel", 2)],
+            "Kultur": [("kultur", 3), ("konst", 2), ("musik", 2), ("film", 2), ("litteratur", 3),
+                      ("teater", 2), ("design", 2), ("arkitektur", 2), ("museum", 2), ("poesi", 2)],
+            "Språk": [("språk", 2), ("grammatik", 3), ("ord", 1), ("svenska", 2), ("engelska", 2),
+                     ("lingvistik", 3), ("etymologi", 3), ("dialekt", 2), ("uttal", 2), ("ordförråd", 2)],
+            "Filosofi": [("filosofi", 3), ("etik", 2), ("moral", 2), ("existens", 2), ("medvetande", 2),
+                        ("fri vilja", 3), ("ontologi", 3), ("epistemologi", 3), ("logik", 2)],
+            "Matematik": [("matematik", 3), ("ekvation", 3), ("algebra", 3), ("geometri", 3), ("statistik", 3),
+                         ("kalkyl", 2), ("bevis", 2), ("tal", 1), ("formel", 2)],
         ]
 
         let lower = text.lowercased()
         return domainKeywords.compactMap { domain, keywords in
-            keywords.contains(where: { lower.contains($0) }) ? domain : nil
+            let score = keywords.reduce(0) { sum, kw in lower.contains(kw.keyword) ? sum + kw.weight : sum }
+            return score >= 2 ? domain : nil // Require minimum score of 2 (not just any single-word match)
         }
     }
 
     // MARK: - Communication style update
 
     private func updateCommunicationStyle(message: String) {
+        let lower = message.lowercased()
         let wordCount = message.split(separator: " ").count
         let hasQuestion = message.contains("?")
-        let hasFormalWords = ["emellertid", "således", "beträffande"].contains(where: { message.lowercased().contains($0) })
 
-        // Rullande medelvärde för meddelandelängd
-        let currentAvg = communicationStyle.avgMessageLength
-        communicationStyle.avgMessageLength = currentAvg * 0.9 + Double(wordCount) * 0.1
+        // Formality detection — expanded word lists
+        let formalWords = ["emellertid", "således", "beträffande", "avseende", "vederbörande",
+                          "härav", "därtill", "emedan", "härmed", "dock", "icke"]
+        let informalWords = ["typ", "liksom", "asså", "va", "grejen", "kul", "gött", "nice",
+                           "fett", "soft", "skit", "lol", "haha"]
 
-        if hasQuestion { communicationStyle.questionFrequency = min(1.0, communicationStyle.questionFrequency + 0.05) }
-        if hasFormalWords { communicationStyle.formalityScore = min(1.0, communicationStyle.formalityScore + 0.03) }
+        let formalHits = formalWords.filter { lower.contains($0) }.count
+        let informalHits = informalWords.filter { lower.contains($0) }.count
+
+        // Rolling average for message length (more responsive: 0.85/0.15)
+        communicationStyle.avgMessageLength = communicationStyle.avgMessageLength * 0.85 + Double(wordCount) * 0.15
+
+        // Question frequency with decay for non-question messages
+        if hasQuestion {
+            communicationStyle.questionFrequency = min(1.0, communicationStyle.questionFrequency + 0.06)
+        } else {
+            communicationStyle.questionFrequency = max(0.0, communicationStyle.questionFrequency - 0.01) // Gentle decay
+        }
+
+        // Formality: bidirectional — formal words increase, informal decrease
+        if formalHits > 0 {
+            communicationStyle.formalityScore = min(1.0, communicationStyle.formalityScore + Double(formalHits) * 0.03)
+        }
+        if informalHits > 0 {
+            communicationStyle.formalityScore = max(0.0, communicationStyle.formalityScore - Double(informalHits) * 0.03)
+        }
+
+        // Humor detection
+        let humorSignals = ["haha", "lol", "😂", "🤣", "xD", "skämt", "rolig"]
+        if humorSignals.contains(where: { lower.contains($0) }) {
+            communicationStyle.humorAppreciation = min(1.0, communicationStyle.humorAppreciation + 0.04)
+        }
+
+        // Directness: short imperative messages suggest directness
+        if wordCount < 6 && !hasQuestion {
+            communicationStyle.directnessPreference = min(1.0, communicationStyle.directnessPreference + 0.02)
+        } else if wordCount > 20 {
+            communicationStyle.directnessPreference = max(0.0, communicationStyle.directnessPreference - 0.01)
+        }
     }
 
     // MARK: - Radar update
@@ -150,9 +260,50 @@ final class UserProfileEngine: ObservableObject {
 
     private func updateEonDescription() {
         let topDomains = domainKnowledge.sorted { $0.mentionCount > $1.mentionCount }.prefix(3).map { $0.domain }
-        let style = communicationStyle.avgMessageLength > 20 ? "detaljerade" : "korta"
 
-        profile.eonDescription = "Intresserad av \(topDomains.joined(separator: ", ")). Föredrar \(style) svar. Ställer ofta följdfrågor."
+        // Length preference description
+        let lengthDesc: String
+        switch communicationStyle.avgMessageLength {
+        case ..<8:   lengthDesc = "korta och koncisa"
+        case 8..<20: lengthDesc = "balanserade"
+        default:     lengthDesc = "detaljerade och utförliga"
+        }
+
+        // Formality description
+        let formalityDesc: String
+        switch communicationStyle.formalityScore {
+        case ..<0.3: formalityDesc = "Informell kommunikationsstil"
+        case 0.3..<0.6: formalityDesc = "Balanserad ton"
+        default:     formalityDesc = "Formell kommunikationsstil"
+        }
+
+        // Personality traits from behavior
+        var traits: [String] = []
+        if communicationStyle.questionFrequency > 0.5 { traits.append("nyfiken och frågvis") }
+        if communicationStyle.directnessPreference > 0.6 { traits.append("direkt och handlingskraftig") }
+        if communicationStyle.humorAppreciation > 0.5 { traits.append("uppskattar humor") }
+        if uniqueVocabularySize > 500 { traits.append("rikt ordförråd") }
+
+        // Emotional pattern
+        let recentEmotions = emotionHistory.suffix(10).map { $0.emotion }
+        let emotionDesc: String
+        if recentEmotions.filter({ $0 == "nyfiken" || $0 == "glad" }).count > 5 {
+            emotionDesc = "Generellt positiv och engagerad"
+        } else if recentEmotions.filter({ $0 == "fundersam" || $0 == "orolig" }).count > 5 {
+            emotionDesc = "Reflekterande och eftertänksam"
+        } else {
+            emotionDesc = ""
+        }
+
+        // Build dynamic description
+        var desc = "Intresserad av \(topDomains.joined(separator: ", ")). "
+        desc += "Föredrar \(lengthDesc) svar. "
+        desc += "\(formalityDesc). "
+        if !traits.isEmpty { desc += "Personlighet: \(traits.joined(separator: ", ")). " }
+        if !emotionDesc.isEmpty { desc += emotionDesc + ". " }
+        desc += "\(totalConversations) konversationer, \(uniqueVocabularySize) unika ord."
+
+        profile.eonDescription = desc
     }
 
     // MARK: - Load/save
@@ -163,6 +314,14 @@ final class UserProfileEngine: ObservableObject {
             profile = saved
         }
         totalConversations = UserDefaults.standard.integer(forKey: "eon_total_conversations")
+        totalSessions = UserDefaults.standard.integer(forKey: "eon_total_sessions")
+        // Restore communication style
+        communicationStyle.formalityScore = UserDefaults.standard.double(forKey: "eon_formality_score")
+        communicationStyle.questionFrequency = UserDefaults.standard.double(forKey: "eon_question_freq")
+        communicationStyle.humorAppreciation = UserDefaults.standard.double(forKey: "eon_humor_score")
+        if communicationStyle.formalityScore == 0 && totalConversations == 0 {
+            communicationStyle.formalityScore = 0.4 // Default
+        }
     }
 
     func saveProfile() {
@@ -170,6 +329,10 @@ final class UserProfileEngine: ObservableObject {
             UserDefaults.standard.set(data, forKey: "eon_user_profile")
         }
         UserDefaults.standard.set(totalConversations, forKey: "eon_total_conversations")
+        UserDefaults.standard.set(totalSessions, forKey: "eon_total_sessions")
+        UserDefaults.standard.set(communicationStyle.formalityScore, forKey: "eon_formality_score")
+        UserDefaults.standard.set(communicationStyle.questionFrequency, forKey: "eon_question_freq")
+        UserDefaults.standard.set(communicationStyle.humorAppreciation, forKey: "eon_humor_score")
     }
 }
 
@@ -179,7 +342,7 @@ struct UserProfile: Codable {
     var eonDescription: String = "Jag lär känna dig fortfarande..."
     var knownSince: Date = Date()
     var preferredResponseLength: ResponseLength = .detailed
-    var preferredTone: Tone = .semiFormai
+    var preferredTone: Tone = .semiFormal
 
     enum ResponseLength: String, Codable, CaseIterable {
         case brief = "Kort"
@@ -189,7 +352,7 @@ struct UserProfile: Codable {
 
     enum Tone: String, Codable, CaseIterable {
         case formal = "Formellt"
-        case semiFormai = "Halvformellt"
+        case semiFormal = "Halvformellt"
         case casual = "Informellt"
     }
 }

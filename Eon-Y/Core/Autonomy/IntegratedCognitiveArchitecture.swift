@@ -167,7 +167,7 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
             }
         }
 
-        // Event: Hög resonemangsnivå → trigga djupare kausalanalys (slumpmässigt, 1/10 chans)
+        // Event: Reasoning milestone → trigger deeper causal analysis
         let reasoningLevel = state.dimensionLevel(.reasoning)
         if reasoningLevel > 0.6 && Int.random(in: 0...10) == 0 {
             let event = CognitiveEvent(
@@ -180,19 +180,60 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
             await fireEvent(event, brain: brain)
         }
 
-        // Event: Metakognition detekterar stagnation — max en gång per 5 min
+        // Event: Knowledge breakthrough — dimension crosses a significant threshold
+        for dim in CognitiveDimension.allCases {
+            let level = state.dimensionLevel(dim)
+            let prevKey = "eon_dim_milestone_\(dim.rawValue)"
+            let prevMilestone = UserDefaults.standard.double(forKey: prevKey)
+            let milestones = [0.3, 0.5, 0.7, 0.85]
+            for milestone in milestones where level >= milestone && prevMilestone < milestone {
+                UserDefaults.standard.set(milestone, forKey: prevKey)
+                let event = CognitiveEvent(
+                    type: .breakthroughAchieved,
+                    source: dim.pillar,
+                    target: .metacognition,
+                    payload: "\(dim.rawValue) nådde \(Int(milestone * 100))% — kognitiv milstolpe!",
+                    priority: .high
+                )
+                await fireEvent(event, brain: brain)
+                break
+            }
+        }
+
+        // Event: Analogy opportunity — two growing dimensions suggest cross-domain insight
+        let growingDims = CognitiveDimension.allCases.filter { state.dimensionTrend($0) > 0.005 }
+        if growingDims.count >= 2 && Int.random(in: 0...5) == 0 {
+            let event = CognitiveEvent(
+                type: .analogyFound,
+                source: .analogy,
+                target: .reasoning,
+                payload: "Samväxande dimensioner: \(growingDims.prefix(2).map { $0.rawValue }.joined(separator: " + ")) — potentiell korskoppling",
+                priority: .medium
+            )
+            await fireEvent(event, brain: brain)
+        }
+
+        // Event: Stagnation detected — max once per 5 min
         let velocity = state.growthVelocity
         if abs(velocity) < 0.00005 && currentCycle > 20 {
             if now.timeIntervalSince(lastStagnationEvent) > Self.stagnationCooldown {
                 lastStagnationEvent = now
+                // Target the weakest pillar, not always knowledge
+                let weakest = state.weakestDimensions(limit: 1).first?.0 ?? .knowledge
                 let event = CognitiveEvent(
                     type: .stagnationDetected,
                     source: .metacognition,
-                    target: .knowledge,
-                    payload: "Stagnation detekterad (v=\(String(format: "%.6f", velocity))). Introducerar kognitiv störning.",
+                    target: weakest.pillar,
+                    payload: "Stagnation (v=\(String(format: "%.6f", velocity))). Fokuserar på \(weakest.rawValue).",
                     priority: .high
                 )
                 await fireEvent(event, brain: brain)
+
+                // Also trigger a perturbation: small random boost to weakest dimensions
+                let weakDims = state.weakestDimensions(limit: 3)
+                for (dim, _) in weakDims {
+                    await state.update(dimension: dim, delta: 0.005, source: "stagnation_perturbation")
+                }
             }
         }
     }
@@ -421,8 +462,47 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     }
 
     private func synthesizeKnowledgeParallels() async -> String? {
-        let articles = await PersistentMemoryStore.shared.randomArticles(limit: 2)
+        let articles = await PersistentMemoryStore.shared.randomArticles(limit: 3)
         guard articles.count >= 2 else { return nil }
+        let mem = PersistentMemoryStore.shared
+
+        // Extract key concepts from each article using NLP
+        var articleConcepts: [[String]] = []
+        for article in articles {
+            let facts = NLPFactExtractor.extract(from: article.content)
+            let concepts = facts.flatMap { [$0.subject, $0.object] }
+                .map { $0.lowercased() }
+                .filter { $0.count > 3 }
+            articleConcepts.append(concepts)
+        }
+
+        // Find concept bridges between articles from different domains
+        for i in 0..<(articles.count - 1) {
+            for j in (i + 1)..<articles.count {
+                guard articles[i].domain != articles[j].domain else { continue }
+                let concepts1 = Set(articleConcepts[i])
+                let concepts2 = Set(articleConcepts[j])
+                let shared = concepts1.intersection(concepts2)
+
+                if shared.count >= 2 {
+                    // Found a real concept bridge between different domains
+                    let bridgeConcepts = shared.prefix(3).joined(separator: ", ")
+
+                    // Save the bridge as a fact for future use
+                    await mem.saveFact(
+                        subject: articles[i].title,
+                        predicate: "konceptbrygga",
+                        object: "\(articles[j].title) via \(bridgeConcepts)",
+                        confidence: min(0.85, 0.5 + Double(shared.count) * 0.1),
+                        source: "knowledge_synthesis"
+                    )
+
+                    return "Konceptbrygga: '\(articles[i].title)' (\(articles[i].domain)) ↔ '\(articles[j].title)' (\(articles[j].domain)) via \(bridgeConcepts)"
+                }
+            }
+        }
+
+        // Fallback: simple word overlap
         let words1 = Set(articles[0].content.lowercased().split(separator: " ").map(String.init).filter { $0.count > 5 })
         let words2 = Set(articles[1].content.lowercased().split(separator: " ").map(String.init).filter { $0.count > 5 })
         let shared = words1.intersection(words2)
@@ -512,13 +592,32 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         guard let brain else { return }
         let state = CognitiveState.shared
         let experiment = LanguageExperimentEngine.generate(stage: brain.developmentalStage, existingExperiments: [])
+
+        // Run the experiment through SwedishLanguageCore for deeper analysis
+        let analysis = await SwedishLanguageCore.shared.analyze(experiment.testSentence)
+        let morphCount = analysis.morphemes.filter { $0.pos != "unknown" }.count
+        let totalCount = max(1, analysis.morphemes.count)
+        let recognitionRate = Double(morphCount) / Double(totalCount)
+
         brain.innerMonologue.append(MonologueLine(
-            text: "🗣 SPRÅK[\(String(format: "%.2f", state.dimensionLevel(.language)))]: \(experiment.rule) '\(experiment.baseWord)' → '\(experiment.derivedForm)'",
+            text: "🗣 SPRÅK[\(String(format: "%.2f", state.dimensionLevel(.language)))]: \(experiment.rule) '\(experiment.baseWord)' → '\(experiment.derivedForm)' · Igenkänning: \(String(format: "%.0f", recognitionRate * 100))%",
             type: .thought
         ))
-        await state.update(dimension: .language, delta: 0.003, source: "language_pillar")
+
+        // Scale cognitive gains by actual morphological recognition quality
+        let langGain = 0.002 + recognitionRate * 0.002
+        await state.update(dimension: .language, delta: langGain, source: "language_pillar")
         await state.update(dimension: .comprehension, delta: 0.002, source: "language_pillar")
         await state.update(dimension: .communication, delta: 0.002, source: "language_pillar")
+
+        // If idioms were detected, boost comprehension further
+        if !analysis.detectedIdioms.isEmpty {
+            brain.innerMonologue.append(MonologueLine(
+                text: "🗣 Idiom: '\(analysis.detectedIdioms.first!.phrase)' = \(analysis.detectedIdioms.first!.meaning)",
+                type: .insight
+            ))
+            await state.update(dimension: .comprehension, delta: 0.003, source: "idiom_detection")
+        }
     }
 
     private func runGlobalWorkspaceWork() async {
@@ -559,25 +658,41 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     private func runFeedbackAmplification(brain: EonBrain) async {
         let state = CognitiveState.shared
         let ii = state.integratedIntelligence
-        guard ii < 0.85 else { return } // Stricter cap to prevent inflation
+        guard ii < 0.85 else { return }
 
         let loops = state.feedbackLoops
         var amplified = 0
-        for loop in loops where loop.type == .positive {
+        var suppressedNegative = 0
+
+        for loop in loops {
             let levels = loop.dimensions.compactMap { state.dimensionLevel($0) }
             let minLevel = levels.min() ?? 0
             let avgLevel = levels.reduce(0, +) / Double(levels.count)
-            guard minLevel > 0.6 else { continue } // Stricter threshold (was 0.55)
-            let boost = loop.strength * 0.001 * (avgLevel - 0.6) // Reduced from 0.0015
-            for dim in loop.dimensions {
-                await state.update(dimension: dim, delta: boost, source: "feedback_amplifier")
+
+            if loop.type == .positive {
+                guard minLevel > 0.6 else { continue }
+                let boost = loop.strength * 0.001 * (avgLevel - 0.6)
+                for dim in loop.dimensions {
+                    await state.update(dimension: dim, delta: boost, source: "feedback_amplifier")
+                }
+                amplified += 1
+            } else if loop.type == .negative {
+                // Negative feedback loops: identify and counteract
+                // If a dimension is stagnating while others grow, give it a targeted boost
+                if let weakestDim = loop.dimensions.min(by: { state.dimensionLevel($0) < state.dimensionLevel($1) }) {
+                    let weakestLevel = state.dimensionLevel(weakestDim)
+                    if weakestLevel < avgLevel - 0.15 { // Significant gap
+                        let compensationBoost = loop.strength * 0.002 * (avgLevel - weakestLevel)
+                        await state.update(dimension: weakestDim, delta: compensationBoost, source: "negative_loop_compensation")
+                        suppressedNegative += 1
+                    }
+                }
             }
-            amplified += 1
         }
 
-        if amplified > 0 {
+        if amplified > 0 || suppressedNegative > 0 {
             brain.innerMonologue.append(MonologueLine(
-                text: "🔄 FEEDBACK: \(amplified) loopar · II=\(String(format: "%.4f", ii)) · v=\(String(format: "%.6f", state.growthVelocity))/min",
+                text: "🔄 FEEDBACK: \(amplified) positiva, \(suppressedNegative) kompenserade · II=\(String(format: "%.4f", ii)) · v=\(String(format: "%.6f", state.growthVelocity))/min",
                 type: .loopTrigger
             ))
         }

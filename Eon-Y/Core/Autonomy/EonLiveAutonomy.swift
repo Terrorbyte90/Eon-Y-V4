@@ -991,21 +991,91 @@ final class EonLiveAutonomy: ObservableObject {
 
     private func runConsolidation(brain: EonBrain) async {
         brain.autonomousProcessLabel = "CLS-konsolidering: minnen bearbetas..."
-        let lines = [
-            MonologueLine(text: "◈ CLS-replay: \(Int.random(in: 15...35)) episoder bearbetas", type: .memory),
-            MonologueLine(text: "◈ Svaga associationer beskärs. Starka förstärks (Hebb-regel).", type: .memory),
-            MonologueLine(text: "◈ BERT-semantik: beräknar meningslikhet för minnesklustring...", type: .memory),
-            MonologueLine(text: "◈ Episodisk → semantisk brygga: \(Int.random(in: 3...9)) minnen abstraherade", type: .memory),
-        ]
-        for line in lines {
-            brain.innerMonologue.append(line)
-            try? await Task.sleep(nanoseconds: 600_000_000)
+        let mem = PersistentMemoryStore.shared
+
+        // Phase 1: Identify redundant facts and consolidate them
+        let recentFacts = await mem.recentFacts(limit: 30)
+        var consolidatedCount = 0
+
+        // Find facts with overlapping subjects — consolidate knowledge
+        var subjectGroups: [String: [(subject: String, predicate: String, object: String, confidence: Double)]] = [:]
+        for fact in recentFacts {
+            let key = fact.subject.lowercased()
+            subjectGroups[key, default: []].append(fact)
         }
 
+        for (_, facts) in subjectGroups where facts.count >= 3 {
+            // Group has enough facts — synthesize a summary fact
+            let predicates = Set(facts.map { $0.predicate })
+            let objects = facts.prefix(4).map { $0.object }
+            if predicates.count >= 2 {
+                let avgConfidence = facts.map { $0.confidence }.reduce(0, +) / Double(facts.count)
+                await mem.saveFact(
+                    subject: facts[0].subject,
+                    predicate: "sammanfattning",
+                    object: objects.joined(separator: "; "),
+                    confidence: min(0.95, avgConfidence + 0.05),
+                    source: "consolidation"
+                )
+                consolidatedCount += 1
+            }
+        }
+
+        brain.innerMonologue.append(MonologueLine(
+            text: "◈ CLS-replay: \(recentFacts.count) fakta bearbetade, \(consolidatedCount) konsoliderade",
+            type: .memory
+        ))
+
+        // Phase 2: Strengthen cross-domain connections
+        let articles = await mem.randomArticles(limit: 3)
+        var crossDomainLinks = 0
+        if articles.count >= 2 {
+            for i in 0..<(articles.count - 1) {
+                let words1 = Set(articles[i].content.lowercased().split(separator: " ").filter { $0.count > 5 }.map(String.init))
+                let words2 = Set(articles[i + 1].content.lowercased().split(separator: " ").filter { $0.count > 5 }.map(String.init))
+                let shared = words1.intersection(words2)
+                if shared.count >= 2 && articles[i].domain != articles[i + 1].domain {
+                    await mem.saveFact(
+                        subject: articles[i].domain,
+                        predicate: "korskoppling_med",
+                        object: "\(articles[i + 1].domain) via \(shared.prefix(3).joined(separator: ", "))",
+                        confidence: min(0.8, 0.4 + Double(shared.count) * 0.05),
+                        source: "consolidation"
+                    )
+                    crossDomainLinks += 1
+                }
+            }
+        }
+
+        if crossDomainLinks > 0 {
+            brain.innerMonologue.append(MonologueLine(
+                text: "◈ Korskoppling: \(crossDomainLinks) nya domänbryggor identifierade",
+                type: .memory
+            ))
+        }
+
+        // Phase 3: Feed stalled domains to LearningEngine
+        let stalledDomains = await LearningEngine.shared.stalledDomains()
+        if let stalled = stalledDomains.first {
+            brain.innerMonologue.append(MonologueLine(
+                text: "◈ Konsolidering: '\(stalled.domain)' har stannat av — schedulerar fördjupning",
+                type: .memory
+            ))
+            await LearningEngine.shared.addFSRSItem(
+                topic: "Fördjupning: \(stalled.domain)",
+                domain: stalled.domain,
+                initialDifficulty: 0.5
+            )
+        }
+
+        // Phase 4: Update conversation count and sync
         Task.detached(priority: .background) {
             let count = await PersistentMemoryStore.shared.conversationCount()
             await MainActor.run { brain.conversationCount = count }
         }
+
+        // Phase 5: Enrich causal graph from accumulated facts
+        await ReasoningEngine.shared.enrichCausalGraphFromFacts()
     }
 
     // MARK: - Self Reflection (called from learning phase)

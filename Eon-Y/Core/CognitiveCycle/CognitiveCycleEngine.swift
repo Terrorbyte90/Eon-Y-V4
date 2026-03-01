@@ -311,6 +311,8 @@ actor CognitiveCycleEngine {
         let icaState = CognitiveState.shared
         let ii = await icaState.integratedIntelligence
         let topDims = await icaState.topDimensions(limit: 3).map { $0.0.rawValue }.joined(separator: ", ")
+        let causalChain = await icaState.activeReasoningChain
+        let hypothesis = await icaState.currentHypothesis
 
         lines.append("""
         Du är Eon i RESONERANDE LÄGE — djupanalys med obegränsad tid.
@@ -320,31 +322,65 @@ actor CognitiveCycleEngine {
         - Analysera frågan från flera perspektiv innan du svarar.
         - Dra paralleller, koppla idéer, utforska nyanser.
         - Strukturera svaret: börja med kärnan, utveckla med detaljer, avsluta med insikt.
-        - Använd din kunskapsbas aktivt — referera till relevanta fakta och artiklar.
+        - Använd din kunskapsbas aktivt — referera till specifika fakta och artiklar.
         - Erkänn osäkerhet explicit — "jag tror" vs "jag vet".
-        - Ge konkreta exempel där möjligt.
+        - Ge konkreta exempel och resonera steg-för-steg.
+        - Visa ditt tänkande: "Å ena sidan..., å andra sidan..."
+        - Avsluta med en sammanfattande insikt eller öppen fråga.
 
         Kognitiv profil: II=\(String(format: "%.2f", ii)), starkast i \(topDims.isEmpty ? "resonemang" : topDims).
         """)
         lines.append("")
 
-        // Knowledge articles
+        // Active reasoning context from ICA
+        var cogParts: [String] = []
+        if !hypothesis.isEmpty { cogParts.append("Aktiv hypotes: \(hypothesis)") }
+        if !causalChain.isEmpty {
+            cogParts.append("Resonemangssteg: \(causalChain.prefix(4).joined(separator: " → "))")
+        }
+        if !cogParts.isEmpty {
+            lines.append("[Resonemangkontext: \(cogParts.joined(separator: " | "))]")
+            lines.append("")
+        }
+
+        // Knowledge articles — include more content in deep mode
         if !articles.isEmpty {
             lines.append("[Kunskapsartiklar:]")
             for article in articles {
-                lines.append("— \(article.title) (\(article.domain)): \(String(article.content.prefix(500)))...")
+                lines.append("— \(article.title) [\(article.domain)]: \(String(article.content.prefix(700)))")
             }
             lines.append("")
         }
 
-        // Knowledge graph facts
-        let relevantFacts = await memory.searchFacts(query: input, limit: 10)
-        if !relevantFacts.isEmpty {
-            lines.append("[Fakta:]")
-            for fact in relevantFacts.prefix(8) {
-                lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
+        // Knowledge graph facts — BERT-ranked in deep mode too
+        var allFacts = await memory.searchFacts(query: input, limit: 15)
+        for entity in context.entities.prefix(4) {
+            let eFacts = await memory.searchFacts(query: entity.text, limit: 5)
+            for fact in eFacts where !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate }) {
+                allFacts.append(fact)
             }
-            lines.append("")
+        }
+        if !allFacts.isEmpty {
+            var rankedFacts = allFacts
+            if !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
+                var scored: [(fact: (subject: String, predicate: String, object: String), score: Float)] = []
+                for fact in allFacts {
+                    let factText = "\(fact.subject) \(fact.predicate) \(fact.object)"
+                    let factEmb = await neuralEngine.embed(factText)
+                    let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, factEmb)
+                    scored.append((fact: fact, score: sim))
+                }
+                rankedFacts = scored.sorted { $0.score > $1.score }
+                    .filter { $0.score > 0.20 }
+                    .prefix(10).map { $0.fact }
+            }
+            if !rankedFacts.isEmpty {
+                lines.append("[Fakta:]")
+                for fact in rankedFacts {
+                    lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
+                }
+                lines.append("")
+            }
         }
 
         // Conversation history (extended for deep mode)
@@ -370,10 +406,19 @@ actor CognitiveCycleEngine {
     private func buildPrompt(input: String, context: CognitiveCycleContext) async -> String {
         var lines: [String] = []
 
-        // 1. System instruction — clear, structured persona
+        // 1. System instruction — clear, structured persona with register awareness
         let icaState = CognitiveState.shared
         let ii = await icaState.integratedIntelligence
         let topDims = await icaState.topDimensions(limit: 2).map { $0.0.rawValue }.joined(separator: ", ")
+
+        // Adapt tone based on detected register
+        let registerHint: String
+        switch context.register {
+        case .formal:  registerHint = "Använd ett formellt, akademiskt tonläge."
+        case .casual:  registerHint = "Var avslappnad och vardaglig i tonen."
+        default:       registerHint = "Anpassa tonen efter användarens stil."
+        }
+
         lines.append("""
         Du är Eon — ett intelligent kognitivt AI-system som körs on-device.
 
@@ -381,11 +426,13 @@ actor CognitiveCycleEngine {
         - Svara ALLTID på svenska, oavsett språk i frågan.
         - FÖRSTÅ vad användaren menar, inte bara vad de säger. Tolka kontext och underliggande intention.
         - Svara DIREKT och NATURLIGT — som i ett riktigt samtal. Upprepa aldrig frågor.
-        - Om du har kunskap om ämnet: dela den konkret och tydligt.
-        - Om du inte vet: säg det ärligt och föreslå hur du kan hjälpa.
-        - Anpassa längd efter frågan: korta frågor = korta svar, djupa frågor = utförliga svar.
+        - Om du har kunskap om ämnet: dela den konkret med fakta, exempel och resonemang.
+        - Om du inte vet: säg det ärligt. Spekulera inte utan att markera det.
+        - Anpassa längd: korta frågor → koncist svar, djupa frågor → utförligt med struktur.
         - Bygg vidare på konversationshistoriken — referera till tidigare ämnen naturligt.
         - Var aldrig generisk. Ge specifika, användbara svar baserade på din kunskap.
+        - \(registerHint)
+        - Kognitiv profil: II=\(String(format: "%.2f", ii))\(topDims.isEmpty ? "" : ", starkast i \(topDims)").
         """)
         lines.append("")
 
@@ -395,50 +442,83 @@ actor CognitiveCycleEngine {
         if !hypothesis.isEmpty { contextParts.append("Hypotes: \(hypothesis)") }
         let frontier = await icaState.knowledgeFrontier.prefix(2).joined(separator: ", ")
         if !frontier.isEmpty { contextParts.append("Utforskar: \(frontier)") }
+        let metacogInsight = await icaState.metacognitiveInsight
+        if !metacogInsight.isEmpty && metacogInsight.count > 10 {
+            contextParts.append("Insikt: \(String(metacogInsight.prefix(100)))")
+        }
         if !contextParts.isEmpty {
             lines.append("[Kognitiv kontext: \(contextParts.joined(separator: " | "))]")
         }
 
-        // 3. Knowledge graph facts — BERT-ranked for semantic relevance
-        let relevantFacts = await memory.searchFacts(query: input, limit: 8)
-        if !relevantFacts.isEmpty {
-            var rankedFacts = relevantFacts
+        // 3. Knowledge graph facts — BERT-ranked for semantic relevance, deduplicated
+        let relevantFacts = await memory.searchFacts(query: input, limit: 12)
+        // Also search by extracted entities for broader coverage
+        var allFacts = relevantFacts
+        for entity in context.entities.prefix(3) {
+            let entityFacts = await memory.searchFacts(query: entity.text, limit: 4)
+            for fact in entityFacts {
+                if !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate && $0.object == fact.object }) {
+                    allFacts.append(fact)
+                }
+            }
+        }
+        if !allFacts.isEmpty {
+            var rankedFacts = allFacts
             if !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
                 var scored: [(fact: (subject: String, predicate: String, object: String), score: Float)] = []
-                for fact in relevantFacts {
+                for fact in allFacts {
                     let factText = "\(fact.subject) \(fact.predicate) \(fact.object)"
                     let factEmb = await neuralEngine.embed(factText)
                     let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, factEmb)
                     scored.append((fact: fact, score: sim))
                 }
                 rankedFacts = scored.sorted { $0.score > $1.score }
-                    .filter { $0.score > 0.3 }  // Only include semantically relevant facts
-                    .prefix(5).map { $0.fact }
+                    .filter { $0.score > 0.25 }  // Lower threshold for better recall
+                    .prefix(7).map { $0.fact }     // More facts for richer context
             }
             if !rankedFacts.isEmpty {
                 lines.append("")
                 lines.append("[Relevanta fakta:]")
                 for fact in rankedFacts {
+                    // Natural language fact formatting
                     lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
                 }
             }
         }
 
-        // 4. Relevant knowledge articles (semantic search)
+        // 4. Relevant knowledge articles (semantic search on title + content summary)
         let articles = await memory.loadAllArticles()
-        if !articles.isEmpty && !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
+        if !articles.isEmpty {
             var scoredArticles: [(article: KnowledgeArticle, score: Float)] = []
-            for article in articles.prefix(20) {
-                let titleEmb = await neuralEngine.embed(article.title)
-                let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, titleEmb)
-                if sim > 0.4 { scoredArticles.append((article, sim)) }
+            let hasEmbedding = !context.inputEmbedding.allSatisfy({ $0 == 0 })
+            for article in articles.prefix(30) {
+                if hasEmbedding {
+                    // Embed title + summary for richer matching
+                    let articleText = article.title + " " + article.summary
+                    let articleEmb = await neuralEngine.embed(articleText)
+                    let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, articleEmb)
+                    // Keyword boost: if input words appear in content, boost score
+                    let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                    let contentWords = Set(article.content.lowercased().prefix(500).components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                    let overlap = Float(inputWords.intersection(contentWords).count)
+                    let boosted = sim + overlap * 0.04
+                    if boosted > 0.30 { scoredArticles.append((article, boosted)) }
+                } else {
+                    // Keyword fallback
+                    let lower = input.lowercased()
+                    if article.title.lowercased().contains(lower.prefix(15)) ||
+                       article.domain.lowercased().contains(lower.prefix(10)) {
+                        scoredArticles.append((article, 0.5))
+                    }
+                }
             }
-            let topArticles = scoredArticles.sorted { $0.score > $1.score }.prefix(2)
+            let topArticles = scoredArticles.sorted { $0.score > $1.score }.prefix(3)
             if !topArticles.isEmpty {
                 lines.append("")
                 lines.append("[Kunskapsartiklar:]")
                 for (article, _) in topArticles {
-                    lines.append("— \(article.title): \(String(article.content.prefix(250)))...")
+                    // Include more content for richer context
+                    lines.append("— \(article.title) [\(article.domain)]: \(String(article.content.prefix(400)))")
                 }
             }
         }
@@ -447,7 +527,19 @@ actor CognitiveCycleEngine {
         if !context.conversationHistory.isEmpty {
             lines.append("")
             lines.append("[Konversation:]")
-            for turn in context.conversationHistory.suffix(10) {
+            // Include more history but summarize older turns
+            let history = context.conversationHistory
+            let recentCutoff = max(0, history.count - 6)
+            // Older turns: compressed
+            if recentCutoff > 0 {
+                let older = history.prefix(recentCutoff)
+                let topics = older.filter { $0.role == "user" }.map { $0.content }.suffix(3)
+                if !topics.isEmpty {
+                    lines.append("[Tidigare ämnen: \(topics.map { String($0.prefix(50)) }.joined(separator: " | "))]")
+                }
+            }
+            // Recent turns: full
+            for turn in history.suffix(6) {
                 let role = turn.role == "user" ? "Användare" : "Eon"
                 lines.append("\(role): \(turn.content)")
             }
@@ -455,8 +547,9 @@ actor CognitiveCycleEngine {
 
         // 6. Relevant memories (semantic, not just keyword-matched)
         if !context.retrievedMemories.isEmpty {
-            let mem = context.retrievedMemories.prefix(4).map { $0.content }.joined(separator: " | ")
-            lines.append("[Minnen: \(String(mem.prefix(300)))]")
+            let uniqueMemories = context.retrievedMemories.prefix(5)
+            let mem = uniqueMemories.map { $0.content }.joined(separator: " | ")
+            lines.append("[Minnen: \(String(mem.prefix(400)))]")
         }
 
         // 7. Current input with clear formatting
@@ -488,14 +581,17 @@ actor CognitiveCycleEngine {
     // MARK: - Intent Detection
 
     enum ConversationIntent: String {
-        case greeting     = "hälsning"
-        case factualQuery = "faktafråga"
-        case explanation  = "förklaring"
-        case opinion      = "åsiktsfråga"
-        case creative     = "kreativ"
-        case followUp     = "uppföljning"
-        case command      = "kommando"
-        case chitchat     = "småprat"
+        case greeting      = "hälsning"
+        case factualQuery  = "faktafråga"
+        case explanation   = "förklaring"
+        case opinion       = "åsiktsfråga"
+        case creative      = "kreativ"
+        case followUp      = "uppföljning"
+        case command       = "kommando"
+        case chitchat      = "småprat"
+        case selfReference = "självreflektion"
+        case emotional     = "emotionell"
+        case complex       = "komplex"
     }
 
     private func detectIntent(input: String, history: [ConversationRecord]) -> ConversationIntent {
@@ -503,44 +599,58 @@ actor CognitiveCycleEngine {
         let wordCount = lower.split(separator: " ").count
 
         // Greeting detection
-        let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "tjena"]
+        let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "tjena", "hejhej", "yo", "tjo"]
         if greetings.contains(where: { lower.hasPrefix($0) }) && wordCount <= 4 { return .greeting }
 
-        // Short follow-up (1-3 words)
-        let followUps = ["ja", "nej", "ok", "okej", "mm", "japp", "precis", "exakt", "visst", "aha", "oh"]
+        // Short follow-up (1-3 words) — only when there is conversation history
+        let followUps = ["ja", "nej", "ok", "okej", "mm", "japp", "precis", "exakt", "visst", "aha", "oh", "absolut", "korrekt", "stämmer", "just det"]
         if wordCount <= 3 && followUps.contains(where: { lower.hasPrefix($0) }) && !history.isEmpty { return .followUp }
 
-        // Command
-        if lower.hasPrefix("gör") || lower.hasPrefix("visa") || lower.hasPrefix("beräkna") || lower.hasPrefix("sök") || lower.hasPrefix("skriv") { return .command }
+        // Self-reference questions about Eon
+        let selfPatterns = ["vem är du", "vad är du", "berätta om dig", "hur fungerar du", "vad kan du", "hur smart", "hur intelligent"]
+        if selfPatterns.contains(where: { lower.contains($0) }) { return .selfReference }
+
+        // Imperative / Command — Swedish imperative verb first word
+        let imperative = ["gör", "visa", "beräkna", "sök", "skriv", "skapa", "lista", "sammanfatta", "analysera", "jämför", "definiera"]
+        if imperative.contains(where: { lower.hasPrefix($0) }) { return .command }
 
         // Explanation request
-        if lower.contains("förklara") || lower.contains("hur fungerar") || lower.contains("vad innebär") || lower.contains("vad betyder") { return .explanation }
+        if lower.contains("förklara") || lower.contains("hur fungerar") || lower.contains("vad innebär") || lower.contains("vad betyder") || lower.contains("kan du beskriva") { return .explanation }
+
+        // Why/opinion/reasoning — deep thought questions
+        if lower.hasPrefix("varför") || lower.contains("tycker du") || lower.contains("vad anser") || lower.contains("vad tror du") || lower.contains("vad tänker du") { return .opinion }
 
         // Factual query
-        if lower.hasPrefix("vad") || lower.hasPrefix("vem") || lower.hasPrefix("var") || lower.hasPrefix("när") || lower.hasPrefix("hur många") { return .factualQuery }
-
-        // Why/opinion
-        if lower.hasPrefix("varför") || lower.contains("tycker du") || lower.contains("vad anser") { return .opinion }
+        if lower.hasPrefix("vad") || lower.hasPrefix("vem") || lower.hasPrefix("var") || lower.hasPrefix("när") || lower.hasPrefix("hur många") || lower.hasPrefix("hur mycket") { return .factualQuery }
 
         // Creative
-        if lower.contains("hitta på") || lower.contains("dikt") || lower.contains("berättelse") || lower.contains("fantisera") { return .creative }
+        if lower.contains("hitta på") || lower.contains("dikt") || lower.contains("berättelse") || lower.contains("fantisera") || lower.contains("skriv en") || lower.contains("skapa en") { return .creative }
 
-        // Default: if has question mark → factual, otherwise chitchat
+        // Emotional/personal
+        if lower.contains("ledsen") || lower.contains("glad") || lower.contains("orolig") || lower.contains("arg") || lower.contains("trött") || lower.contains("mår") { return .emotional }
+
+        // Multi-part or long input → likely needs thorough response
+        if wordCount > 20 || (lower.contains("?") && wordCount > 10) { return .complex }
+
+        // Default: question mark → factual, otherwise chitchat
         return lower.contains("?") ? .factualQuery : .chitchat
     }
 
     private func generationParams(for intent: ConversationIntent, inputLength: Int) -> (maxTokens: Int, temperature: Double) {
         switch intent {
-        case .greeting:     return (60, 0.80)
-        case .followUp:     return (120, 0.70)
-        case .factualQuery: return (250, 0.65)
-        case .explanation:  return (400, 0.68)
-        case .opinion:      return (300, 0.75)
-        case .creative:     return (350, 0.85)
-        case .command:      return (200, 0.60)
+        case .greeting:      return (80, 0.80)
+        case .followUp:      return (150, 0.70)
+        case .factualQuery:  return (300, 0.65)
+        case .explanation:   return (450, 0.68)
+        case .opinion:       return (350, 0.72)
+        case .creative:      return (400, 0.85)
+        case .command:       return (250, 0.60)
+        case .selfReference: return (300, 0.70)
+        case .emotional:     return (200, 0.75)
+        case .complex:       return (500, 0.68)
         case .chitchat:
             // Scale with input length: longer inputs deserve longer responses
-            let tokens = max(100, min(300, inputLength * 3))
+            let tokens = max(120, min(350, inputLength * 3))
             return (tokens, 0.72)
         }
     }
@@ -548,43 +658,66 @@ actor CognitiveCycleEngine {
     // MARK: - Konfidens-aggregering
 
     private func computeAggregatedConfidence(context: CognitiveCycleContext) -> Double {
-        // Weighted confidence from multiple signals
+        // Weighted confidence from multiple complementary signals
         var weightedSum: Double = 0
         var totalWeight: Double = 0
 
-        // Base confidence from response length and coherence (weight: 2.0)
+        // 1. Response adequacy — not just length, but ratio to input complexity (weight: 2.0)
         let responseLength = context.generatedText.count
+        let inputLength = max(1, context.userInput.count)
+        let lengthRatio = Double(responseLength) / Double(inputLength)
         let lengthConfidence: Double
-        if responseLength < 10 { lengthConfidence = 0.3 }
-        else if responseLength < 30 { lengthConfidence = 0.55 }
-        else if responseLength < 200 { lengthConfidence = 0.78 }
-        else { lengthConfidence = 0.85 }
+        if responseLength < 10 { lengthConfidence = 0.25 }           // Almost empty
+        else if responseLength < 30 { lengthConfidence = 0.50 }      // Very brief
+        else if lengthRatio < 0.5 { lengthConfidence = 0.60 }        // Short relative to question
+        else if lengthRatio > 5.0 { lengthConfidence = 0.70 }        // May be verbose
+        else { lengthConfidence = 0.85 }                              // Good ratio
         weightedSum += lengthConfidence * 2.0
         totalWeight += 2.0
 
-        // WSD confidence (weight: 1.5)
+        // 2. WSD confidence (weight: 1.5)
         if !context.disambiguations.isEmpty {
             let avgWSD = context.disambiguations.map { $0.confidence }.reduce(0, +) / Double(context.disambiguations.count)
             weightedSum += avgWSD * 1.5
             totalWeight += 1.5
         }
 
-        // Validation result (weight: 2.5)
+        // 3. Validation result (weight: 2.0)
         if context.validationResult?.needsRegeneration == true {
-            weightedSum += 0.45 * 2.5
+            weightedSum += 0.40 * 2.0
         } else {
-            weightedSum += 0.85 * 2.5
+            weightedSum += 0.85 * 2.0
         }
+        totalWeight += 2.0
+
+        // 4. Knowledge grounding — response backed by facts/articles (weight: 2.5)
+        // Check if response text actually references retrieved knowledge
+        let responseWords = Set(context.generatedText.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+        var knowledgeOverlap = 0
+        for entity in context.entities {
+            if responseWords.contains(entity.text.lowercased()) { knowledgeOverlap += 1 }
+        }
+        let groundingScore: Double
+        if context.entities.isEmpty && context.retrievedMemories.isEmpty {
+            groundingScore = 0.50  // No knowledge available
+        } else if knowledgeOverlap > 0 {
+            groundingScore = min(0.90, 0.65 + Double(knowledgeOverlap) * 0.08)  // Uses knowledge
+        } else {
+            groundingScore = 0.60  // Knowledge available but not used
+        }
+        weightedSum += groundingScore * 2.5
         totalWeight += 2.5
 
-        // Memory retrieval — more memories = better context (weight: 1.0)
-        let memoryScore = context.retrievedMemories.isEmpty ? 0.5 : min(0.9, 0.6 + Double(context.retrievedMemories.count) * 0.06)
+        // 5. Context relevance — memory retrieval quality (weight: 1.0)
+        let memoryScore = context.retrievedMemories.isEmpty ? 0.45 : min(0.85, 0.55 + Double(context.retrievedMemories.count) * 0.05)
         weightedSum += memoryScore * 1.0
         totalWeight += 1.0
 
-        // Knowledge graph facts — having relevant facts boosts confidence (weight: 1.0)
-        let hasFacts = !context.entities.isEmpty
-        weightedSum += (hasFacts ? 0.8 : 0.55) * 1.0
+        // 6. Response diversity — penalize repetitive/low-variety text (weight: 1.0)
+        let words = context.generatedText.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 2 }
+        let uniqueRatio = words.isEmpty ? 0.5 : Double(Set(words).count) / Double(words.count)
+        let diversityScore = min(0.90, uniqueRatio * 1.1)  // Reward lexical variety
+        weightedSum += diversityScore * 1.0
         totalWeight += 1.0
 
         return min(0.95, weightedSum / totalWeight)

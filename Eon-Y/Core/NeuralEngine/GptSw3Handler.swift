@@ -291,32 +291,50 @@ struct NLResponseEngine {
         return h
     }
 
-    // Samlar rik kontext från ICA, minne och kunskapsgraf
+    // Samlar rik kontext från ICA, minne, kunskapsgraf och artiklar
     static func buildCognitiveContext(input: String, history: [(role: String, text: String)]) -> CognitiveResponseContext {
         let state = CognitiveState.shared
         let memory = PersistentMemoryStore.shared
 
-        // Hämta relevanta fakta — search by input + extracted nouns for broader coverage
-        var allFacts = memory.searchFacts(query: input, limit: 8)
+        // Hämta relevanta fakta — search by input + extracted nouns + verbs for broader coverage
+        var allFacts = memory.searchFacts(query: input, limit: 10)
 
-        // Also search for key nouns individually to find more relevant facts
         let tagger = NLTagger(tagSchemes: [.lexicalClass])
         tagger.string = input
         var keyNouns: [String] = []
+        var keyVerbs: [String] = []
         tagger.enumerateTags(in: input.startIndex..<input.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, range in
-            if tag == .noun {
-                let word = String(input[range])
-                if word.count > 3 { keyNouns.append(word) }
-            }
+            let word = String(input[range])
+            if tag == .noun && word.count > 3 { keyNouns.append(word) }
+            if tag == .verb && word.count > 3 { keyVerbs.append(word) }
             return true
         }
-        for noun in keyNouns.prefix(3) {
-            let nounFacts = memory.searchFacts(query: noun, limit: 3)
+        // Search by each key noun
+        for noun in keyNouns.prefix(4) {
+            let nounFacts = memory.searchFacts(query: noun, limit: 4)
             for fact in nounFacts {
                 if !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate && $0.object == fact.object }) {
                     allFacts.append(fact)
                 }
             }
+        }
+
+        // Search articles for relevant content
+        let articles = memory.loadAllArticles(limit: 30)
+        let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+        var relevantArticleSummaries: [String] = []
+        for article in articles {
+            let titleWords = Set(article.title.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+            let contentWords = Set(article.content.lowercased().prefix(300).components(separatedBy: .whitespaces).filter { $0.count > 3 })
+            let titleOverlap = inputWords.intersection(titleWords).count
+            let contentOverlap = inputWords.intersection(contentWords).count
+            // Also check noun overlap
+            let nounSet = Set(keyNouns.map { $0.lowercased() })
+            let nounMatch = titleWords.intersection(nounSet).count + contentWords.intersection(nounSet).count
+            if titleOverlap >= 1 || contentOverlap >= 2 || nounMatch >= 1 {
+                relevantArticleSummaries.append("\(article.title): \(String(article.content.prefix(200)))")
+            }
+            if relevantArticleSummaries.count >= 3 { break }
         }
 
         let recentMessages = memory.recentUserMessages(limit: 8)
@@ -341,6 +359,7 @@ struct NLResponseEngine {
             activeHypothesis: hypothesis,
             knowledgeFrontier: frontier,
             metacognitiveInsight: metacogInsight,
+            articleSummaries: relevantArticleSummaries,
             causalChain: causalChain,
             reasoningHint: reasoningHint
         )
@@ -601,11 +620,13 @@ struct CognitiveResponseContext {
     let metacognitiveInsight: String
     let causalChain: [String]
     let reasoningHint: String
+    let articleSummaries: [String]
 
     static let empty = CognitiveResponseContext(
         facts: [], recentMessages: [], integratedIntelligence: 0.3,
         topDimensions: [], weakDimensions: [], activeHypothesis: "",
-        knowledgeFrontier: [], metacognitiveInsight: "", causalChain: [], reasoningHint: ""
+        knowledgeFrontier: [], metacognitiveInsight: "", causalChain: [], reasoningHint: "",
+        articleSummaries: []
     )
 }
 
@@ -1088,31 +1109,55 @@ struct ResponseComposer {
         let scoredFacts = cc.facts.map { fact -> (fact: (subject: String, predicate: String, object: String), score: Int) in
             let factWords = Set("\(fact.subject) \(fact.predicate) \(fact.object)".lowercased()
                 .components(separatedBy: .whitespaces).filter { $0.count > 2 })
-            // Score by word overlap + direct substring match
             var score = topicWords.intersection(factWords).count * 2
             if fact.subject.lowercased().contains(t) || fact.object.lowercased().contains(t) { score += 3 }
             if fact.subject.lowercased().hasPrefix(t) || fact.object.lowercased().hasPrefix(t) { score += 2 }
+            // Partial word match (stem overlap)
+            for tw in topicWords {
+                if tw.count > 4 {
+                    let stem = String(tw.prefix(tw.count - 2))
+                    if fact.subject.lowercased().contains(stem) || fact.object.lowercased().contains(stem) { score += 1 }
+                }
+            }
             return (fact, score)
         }
         .filter { $0.score > 0 }
         .sorted { $0.score > $1.score }
-        .prefix(4)
+        .prefix(5)
 
         if !scoredFacts.isEmpty {
-            // Build natural language from facts instead of raw triples
+            // Build natural language from facts — handle more predicates naturally
             let factSentences = scoredFacts.map { item in
                 let f = item.fact
-                if f.predicate == "är" { return "\(f.subject) är \(f.object)" }
-                if f.predicate == "har" { return "\(f.subject) har \(f.object)" }
-                if f.predicate == "orsakar" || f.predicate == "påverkar" {
-                    return "\(f.subject) \(f.predicate) \(f.object)"
+                switch f.predicate {
+                case "är":         return "\(f.subject) är \(f.object)"
+                case "har":        return "\(f.subject) har \(f.object)"
+                case "orsakar":    return "\(f.subject) orsakar \(f.object)"
+                case "påverkar":   return "\(f.subject) påverkar \(f.object)"
+                case "kallas":     return "\(f.subject) kallas \(f.object)"
+                case "består_av":  return "\(f.subject) består av \(f.object)"
+                case "tillhör":    return "\(f.subject) tillhör \(f.object)"
+                case "relaterar_till": return "\(f.subject) relaterar till \(f.object)"
+                case "leder_till": return "\(f.subject) leder till \(f.object)"
+                default:           return "\(f.subject) \(f.predicate) \(f.object)"
                 }
-                return "\(f.subject) \(f.predicate) \(f.object)"
             }
             parts.append(factSentences.joined(separator: ". ") + ".")
         }
 
-        // 2. Causal chain — include if relevant to topic OR if few facts found
+        // 2. Article knowledge — integrate relevant article content
+        if !cc.articleSummaries.isEmpty {
+            // Extract useful sentences from article summaries
+            for summary in cc.articleSummaries.prefix(2) {
+                // Take first meaningful sentence from article content
+                let sentences = summary.components(separatedBy: ". ").filter { $0.count > 20 }
+                if let firstUseful = sentences.first {
+                    parts.append(String(firstUseful.prefix(200)) + ".")
+                }
+            }
+        }
+
+        // 3. Causal chain — include if relevant to topic OR if few facts found
         if !cc.causalChain.isEmpty && cc.causalChain.count > 1 {
             let chainRelevant = cc.causalChain.contains { chain in
                 let chainLower = chain.lowercased()
@@ -1123,14 +1168,14 @@ struct ResponseComposer {
             }
         }
 
-        // 3. Active hypothesis — include if relevant
+        // 4. Active hypothesis — include if relevant
         if !cc.activeHypothesis.isEmpty {
             let hypLower = cc.activeHypothesis.lowercased()
             let relevant = hypLower.contains(t) || topicWords.contains(where: { hypLower.contains($0) })
             if relevant { parts.append("Min hypotes: \(cc.activeHypothesis).") }
         }
 
-        // 4. Metacognitive insight if relevant and parts are sparse
+        // 5. Metacognitive insight if relevant and parts are sparse
         if !cc.metacognitiveInsight.isEmpty && parts.count < 2 {
             let insightLower = cc.metacognitiveInsight.lowercased()
             if insightLower.contains(t) || topicWords.contains(where: { insightLower.contains($0) }) {
@@ -1138,7 +1183,7 @@ struct ResponseComposer {
             }
         }
 
-        // 5. Recent messages context — if user mentioned topic before, reference it
+        // 6. Recent messages context — if user mentioned topic before, reference it
         let previousMentions = cc.recentMessages.filter { msg in
             let msgLower = msg.lowercased()
             return topicWords.contains(where: { msgLower.contains($0) })
