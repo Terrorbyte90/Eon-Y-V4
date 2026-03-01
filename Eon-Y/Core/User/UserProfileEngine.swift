@@ -79,8 +79,8 @@ final class UserProfileEngine: ObservableObject {
             }
         }
 
-        // Apply temporal decay to radar data — inactive interests slowly fade
-        applyInterestDecay()
+        // Intresse-decay borttagen — Eon glömmer aldrig sin användare.
+        // Radar-data behålls permanent för att bygga en stabil bild av användaren.
 
         // Uppdatera kommunikationsstil (enhanced)
         updateCommunicationStyle(message: userMessage)
@@ -135,19 +135,6 @@ final class UserProfileEngine: ObservableObject {
         } else if msgLength < 8 && totalConversations > 10 && profile.preferredResponseLength == .detailed {
             // Consistently short messages suggest preference for brevity
             profile.preferredResponseLength = .balanced
-        }
-    }
-
-    /// Decay inactive interests so radar reflects current interests
-    private func applyInterestDecay() {
-        for idx in interestRadarData.indices {
-            // Small decay each conversation — inactive interests slowly decrease
-            let matchingDomain = domainKnowledge.first { $0.domain == interestRadarData[idx].label }
-            let daysSinceLastMention = matchingDomain.map { Date().timeIntervalSince($0.lastMentioned) / 86400.0 } ?? 30.0
-            if daysSinceLastMention > 3 {
-                let decayAmount = min(0.01, daysSinceLastMention * 0.001)
-                interestRadarData[idx].value = max(0.05, interestRadarData[idx].value - decayAmount)
-            }
         }
     }
 

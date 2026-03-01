@@ -184,12 +184,35 @@ actor PersistentMemoryStore {
                 created_at REAL NOT NULL
             )
         """)
+        // Creative features — letters and awareness tests
+        execute("""
+            CREATE TABLE IF NOT EXISTS eon_letters (
+                id TEXT PRIMARY KEY,
+                sender TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                body TEXT NOT NULL,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                in_reply_to TEXT,
+                created_at REAL NOT NULL
+            )
+        """)
+        execute("""
+            CREATE TABLE IF NOT EXISTS awareness_test_runs (
+                id TEXT PRIMARY KEY,
+                total_score REAL NOT NULL,
+                passed_count INTEGER NOT NULL,
+                results_json TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+        """)
         execute("CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id)")
         execute("CREATE INDEX IF NOT EXISTS idx_conv_timestamp ON conversations(timestamp)")
         execute("CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts(subject)")
         execute("CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name)")
         execute("CREATE INDEX IF NOT EXISTS idx_articles_domain ON articles(domain)")
         execute("CREATE INDEX IF NOT EXISTS idx_articles_created ON articles(created_at)")
+        execute("CREATE INDEX IF NOT EXISTS idx_letters_created ON eon_letters(created_at)")
+        execute("CREATE INDEX IF NOT EXISTS idx_awareness_created ON awareness_test_runs(created_at)")
     }
 
     // MARK: - Conversation operations

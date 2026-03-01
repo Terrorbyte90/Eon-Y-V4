@@ -68,6 +68,20 @@ actor SwedishLanguageCore {
         (["inte", "alla", "hästar", "hemma"], "inte riktigt klok", "not all horses at home"),
         (["ta", "med", "en", "nypa", "salt"], "vara skeptisk", "take with a pinch of salt"),
         (["göra", "en", "höna", "av", "en", "fjäder"], "överdriva", "make a hen of a feather"),
+        (["komma", "på", "fall"], "bli lurad, gå i fällan", "come to a fall"),
+        (["ha", "rent", "mjöl", "i", "påsen"], "vara oskyldig", "have clean flour in the bag"),
+        (["lägga", "benen", "på", "ryggen"], "springa snabbt, fly", "put legs on the back"),
+        (["kasta", "pärlor", "för", "svin"], "slösa på oförstående", "cast pearls before swine"),
+        (["dra", "alla", "över", "en", "kam"], "generalisera orättvist", "comb everyone the same"),
+        (["ligga", "i", "lä"], "vara skyddad", "lie in the lee"),
+        (["gå", "i", "fällan"], "bli lurad", "walk into the trap"),
+        (["få", "kalla", "fötter"], "bli nervös, ändra sig", "get cold feet"),
+        (["stå", "på", "egna", "ben"], "vara självständig", "stand on own legs"),
+        (["spela", "med", "öppna", "kort"], "vara ärlig, transparent", "play with open cards"),
+        (["ta", "bladet", "från", "munnen"], "tala klarspråk", "take the leaf from the mouth"),
+        (["vända", "kappan", "efter", "vinden"], "ändra åsikt opportunistiskt", "turn the cloak after the wind"),
+        (["ha", "en", "räv", "bakom", "örat"], "vara slug", "have a fox behind the ear"),
+        (["sopa", "under", "mattan"], "dölja problem", "sweep under the carpet"),
     ]
 
     private func detectIdioms(_ text: String) -> [DetectedIdiom] {
@@ -524,6 +538,50 @@ actor SwedishWSDEngine {
             "del": [
                 WordSense(id: "del.1", definition: "bit, stycke", examples: ["en del av", "första delen"], confidence: 0.0),
                 WordSense(id: "del.2", definition: "ganska mycket", examples: ["en hel del", "en del människor"], confidence: 0.0)
+            ],
+            "kraft": [
+                WordSense(id: "kraft.1", definition: "fysisk styrka", examples: ["med full kraft", "muskelkraft"], confidence: 0.0),
+                WordSense(id: "kraft.2", definition: "energi, el", examples: ["kärnkraft", "vindkraft", "kraftverk"], confidence: 0.0),
+                WordSense(id: "kraft.3", definition: "giltighet", examples: ["i kraft", "träda i kraft", "laga kraft"], confidence: 0.0)
+            ],
+            "kort": [
+                WordSense(id: "kort.1", definition: "litet, inte långt", examples: ["kort tid", "kort hår", "kort svar"], confidence: 0.0),
+                WordSense(id: "kort.2", definition: "spelkort, kreditkort", examples: ["betala med kort", "spela kort", "bankkort"], confidence: 0.0)
+            ],
+            "press": [
+                WordSense(id: "press.1", definition: "media, tidningar", examples: ["presskonferens", "svensk press", "pressen rapporterade"], confidence: 0.0),
+                WordSense(id: "press.2", definition: "tryck, påfrestning", examples: ["under press", "sätta press på"], confidence: 0.0)
+            ],
+            "brott": [
+                WordSense(id: "brott.1", definition: "lagöverträdelse", examples: ["begå brott", "grovt brott", "brottslighet"], confidence: 0.0),
+                WordSense(id: "brott.2", definition: "bräckning, avbrott", examples: ["benbrott", "brott mot reglerna"], confidence: 0.0)
+            ],
+            "ton": [
+                WordSense(id: "ton.1", definition: "musikton, ljud", examples: ["en ren ton", "grundton", "tonart"], confidence: 0.0),
+                WordSense(id: "ton.2", definition: "stil, attityd", examples: ["hård ton", "tonläge", "tonen i samtalet"], confidence: 0.0),
+                WordSense(id: "ton.3", definition: "viktenhet", examples: ["ett ton", "tusen kilo"], confidence: 0.0)
+            ],
+            "takt": [
+                WordSense(id: "takt.1", definition: "rytm, tempo", examples: ["i takt med", "hålla takten"], confidence: 0.0),
+                WordSense(id: "takt.2", definition: "hövlighet", examples: ["visa takt", "taktlös"], confidence: 0.0)
+            ],
+            "rum": [
+                WordSense(id: "rum.1", definition: "fysiskt rum, kammare", examples: ["sovrum", "vardagsrum", "ett stort rum"], confidence: 0.0),
+                WordSense(id: "rum.2", definition: "utrymme, plats", examples: ["ge rum för", "ta rum", "lämna rum"], confidence: 0.0)
+            ],
+            "led": [
+                WordSense(id: "led.1", definition: "kroppsdel", examples: ["knäled", "handleds"], confidence: 0.0),
+                WordSense(id: "led.2", definition: "väg, led", examples: ["vandringsleda", "leden till toppen"], confidence: 0.0),
+                WordSense(id: "led.3", definition: "trött, matt", examples: ["led vid", "led på"], confidence: 0.0)
+            ],
+            "sak": [
+                WordSense(id: "sak.1", definition: "föremål, ting", examples: ["en fin sak", "dina saker"], confidence: 0.0),
+                WordSense(id: "sak.2", definition: "ärende, fråga", examples: ["en viktig sak", "saken är den"], confidence: 0.0)
+            ],
+            "skott": [
+                WordSense(id: "skott.1", definition: "avfyrning", examples: ["skjuta ett skott", "skottlossning"], confidence: 0.0),
+                WordSense(id: "skott.2", definition: "växtskott", examples: ["nya skott", "sidoskott"], confidence: 0.0),
+                WordSense(id: "skott.3", definition: "skiljevägg", examples: ["skottet i båten", "brandskott"], confidence: 0.0)
             ],
         ]
     }

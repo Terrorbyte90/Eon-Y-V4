@@ -336,7 +336,7 @@ final class EonLiveAutonomy: ObservableObject {
         let workDone = phaseWorkDone[.learning] ?? 0
         phaseWorkDone[.learning] = workDone + 1
 
-        switch workDone % 4 {
+        switch workDone % 5 {
         case 0:
             if !brain.isThinking { await readAndLearnFromArticles(brain: brain) }
         case 1:
@@ -345,9 +345,55 @@ final class EonLiveAutonomy: ObservableObject {
             if isSelfReflectEnabled && !brain.isThinking { await runDeepSelfReflection(brain: brain) }
         case 3:
             await runConstitutionalWork(brain: brain)
+        case 4:
+            // Cross-domain article analysis: Eon reads articles and draws parallels
+            if !brain.isThinking { await runCrossDomainArticleAnalysis(brain: brain) }
         default:
             break
         }
+    }
+
+    /// Eon läser artiklar djupt och drar paralleller mellan domäner
+    private func runCrossDomainArticleAnalysis(brain: EonBrain) async {
+        let analyzer = CrossDomainAnalyzer.shared
+        let articles = await PersistentMemoryStore.shared.loadAllArticles(limit: 100)
+        guard !articles.isEmpty else { return }
+
+        // Pick a random unlearned article to deeply comprehend
+        let unlearnedArticles = articles.filter { !learnedArticleIDs.contains($0.id) }
+        guard let targetArticle = unlearnedArticles.randomElement() ?? articles.randomElement() else { return }
+
+        learnedArticleIDs.insert(targetArticle.id)
+
+        // Deep comprehend the article
+        let comprehension = await analyzer.comprehendArticle(targetArticle)
+
+        // Update monologue with insights
+        if !comprehension.crossDomainLinks.isEmpty {
+            let link = comprehension.crossDomainLinks.first!
+            let line = MonologueLine(
+                text: "Artikel '\(targetArticle.title)': fann koppling till '\(link.toArticle)' via begreppen \(link.sharedConcepts.prefix(3).joined(separator: ", "))",
+                type: .insight
+            )
+            brain.innerMonologue.append(line)
+        }
+
+        if !comprehension.causalRelations.isEmpty {
+            let causal = comprehension.causalRelations.first!
+            let line = MonologueLine(
+                text: "Kausalitet i '\(targetArticle.title)': \(causal.cause) → \(causal.effect)",
+                type: .thought
+            )
+            brain.innerMonologue.append(line)
+        }
+
+        // Update creative engine emotions
+        CreativeEngine.shared.updateEmotionalState(based: .curious, confidence: 0.7)
+
+        // Update cognitive dimensions
+        let state = CognitiveState.shared
+        state.update(dimension: .reasoning, delta: 0.003, source: "CrossDomainAnalysis")
+        state.update(dimension: .analogyBuilding, delta: 0.005, source: "CrossDomainAnalysis")
     }
 
     private func runLanguagePhaseWork(brain: EonBrain) async {
