@@ -104,45 +104,65 @@ struct TabContentView: View {
     @Binding var selectedTab: EonTab
     @Binding var tabBarVisible: Bool
 
+    // v4: Track visited tabs to keep them mounted after first visit
+    // (preserves scroll positions and state), but don't mount all 7 on launch.
+    @State private var visitedTabs: Set<EonTab> = [.chat]
+
     var body: some View {
         ZStack {
-            EonPulseHomeView()
-                .environment(\.tabBarVisible, $tabBarVisible)
-                .opacity(selectedTab == .home ? 1 : 0)
-                .allowsHitTesting(selectedTab == .home)
-
+            // Chat is always mounted (default tab, has important scroll state)
             ChatView()
                 .environment(\.tabBarVisible, $tabBarVisible)
                 .opacity(selectedTab == .chat ? 1 : 0)
                 .allowsHitTesting(selectedTab == .chat)
 
-            CreativeView()
-                .environment(\.tabBarVisible, $tabBarVisible)
-                .opacity(selectedTab == .creative ? 1 : 0)
-                .allowsHitTesting(selectedTab == .creative)
+            // Other views: only mount after first visit (lazy loading)
+            if visitedTabs.contains(.home) {
+                EonPulseHomeView()
+                    .environment(\.tabBarVisible, $tabBarVisible)
+                    .opacity(selectedTab == .home ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .home)
+            }
 
-            MindView()
-                .environment(\.tabBarVisible, $tabBarVisible)
-                .opacity(selectedTab == .mind ? 1 : 0)
-                .allowsHitTesting(selectedTab == .mind)
+            if visitedTabs.contains(.creative) {
+                CreativeView()
+                    .environment(\.tabBarVisible, $tabBarVisible)
+                    .opacity(selectedTab == .creative ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .creative)
+            }
 
-            SelfAwarenessView()
-                .environment(\.tabBarVisible, $tabBarVisible)
-                .opacity(selectedTab == .selfAwareness ? 1 : 0)
-                .allowsHitTesting(selectedTab == .selfAwareness)
+            if visitedTabs.contains(.mind) {
+                MindView()
+                    .environment(\.tabBarVisible, $tabBarVisible)
+                    .opacity(selectedTab == .mind ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .mind)
+            }
 
-            KnowledgeView()
-                .environment(\.tabBarVisible, $tabBarVisible)
-                .opacity(selectedTab == .knowledge ? 1 : 0)
-                .allowsHitTesting(selectedTab == .knowledge)
+            if visitedTabs.contains(.selfAwareness) {
+                SelfAwarenessView()
+                    .environment(\.tabBarVisible, $tabBarVisible)
+                    .opacity(selectedTab == .selfAwareness ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .selfAwareness)
+            }
 
-            ProfileRootView()
-                .environment(\.tabBarVisible, $tabBarVisible)
-                .opacity(selectedTab == .profile ? 1 : 0)
-                .allowsHitTesting(selectedTab == .profile)
+            if visitedTabs.contains(.knowledge) {
+                KnowledgeView()
+                    .environment(\.tabBarVisible, $tabBarVisible)
+                    .opacity(selectedTab == .knowledge ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .knowledge)
+            }
+
+            if visitedTabs.contains(.profile) {
+                ProfileRootView()
+                    .environment(\.tabBarVisible, $tabBarVisible)
+                    .opacity(selectedTab == .profile ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .profile)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: selectedTab) { _ in
+        .onChange(of: selectedTab) { newTab in
+            // Register tab visit for lazy mounting
+            visitedTabs.insert(newTab)
             // Tab-byte: visa alltid tab bar igen
             withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) {
                 tabBarVisible = true

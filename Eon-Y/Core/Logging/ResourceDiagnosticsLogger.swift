@@ -46,7 +46,7 @@ final class ResourceDiagnosticsLogger {
         guard !isRunning else { return }
         isRunning = true
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 3, repeating: 5.0)
+        t.schedule(deadline: .now() + 5, repeating: 8.0)  // v4: 5s → 8s sampling
         t.setEventHandler { [weak self] in self?.sample() }
         t.resume()
         timer = t

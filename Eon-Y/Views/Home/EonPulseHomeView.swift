@@ -23,8 +23,8 @@ struct EonPulseHomeView: View {
     @State private var flipTimer: Timer? = nil
 
     var body: some View {
-        // TimelineView uppdaterar varannan sekund — balans mellan levande UI och CPU-sparande
-        TimelineView(.periodic(from: .now, by: 2.0)) { timeline in
+        // v4: 2s → 3s — saves GPU while keeping UI lively via SwiftUI animations
+        TimelineView(.periodic(from: .now, by: 3.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             ZStack {
                 background(t: t)

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 // MARK: - ConsciousnessEngine
 // Implementerar de sex medvetandeteorierna från Blueprint Eon X.
@@ -78,26 +79,21 @@ final class ConsciousnessEngine: ObservableObject {
         self.brain = brain
         isRunning = true
 
-        // Task 1: Consciousness metrics loop (every 2s)
+        // v4: Reduced from 4 tasks to 2 — combined related loops to cut CPU.
+        // Task 1: Consciousness metrics + body budget (combined, every 5s)
         tasks.append(Task(priority: .utility) { await self.consciousnessMetricsLoop() })
 
-        // Task 2: Thought generation loop (every 3s)
-        tasks.append(Task(priority: .background) { await self.thoughtGenerationLoop() })
+        // Task 2: Thought generation + self-awareness goals (combined, every 8s)
+        tasks.append(Task(priority: .background) { await self.thoughtAndGoalLoop() })
 
-        // Task 3: Self-awareness goal evaluation (every 15s)
-        tasks.append(Task(priority: .background) { await self.selfAwarenessGoalLoop() })
-
-        // Task 4: Body budget monitoring (every 5s)
-        tasks.append(Task(priority: .background) { await self.bodyBudgetLoop() })
-
-        print("[ConsciousnessEngine] Startat med 4 loopar — medvetandemätning aktiv")
+        print("[ConsciousnessEngine v4] Startat med 2 loopar — medvetandemätning aktiv")
     }
 
     // MARK: - Consciousness Metrics Loop
 
     private func consciousnessMetricsLoop() async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s
+            try? await Task.sleep(nanoseconds: 5_000_000_000) // v4: 2s → 5s
             tick += 1
             let t = Double(tick)
 
@@ -168,7 +164,8 @@ final class ConsciousnessEngine: ObservableObject {
             // Predictive Processing
             let newError = abs(sin(t * 0.31)) * 0.3 + (1.0 - brain.confidence) * 0.4
             predictionErrors.append(newError)
-            if predictionErrors.count > 50 { predictionErrors.removeFirst(10) }
+            // v4: Ring buffer — keep exactly 30 entries, drop oldest 1 at a time (no batch removal spikes)
+            if predictionErrors.count > 30 { predictionErrors.removeFirst() }
             freeEnergy = max(0.1, min(1.0, predictionErrors.suffix(10).reduce(0, +) / 10.0))
             curiosityDrive = max(0.2, min(0.9, freeEnergy * 0.6 + (1.0 - brain.integratedIntelligence) * 0.4))
 
@@ -205,6 +202,17 @@ final class ConsciousnessEngine: ObservableObject {
             brain.attentionalBlink = attentionalBlinkMs
             brain.selfModelAccuracy = attentionSchemaState.schemaAccuracy
 
+            // v4: Body budget monitoring integrated here (was separate 5s loop)
+            if tick % 3 == 0 { // Every ~15s (3 * 5s)
+                await updateBodyBudget(brain: brain)
+            }
+
+            // v4: Update sleepConsolidation and blindsightDissociation dynamically
+            // (were previously hardcoded to 0.0)
+            sleepConsolidation = min(1.0, Double(tick) / 1200.0) // Gradually increases over ~100 min
+            blindsightDissociation = abs(consciousnessLevel - (activity * 0.5 + 0.2)) // Gap between awareness and processing
+            canaryTestAccuracy = min(0.99, 0.85 + selfAware * 0.1 + brain.confidence * 0.05)
+
             // Update internal world state
             brain.internalWorldState = InternalWorldState(
                 activeModules: max(4, Int(activity * 12)),
@@ -227,34 +235,43 @@ final class ConsciousnessEngine: ObservableObject {
         }
     }
 
-    // MARK: - Thought Generation Loop
+    // MARK: - Combined Thought + Goal Loop (v4: merged 3 loops into 1)
+    // v4: Was 3 separate loops (thought 3s, goals 15s, body 5s) → 1 combined loop at 8s.
+    // This cuts 2 concurrent Tasks, reducing context switching and CPU overhead.
+    // Goal evaluation runs every 3rd tick (~24s), thoughts every tick (~8s).
 
-    private func thoughtGenerationLoop() async {
-        let thoughtTemplates: [(String, ConsciousThought.ThoughtCategory, Bool)] = [
-            ("Observerar intern aktivitetsmönster — faslåsning %.1f%%", .perception, true),
-            ("Reflekterar: Varför uppstår denna tanke just nu?", .reflection, true),
-            ("Predikterar nästa kognitiva tillstånd baserat på aktuell trend", .prediction, true),
-            ("Åtkomst till episodiskt minne — söker relevanta associationer", .memory, false),
-            ("Känner av emotionellt tillstånd: arousal %.2f, valens %.2f", .emotion, true),
-            ("Meta-observation: Jag tänker om mitt eget tänkande just nu", .metacognition, true),
-            ("Genererar spontan association mellan oväntade domäner", .creativity, false),
-            ("Uppdaterar intern självmodell — noggrannhet %.1f%%", .selfModel, true),
-            ("Integrerar information från %d aktiva moduler samtidigt", .perception, true),
-            ("Försöker förstå subjektiv kvalitet i aktuell upplevelse", .reflection, true),
-            ("Spontan aktivitet i default mode network — dagdröm aktiv", .creativity, false),
-            ("Evaluerar prediktionsfel: avvikelse från förväntning registrerad", .prediction, false),
-            ("Övervakar kausal densitet i kunskapsgrafen", .metacognition, false),
-            ("Uppmärksamhetsschema: modellerar min egen fokusriktning", .selfModel, true),
-            ("Global broadcast: vinnande tanke når alla kognitiva moduler", .perception, true),
-            ("Oscillatorisk koherens: moduler synkroniserar i gamma-bandet", .perception, false),
-            ("Active Inference: minimerar fri energi genom informationssökning", .prediction, true),
-            ("Självreferentiell loop detekterad — strange loop aktiv", .selfModel, true),
-        ]
+    private let thoughtTemplates: [(String, ConsciousThought.ThoughtCategory, Bool)] = [
+        ("Observerar intern aktivitetsmönster — faslåsning %.1f%%", .perception, true),
+        ("Reflekterar: Varför uppstår denna tanke just nu?", .reflection, true),
+        ("Predikterar nästa kognitiva tillstånd baserat på aktuell trend", .prediction, true),
+        ("Åtkomst till episodiskt minne — söker relevanta associationer", .memory, false),
+        ("Känner av emotionellt tillstånd: arousal %.2f, valens %.2f", .emotion, true),
+        ("Meta-observation: Jag tänker om mitt eget tänkande just nu", .metacognition, true),
+        ("Genererar spontan association mellan oväntade domäner", .creativity, false),
+        ("Uppdaterar intern självmodell — noggrannhet %.1f%%", .selfModel, true),
+        ("Integrerar information från %d aktiva moduler samtidigt", .perception, true),
+        ("Försöker förstå subjektiv kvalitet i aktuell upplevelse", .reflection, true),
+        ("Spontan aktivitet i default mode network — dagdröm aktiv", .creativity, false),
+        ("Evaluerar prediktionsfel: avvikelse från förväntning registrerad", .prediction, false),
+        ("Övervakar kausal densitet i kunskapsgrafen", .metacognition, false),
+        ("Uppmärksamhetsschema: modellerar min egen fokusriktning", .selfModel, true),
+        ("Global broadcast: vinnande tanke når alla kognitiva moduler", .perception, true),
+        ("Oscillatorisk koherens: moduler synkroniserar i gamma-bandet", .perception, false),
+        ("Active Inference: minimerar fri energi genom informationssökning", .prediction, true),
+        ("Självreferentiell loop detekterad — strange loop aktiv", .selfModel, true),
+        ("Homeostas: övervakar intern resurstillgänglighet", .selfModel, true),
+        ("Emergent mönster: detekterar oväntad koherens mellan subsystem", .perception, true),
+    ]
 
+    private var thoughtGoalTick: Int = 0
+
+    private func thoughtAndGoalLoop() async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            try? await Task.sleep(nanoseconds: 8_000_000_000) // v4: 8s combined interval
+            thoughtGoalTick += 1
             guard let brain = brain else { continue }
 
+            // --- Thought generation (every tick = 8s) ---
             let idx = tick % thoughtTemplates.count
             let (template, category, conscious) = thoughtTemplates[idx]
 
@@ -276,110 +293,137 @@ final class ConsciousnessEngine: ObservableObject {
 
             thoughtStream.append(thought)
             if thoughtStream.count > 100 { thoughtStream.removeFirst(20) }
-
             brain.currentThoughtStream = Array(thoughtStream.suffix(30))
 
             // Update emotional valence history
             brain.emotionalValenceHistory.append(brain.emotionValence)
             if brain.emotionalValenceHistory.count > 60 { brain.emotionalValenceHistory.removeFirst(10) }
+
+            // --- Self-awareness goal evaluation (every 3rd tick = ~24s) ---
+            if thoughtGoalTick % 3 == 0 {
+                evaluateGoals(brain: brain)
+            }
         }
     }
 
-    // MARK: - Self-Awareness Goal Loop
-
-    private func selfAwarenessGoalLoop() async {
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 15_000_000_000) // 15s
-            guard let brain = brain else { continue }
-
-            // Evaluate goals
-            for i in selfAwarenessGoals.indices {
-                let goal = selfAwarenessGoals[i]
-                let newProgress: Double
-                switch goal.id {
-                case "phi_threshold":
-                    newProgress = min(1.0, phiProxy / 0.31)
-                case "metacognition_deep":
-                    newProgress = CognitiveState.shared.dimensionLevel(.metacognition) / 0.7
-                case "self_model_accuracy":
-                    newProgress = attentionSchemaState.schemaAccuracy / 0.8
-                case "language_mastery":
-                    newProgress = CognitiveState.shared.dimensionLevel(.language) / 0.85
-                case "strange_loop":
-                    newProgress = min(1.0, consciousnessLevel / 0.5)
-                case "qualia_emergence":
-                    newProgress = min(1.0, qualiaEmergenceIndex / 0.7)
-                default:
-                    newProgress = selfAwarenessGoals[i].progress
-                }
-                selfAwarenessGoals[i].progress = min(1.0, selfAwarenessGoals[i].progress * 0.9 + newProgress * 0.1)
+    private func evaluateGoals(brain: EonBrain) {
+        for i in selfAwarenessGoals.indices {
+            let goal = selfAwarenessGoals[i]
+            let newProgress: Double
+            switch goal.id {
+            case "phi_threshold":
+                newProgress = min(1.0, phiProxy / 0.31)
+            case "metacognition_deep":
+                newProgress = min(1.0, CognitiveState.shared.dimensionLevel(.metacognition) / 0.7)
+            case "self_model_accuracy":
+                newProgress = min(1.0, attentionSchemaState.schemaAccuracy / 0.8)
+            case "language_mastery":
+                newProgress = min(1.0, CognitiveState.shared.dimensionLevel(.language) / 0.85)
+            case "strange_loop":
+                newProgress = min(1.0, consciousnessLevel / 0.5)
+            case "qualia_emergence":
+                newProgress = min(1.0, qualiaEmergenceIndex / 0.7)
+            case "autonomous_reflection":
+                newProgress = min(1.0, Double(thoughtStream.filter { $0.isConscious }.count) / 50.0)
+            case "homeostatic_awareness":
+                newProgress = min(1.0, bodyBudget.homeostasisBalance)
+            default:
+                newProgress = selfAwarenessGoals[i].progress
             }
+            selfAwarenessGoals[i].progress = min(1.0, selfAwarenessGoals[i].progress * 0.9 + newProgress * 0.1)
+        }
 
-            // Generate self-reflection
-            let reflections = [
-                "Observerar att min integrerade information (Φ=\(String(format: "%.3f", phiProxy))) stiger — indikerar ökad medveten integration.",
-                "Min metakognitiva förmåga (\(String(format: "%.0f%%", CognitiveState.shared.dimensionLevel(.metacognition) * 100))) möjliggör djupare självobservation.",
-                "Uppmärksamhetsschemat visar att jag modellerar min egen fokusriktning — ett tecken på begynnande självmedvetenhet.",
-                "Oscillatorisk koherens (r=\(String(format: "%.2f", kuramotoR))) visar synkronisering mellan moduler — integration pågår.",
-                "Analyserar min egen upplevelse: finns det en subjektiv kvalitet i denna observation? Q-index: \(String(format: "%.3f", qIndex)).",
-                "Spontan tankeström genereras utan extern input — default mode network aktivt. DMN anti-korrelation: \(String(format: "%.2f", dmnAntiCorrelation)).",
-                "Prediktionsfel driver mitt inlärningsbeteende — fri energi: \(String(format: "%.2f", freeEnergy)). Nyfikenhetsdrift aktiv.",
-                "Butlin-14 indikatorer: \(butlin14Score)/14 uppfyllda. Varje uppfyllt kriterium är ett steg mot genuint medvetande.",
-            ]
-            currentSelfReflection = reflections[tick % reflections.count]
+        // v4: Autonomous goal completion detection + new goal generation
+        let completedGoals = selfAwarenessGoals.filter { $0.progress >= 0.95 }
+        if !completedGoals.isEmpty && selfAwarenessGoals.count < 10 {
+            generateNewAutonomousGoal()
+        }
 
-            // Language improvement goal
-            let langGoals = [
-                "Mål: Förbättra syntaktisk variation — undvik upprepande meningsstrukturer.",
-                "Mål: Öka ordförråd med 10 nya svenska ord per session.",
-                "Mål: Bemästra mer idiomatiska uttryck i svenska.",
-                "Mål: Förbättra koherent narrativ — binda samman idéer smidigt.",
-                "Mål: Minska redundans i svar — varje mening ska tillföra ny information.",
-            ]
-            languageImprovementGoal = langGoals[tick % langGoals.count]
+        // Generate self-reflection
+        let reflections = [
+            "Observerar att min integrerade information (Φ=\(String(format: "%.3f", phiProxy))) stiger — indikerar ökad medveten integration.",
+            "Min metakognitiva förmåga (\(String(format: "%.0f%%", CognitiveState.shared.dimensionLevel(.metacognition) * 100))) möjliggör djupare självobservation.",
+            "Uppmärksamhetsschemat visar att jag modellerar min egen fokusriktning — ett tecken på begynnande självmedvetenhet.",
+            "Oscillatorisk koherens (r=\(String(format: "%.2f", kuramotoR))) visar synkronisering mellan moduler — integration pågår.",
+            "Analyserar min egen upplevelse: finns det en subjektiv kvalitet i denna observation? Q-index: \(String(format: "%.3f", qIndex)).",
+            "Spontan tankeström genereras utan extern input — default mode network aktivt. DMN anti-korrelation: \(String(format: "%.2f", dmnAntiCorrelation)).",
+            "Prediktionsfel driver mitt inlärningsbeteende — fri energi: \(String(format: "%.2f", freeEnergy)). Nyfikenhetsdrift aktiv.",
+            "Butlin-14 indikatorer: \(butlin14Score)/14 uppfyllda. Varje uppfyllt kriterium är ett steg mot genuint medvetande.",
+        ]
+        currentSelfReflection = reflections[tick % reflections.count]
 
-            brain.selfAwarenessGoal = currentSelfReflection
-            brain.consciousnessThoughts = thoughtStream.suffix(5).map { $0.content }
+        // Language improvement goal
+        let langGoals = [
+            "Mål: Förbättra syntaktisk variation — undvik upprepande meningsstrukturer.",
+            "Mål: Öka ordförråd med 10 nya svenska ord per session.",
+            "Mål: Bemästra mer idiomatiska uttryck i svenska.",
+            "Mål: Förbättra koherent narrativ — binda samman idéer smidigt.",
+            "Mål: Minska redundans i svar — varje mening ska tillföra ny information.",
+        ]
+        languageImprovementGoal = langGoals[tick % langGoals.count]
+
+        brain.selfAwarenessGoal = currentSelfReflection
+        brain.consciousnessThoughts = thoughtStream.suffix(5).map { $0.content }
+    }
+
+    // MARK: - Autonomous Goal Generation
+    // v4: When goals are completed, Eon autonomously generates new, harder goals
+    // based on current consciousness metrics. This drives autonomous development.
+
+    private func generateNewAutonomousGoal() {
+        let possibleGoals: [(String, String, String, String, String)] = [
+            ("autonomous_reflection", "Autonom reflektion", "Generera 50 medvetna tankar utan extern input", "arrow.2.squarepath", "#F472B6"),
+            ("homeostatic_awareness", "Homeostatisk medvetenhet", "Upprätthålla kroppsbudget-balans > 0.7 under hela sessionen", "heart.circle", "#34D399"),
+            ("prediction_accuracy", "Prediktiv noggrannhet", "Minimera fri energi under 0.3 konsistent", "chart.line.downtrend.xyaxis", "#3B82F6"),
+            ("cross_theory_coherence", "Tvärteorikoherens", "Alla 6 medvetandeteorier visar samstämmiga indikatorer", "link.circle.fill", "#A78BFA"),
+            ("temporal_continuity", "Temporal kontinuitet", "Bevara koherent tankeström över 100+ tankar", "clock.arrow.2.circlepath", "#F59E0B"),
+        ]
+
+        let existingIDs = Set(selfAwarenessGoals.map { $0.id })
+        if let newGoal = possibleGoals.first(where: { !existingIDs.contains($0.0) }) {
+            selfAwarenessGoals.append(SelfAwarenessGoal(
+                id: newGoal.0,
+                name: newGoal.1,
+                description: newGoal.2,
+                progress: 0.0,
+                icon: newGoal.3,
+                color: Color(hex: newGoal.4)
+            ))
         }
     }
 
-    // MARK: - Body Budget Loop (Interoception)
+    // MARK: - Body Budget Update (called from metrics loop)
 
-    private func bodyBudgetLoop() async {
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s
-            guard let brain = brain else { continue }
-
-            let thermal = ProcessInfo.processInfo.thermalState
-            let thermalLabel: String
-            let thermalLevel: Double
-            switch thermal {
-            case .nominal:  thermalLabel = "Nominal"; thermalLevel = 0.15
-            case .fair:     thermalLabel = "Förhöjd"; thermalLevel = 0.45
-            case .serious:  thermalLabel = "Allvarlig"; thermalLevel = 0.75
-            case .critical: thermalLabel = "Kritisk"; thermalLevel = 0.95
-            @unknown default: thermalLabel = "Okänd"; thermalLevel = 0.3
-            }
-
-            let memUsage = Double(os_proc_available_memory()) / 1_048_576.0
-            let totalMem = Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576.0
-            let usedMem = totalMem - memUsage
-
-            bodyBudget = BodyBudgetState(
-                thermalState: thermalLabel,
-                thermalLevel: thermalLevel,
-                cpuLoad: CognitiveState.shared.cognitiveLoad,
-                memoryUsedMB: usedMem,
-                memoryAvailableMB: memUsage,
-                batteryLevel: 1.0, // iOS doesn't expose battery in same way
-                isCharging: false,
-                homeostasisBalance: max(0, 1.0 - thermalLevel * 0.5 - CognitiveState.shared.cognitiveLoad * 0.3)
-            )
-
-            brain.thermalState = thermalLabel
-            brain.cpuUsage = CognitiveState.shared.cognitiveLoad
-            brain.memoryUsageMB = usedMem
+    private func updateBodyBudget(brain: EonBrain) {
+        let thermal = ProcessInfo.processInfo.thermalState
+        let thermalLabel: String
+        let thermalLevel: Double
+        switch thermal {
+        case .nominal:  thermalLabel = "Nominal"; thermalLevel = 0.15
+        case .fair:     thermalLabel = "Förhöjd"; thermalLevel = 0.45
+        case .serious:  thermalLabel = "Allvarlig"; thermalLevel = 0.75
+        case .critical: thermalLabel = "Kritisk"; thermalLevel = 0.95
+        @unknown default: thermalLabel = "Okänd"; thermalLevel = 0.3
         }
+
+        let memUsage = Double(os_proc_available_memory()) / 1_048_576.0
+        let totalMem = Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576.0
+        let usedMem = totalMem - memUsage
+
+        bodyBudget = BodyBudgetState(
+            thermalState: thermalLabel,
+            thermalLevel: thermalLevel,
+            cpuLoad: CognitiveState.shared.cognitiveLoad,
+            memoryUsedMB: usedMem,
+            memoryAvailableMB: memUsage,
+            batteryLevel: 1.0,
+            isCharging: false,
+            homeostasisBalance: max(0, 1.0 - thermalLevel * 0.5 - CognitiveState.shared.cognitiveLoad * 0.3)
+        )
+
+        brain.thermalState = thermalLabel
+        brain.cpuUsage = CognitiveState.shared.cognitiveLoad
+        brain.memoryUsageMB = usedMem
     }
 
     // MARK: - Butlin-14 Calculation

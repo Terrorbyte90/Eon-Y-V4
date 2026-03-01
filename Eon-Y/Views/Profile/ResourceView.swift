@@ -51,9 +51,11 @@ struct ResourceView: View {
             VStack(alignment: .leading, spacing: 10) {
                 resourceHeader("KOGNITIVA MOTORER", icon: "brain.head.profile", color: Color(hex: "#A78BFA"))
 
+                // v4: Updated descriptions to match v4 phased architecture
                 let engines: [(String, String, Double, Color)] = [
-                    ("Autonomi (EonLiveAutonomy)", "20 loopar aktiva", brain.engineActivity["autonomy"] ?? 0.5, Color(hex: "#A78BFA")),
-                    ("ICA Orkestrator", "12 pelare · 2s cykel", brain.engineActivity["cognitive"] ?? 0.5, Color(hex: "#7C3AED")),
+                    ("Autonomi (EonLiveAutonomy)", "3 uppgifter · fasad cykel", brain.engineActivity["autonomy"] ?? 0.5, Color(hex: "#A78BFA")),
+                    ("ICA Orkestrator", "12 pelare · 3 uppgifter", brain.engineActivity["cognitive"] ?? 0.5, Color(hex: "#7C3AED")),
+                    ("Medvetande (ConsciousnessEngine)", "6 teorier · 2 loopar", brain.engineActivity["cognitive"] ?? 0.5, Color(hex: "#F472B6")),
                     ("Resonemang (ReasoningEngine)", "Kausal + Analogisk", brain.engineActivity["cognitive"] ?? 0.5, Color(hex: "#3B82F6")),
                     ("Inlärning (LearningEngine)", "Kompetens-cykler", brain.engineActivity["learning"] ?? 0.5, Color(hex: "#14B8A6")),
                     ("Minne (PersistentMemoryStore)", "SQLite + HNSW", brain.engineActivity["memory"] ?? 0.5, Color(hex: "#F59E0B")),

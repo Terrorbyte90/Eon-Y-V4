@@ -355,8 +355,8 @@ final class CognitiveState: ObservableObject {
             if intelligenceHistory.count > 200 { intelligenceHistory.removeFirst(50) }
         }
 
-        // Auto-persistera kognitiv state var 15s — minimerar förlust vid krasch
-        if Date().timeIntervalSince(lastPersistDate) > 15 {
+        // v4: Auto-persistera kognitiv state var 30s (was 15s) — reduces disk I/O
+        if Date().timeIntervalSince(lastPersistDate) > 30 {
             persistCurrentState()
             lastPersistDate = Date()
             UserDefaults.standard.set(DevelopmentalStage.fromIntelligence(newII).rawValue, forKey: "eon_persisted_stage")
@@ -369,7 +369,7 @@ final class CognitiveState: ObservableObject {
     @MainActor
     private func startStateMonitor() async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 8_000_000_000) // 8s — minskar CPU-användning
+            try? await Task.sleep(nanoseconds: 12_000_000_000) // v4: 8s → 12s — further CPU reduction
             updateFeedbackLoops()
             applyHomeostaticDecay()
             updateCognitiveLoad()
