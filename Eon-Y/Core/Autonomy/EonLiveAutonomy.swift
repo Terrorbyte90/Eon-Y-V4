@@ -160,29 +160,42 @@ final class EonLiveAutonomy {
     // MARK: - Main Loop (3s) — hjärtat i Eon, alltid aktiv
 
     private func mainLoop() async {
-        // Kör omedelbart vid start — ingen initial fördröjning
         tickCount += 1
         updateEngineActivity()
         await animateCognitiveStep()
 
         while !Task.isCancelled {
-            let mode = performanceMode
+            let mode = CyclingModeEngine.shared.effectiveMode(base: performanceMode)
+
+            // AutonomyOff: vänta länge utan att utföra kognitiva operationer
+            if mode.autonomyPaused {
+                updateEngineActivity()
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                continue
+            }
+
             let baseInterval: UInt64
             switch mode {
-            case .maximal:  baseInterval = 2_000_000_000   // 2s
-            case .balanced: baseInterval = 3_000_000_000   // 3s
-            case .sparse:   baseInterval = 5_000_000_000   // 5s
-            case .rest:     baseInterval = 10_000_000_000  // 10s
+            case .maximal:  baseInterval = 2_000_000_000
+            case .balanced: baseInterval = 3_000_000_000
+            case .sparse:   baseInterval = 5_000_000_000
+            case .rest:     baseInterval = 10_000_000_000
             case .auto:     baseInterval = autoScaledInterval(base: 3_000_000_000)
             case .adaptive: baseInterval = adaptiveScaledInterval(loop: "mainLoop", base: 3_000_000_000)
+            default:        baseInterval = 3_000_000_000
             }
             try? await Task.sleep(nanoseconds: baseInterval)
             tickCount += 1
             updateEngineActivity()
             if tickCount % 3 == 0 { await animateCognitiveStep() }
-            // Varje 10:e tick: kör en djupare kognitiv analys
             if tickCount % 10 == 0 { await runDeepCognitiveAnalysis() }
         }
+    }
+
+    // Guard som alla loopar anropar — returnerar sant om loopen ska hoppa över detta varv
+    private func shouldSkipAutonomousWork() -> Bool {
+        let mode = CyclingModeEngine.shared.effectiveMode(base: performanceMode)
+        return mode.autonomyPaused
     }
 
     // Djup kognitiv analys — körs var ~30s för att hålla Eon aktiv och tänkande
@@ -275,16 +288,19 @@ final class EonLiveAutonomy {
     private func deepThoughtLoop() async {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         while !Task.isCancelled {
-            await generateDeepThought()
-            let mode = performanceMode
+            if !shouldSkipAutonomousWork() {
+                await generateDeepThought()
+            }
+            let mode = CyclingModeEngine.shared.effectiveMode(base: performanceMode)
             let minNs: UInt64
             let maxNs: UInt64
             switch mode {
-            case .maximal:  minNs = 4_000_000_000;  maxNs = 7_000_000_000
-            case .balanced: minNs = 6_000_000_000;  maxNs = 10_000_000_000
-            case .sparse:   minNs = 12_000_000_000; maxNs = 20_000_000_000
-            case .rest:     minNs = 30_000_000_000; maxNs = 60_000_000_000
-            case .auto, .adaptive:
+            case .maximal:     minNs = 4_000_000_000;  maxNs = 7_000_000_000
+            case .balanced:    minNs = 6_000_000_000;  maxNs = 10_000_000_000
+            case .sparse:      minNs = 12_000_000_000; maxNs = 20_000_000_000
+            case .rest:        minNs = 30_000_000_000; maxNs = 60_000_000_000
+            case .autonomyOff: minNs = 10_000_000_000; maxNs = 15_000_000_000
+            case .auto, .adaptive, .cycling:
                 let scaled = autoScaledInterval(base: 6_000_000_000)
                 minNs = scaled; maxNs = scaled + 4_000_000_000
             }
@@ -426,7 +442,7 @@ final class EonLiveAutonomy {
     private func consolidationLoop() async {
         try? await Task.sleep(nanoseconds: 8_000_000_000)
         while !Task.isCancelled {
-            guard let brain, !brain.isThinking else {
+            guard let brain, !brain.isThinking, !shouldSkipAutonomousWork() else {
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
                 continue
             }
@@ -459,7 +475,7 @@ final class EonLiveAutonomy {
     private func selfReflectionLoop() async {
         try? await Task.sleep(nanoseconds: 6_000_000_000)
         while !Task.isCancelled {
-            guard let brain, !brain.isThinking else {
+            guard let brain, !brain.isThinking, !shouldSkipAutonomousWork() else {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
                 continue
             }
@@ -599,12 +615,12 @@ final class EonLiveAutonomy {
     private func sprakbankenLoop() async {
         try? await Task.sleep(nanoseconds: 5_000_000_000)
         while !Task.isCancelled {
-            await fetchFromSprakbanken()
-            // Random intervall 2–7 minuter som begärt
-            let minNs: UInt64 = 120_000_000_000   // 2 min
-            let maxNs: UInt64 = 420_000_000_000   // 7 min
-            let interval = UInt64.random(in: minNs...maxNs)
-            try? await Task.sleep(nanoseconds: interval)
+            if !shouldSkipAutonomousWork() {
+                await fetchFromSprakbanken()
+            }
+            let minNs: UInt64 = 120_000_000_000
+            let maxNs: UInt64 = 420_000_000_000
+            try? await Task.sleep(nanoseconds: UInt64.random(in: minNs...maxNs))
         }
     }
 
@@ -667,7 +683,7 @@ final class EonLiveAutonomy {
     private func hypothesisLoop() async {
         try? await Task.sleep(nanoseconds: 7_000_000_000)
         while !Task.isCancelled {
-            guard let brain, !brain.isThinking else {
+            guard let brain, !brain.isThinking, !shouldSkipAutonomousWork() else {
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
                 continue
             }
@@ -2002,78 +2018,97 @@ struct ProcessLabels {
 // MARK: - PerformanceMode
 
 enum PerformanceMode: Int, CaseIterable {
-    case maximal    = 0
-    case balanced   = 1
-    case sparse     = 2
-    case rest       = 3
-    case auto       = 4
-    case adaptive   = 5
+    case maximal      = 0
+    case balanced     = 1
+    case sparse       = 2
+    case rest         = 3
+    case auto         = 4
+    case adaptive     = 5
+    case autonomyOff  = 6   // Ingen autonom drift — bara chatt
+    case cycling      = 7   // Cyklar: 3 min Max → 2 min AutonomyOff → 5 min Vila
 
     var displayName: String {
         switch self {
-        case .maximal:  return "Maximal"
-        case .balanced: return "Balanserat"
-        case .sparse:   return "Sparsam"
-        case .rest:     return "Vila"
-        case .auto:     return "Auto"
-        case .adaptive: return "Adaptivt"
+        case .maximal:     return "Maximal"
+        case .balanced:    return "Balanserat"
+        case .sparse:      return "Sparsam"
+        case .rest:        return "Vila"
+        case .auto:        return "Auto"
+        case .adaptive:    return "Adaptivt"
+        case .autonomyOff: return "Autonom av"
+        case .cycling:     return "Cyklande"
         }
     }
 
     var description: String {
         switch self {
-        case .maximal:  return "Alla 18 loopar + 12 pelare aktiva"
-        case .balanced: return "Pelare 1–7 + Loop 1–2 aktiva"
-        case .sparse:   return "Pelare 1–3, ingen Loop 3"
-        case .rest:     return "Enbart Foundation Model"
-        case .auto:     return "Maximerar prestanda, minimerar CPU/värme automatiskt"
-        case .adaptive: return "Lär sig vad som orsakar värme och sparar på det specifikt"
+        case .maximal:     return "Alla 18 loopar + 12 pelare aktiva"
+        case .balanced:    return "Pelare 1–7 + Loop 1–2 aktiva"
+        case .sparse:      return "Pelare 1–3, ingen Loop 3"
+        case .rest:        return "Enbart Foundation Model"
+        case .auto:        return "Maximerar prestanda, minimerar CPU/värme automatiskt"
+        case .adaptive:    return "Lär sig vad som orsakar värme och sparar på det specifikt"
+        case .autonomyOff: return "Inga autonoma loopar — full intelligens i chatt"
+        case .cycling:     return "3 min Max → 2 min Av → 5 min Vila, upprepas"
         }
     }
 
     var batteryPerHour: String {
         switch self {
-        case .maximal:  return "~8%/h"
-        case .balanced: return "~4%/h"
-        case .sparse:   return "~2%/h"
-        case .rest:     return "~1%/h"
-        case .auto:     return "~3–5%/h"
-        case .adaptive: return "~2–4%/h"
+        case .maximal:     return "~8%/h"
+        case .balanced:    return "~4%/h"
+        case .sparse:      return "~2%/h"
+        case .rest:        return "~1%/h"
+        case .auto:        return "~3–5%/h"
+        case .adaptive:    return "~2–4%/h"
+        case .autonomyOff: return "~0.5%/h"
+        case .cycling:     return "~3%/h"
         }
     }
 
     var responseTime: String {
         switch self {
-        case .maximal:  return "~3s"
-        case .balanced: return "~1.5s"
-        case .sparse:   return "~0.8s"
-        case .rest:     return "~0.4s"
-        case .auto:     return "~1–2s"
-        case .adaptive: return "~1–2s"
+        case .maximal:     return "~3s"
+        case .balanced:    return "~1.5s"
+        case .sparse:      return "~0.8s"
+        case .rest:        return "~0.4s"
+        case .auto:        return "~1–2s"
+        case .adaptive:    return "~1–2s"
+        case .autonomyOff: return "~0.3s"
+        case .cycling:     return "~1–3s"
         }
     }
 
     var color: Color {
         switch self {
-        case .maximal:  return Color(hex: "#EF4444")
-        case .balanced: return Color(hex: "#7C3AED")
-        case .sparse:   return Color(hex: "#34D399")
-        case .rest:     return Color(hex: "#3B82F6")
-        case .auto:     return Color(hex: "#F59E0B")
-        case .adaptive: return Color(hex: "#A78BFA")
+        case .maximal:     return Color(hex: "#EF4444")
+        case .balanced:    return Color(hex: "#7C3AED")
+        case .sparse:      return Color(hex: "#34D399")
+        case .rest:        return Color(hex: "#3B82F6")
+        case .auto:        return Color(hex: "#F59E0B")
+        case .adaptive:    return Color(hex: "#A78BFA")
+        case .autonomyOff: return Color(hex: "#6B7280")
+        case .cycling:     return Color(hex: "#EC4899")
         }
     }
 
     // Skalningsfaktor för loop-intervall (högre = längre väntan = lägre CPU)
     var loopScaleFactor: Double {
         switch self {
-        case .maximal:  return 1.0
-        case .balanced: return 1.5
-        case .sparse:   return 3.0
-        case .rest:     return 10.0
-        case .auto:     return 1.0  // Dynamiskt
-        case .adaptive: return 1.0  // Dynamiskt
+        case .maximal:     return 1.0
+        case .balanced:    return 1.5
+        case .sparse:      return 3.0
+        case .rest:        return 10.0
+        case .auto:        return 1.0   // Dynamiskt
+        case .adaptive:    return 1.0   // Dynamiskt
+        case .autonomyOff: return 999.0 // Effektivt pausar alla loopar
+        case .cycling:     return 1.0   // Hanteras av CyclingModeEngine
         }
+    }
+
+    // Sant om autonoma bakgrundsloopar ska pausas
+    var autonomyPaused: Bool {
+        self == .autonomyOff
     }
 }
 
@@ -2126,6 +2161,59 @@ actor AdaptivePerformanceEngine {
     func throttleFactor(for loop: String) -> Double {
         throttleFactors[loop] ?? 1.0
     }
+}
+
+// MARK: - CyclingModeEngine
+// Hanterar det cyklande prestandaläget: 3 min Max → 2 min AutonomyOff → 5 min Vila
+
+final class CyclingModeEngine {
+    static let shared = CyclingModeEngine()
+
+    // Cykelschema: (läge, varaktighet i sekunder)
+    private let schedule: [(PerformanceMode, TimeInterval)] = [
+        (.maximal,     3 * 60),   // 3 min max
+        (.autonomyOff, 2 * 60),   // 2 min autonom av
+        (.rest,        5 * 60),   // 5 min vila
+    ]
+
+    private var cycleStartTime: Date = Date()
+    private var totalCycleDuration: TimeInterval
+
+    init() {
+        totalCycleDuration = schedule.reduce(0) { $0 + $1.1 }
+    }
+
+    // Returnerar det aktiva läget baserat på cykelposition
+    func effectiveMode(base: PerformanceMode) -> PerformanceMode {
+        guard base == .cycling else { return base }
+        let elapsed = Date().timeIntervalSince(cycleStartTime).truncatingRemainder(dividingBy: totalCycleDuration)
+        var accumulated: TimeInterval = 0
+        for (mode, duration) in schedule {
+            accumulated += duration
+            if elapsed < accumulated { return mode }
+        }
+        return schedule[0].0
+    }
+
+    // Aktuell fas-beskrivning för UI
+    func cycleStatusLabel(base: PerformanceMode) -> String {
+        guard base == .cycling else { return "" }
+        let elapsed = Date().timeIntervalSince(cycleStartTime).truncatingRemainder(dividingBy: totalCycleDuration)
+        var accumulated: TimeInterval = 0
+        for (mode, duration) in schedule {
+            let phaseStart = accumulated
+            accumulated += duration
+            if elapsed < accumulated {
+                let remaining = Int(accumulated - elapsed)
+                let m = remaining / 60, s = remaining % 60
+                return "\(mode.displayName) · \(m > 0 ? "\(m)m " : "")\(s)s kvar"
+            }
+        }
+        return ""
+    }
+
+    // Starta om cykeln (vid lägesbyte)
+    func reset() { cycleStartTime = Date() }
 }
 
 // MARK: - Extensions

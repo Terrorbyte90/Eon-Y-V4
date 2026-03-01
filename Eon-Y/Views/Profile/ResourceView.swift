@@ -526,6 +526,20 @@ struct PerformanceModeSelector: View {
                                             .padding(.horizontal, 5).padding(.vertical, 2)
                                             .background(Capsule().fill(mode.color.opacity(0.15)))
                                     }
+                                    if mode == .autonomyOff {
+                                        Text("CHATT-ONLY")
+                                            .font(.system(size: 7, weight: .black, design: .monospaced))
+                                            .foregroundStyle(mode.color)
+                                            .padding(.horizontal, 5).padding(.vertical, 2)
+                                            .background(Capsule().fill(mode.color.opacity(0.15)))
+                                    }
+                                    if mode == .cycling {
+                                        Text("AUTO-CYKEL")
+                                            .font(.system(size: 7, weight: .black, design: .monospaced))
+                                            .foregroundStyle(mode.color)
+                                            .padding(.horizontal, 5).padding(.vertical, 2)
+                                            .background(Capsule().fill(mode.color.opacity(0.15)))
+                                    }
                                 }
                                 Text(mode.description)
                                     .font(.system(size: 10, design: .rounded))
@@ -555,26 +569,29 @@ struct PerformanceModeSelector: View {
                     .buttonStyle(.plain)
                 }
 
-                // Förklaring av Auto och Adaptivt
-                if selectedMode == PerformanceMode.auto.rawValue || selectedMode == PerformanceMode.adaptive.rawValue {
-                    let mode = PerformanceMode(rawValue: selectedMode) ?? .auto
+                // Förklaring baserad på valt läge
+                let currentMode = PerformanceMode(rawValue: selectedMode) ?? .auto
+                if [PerformanceMode.auto, .adaptive, .autonomyOff, .cycling].contains(currentMode) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Rectangle().fill(mode.color.opacity(0.2)).frame(height: 0.5)
+                        Rectangle().fill(currentMode.color.opacity(0.2)).frame(height: 0.5)
                         HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: mode == .auto ? "wand.and.stars" : "brain.head.profile")
+                            Image(systemName: modeExplainIcon(currentMode))
                                 .font(.system(size: 12))
-                                .foregroundStyle(mode.color)
+                                .foregroundStyle(currentMode.color)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(mode == .auto ? "Hur Auto fungerar" : "Hur Adaptivt fungerar")
+                                Text("Hur \(currentMode.displayName) fungerar")
                                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                                     .foregroundStyle(.white.opacity(0.8))
-                                Text(mode == .auto
-                                    ? "Övervakar CPU, termisk status och batterinivå var 30s. Skalar automatiskt loop-intervall för att hålla CPU under 40% och temperaturen under 45°C — utan att offra kognitiv kvalitet."
-                                    : "Mäter exekveringstid per loop och korrelerar med termisk ökning. Loopar som orsakar oproportionerlig värme throttlas med upp till 5× längre intervall. Övriga loopar körs på full hastighet. Lär sig kontinuerligt."
-                                )
-                                .font(.system(size: 10, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.45))
-                                .fixedSize(horizontal: false, vertical: true)
+                                Text(modeExplainText(currentMode))
+                                    .font(.system(size: 10, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.45))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if currentMode == .cycling {
+                                    Text(CyclingModeEngine.shared.cycleStatusLabel(base: .cycling))
+                                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(currentMode.color)
+                                        .padding(.top, 2)
+                                }
                             }
                         }
                     }
@@ -582,6 +599,33 @@ struct PerformanceModeSelector: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - PerformanceModeSelector helpers
+
+private func modeExplainIcon(_ mode: PerformanceMode) -> String {
+    switch mode {
+    case .auto:        return "wand.and.stars"
+    case .adaptive:    return "brain.head.profile"
+    case .autonomyOff: return "pause.circle.fill"
+    case .cycling:     return "arrow.2.circlepath"
+    default:           return "info.circle"
+    }
+}
+
+private func modeExplainText(_ mode: PerformanceMode) -> String {
+    switch mode {
+    case .auto:
+        return "Övervakar CPU, termisk status och batterinivå var 30s. Skalar automatiskt loop-intervall för att hålla CPU under 40% och temperaturen under 45°C."
+    case .adaptive:
+        return "Mäter exekveringstid per loop och korrelerar med termisk ökning. Loopar som orsakar oproportionerlig värme throttlas upp till 5×. Lär sig kontinuerligt."
+    case .autonomyOff:
+        return "Alla autonoma bakgrundsloopar pausas helt. Eon är fullt intelligent i konversation men utvecklar sig inte självständigt. Minimal CPU-användning."
+    case .cycling:
+        return "Växlar automatiskt: 3 min Maximal (full kognition) → 2 min Autonom av (vila för batteriet) → 5 min Vila (minimal last). Upprepar sedan cykeln."
+    default:
+        return mode.description
     }
 }
 
