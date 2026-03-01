@@ -574,8 +574,9 @@ actor ReasoningEngine {
 
         // Select top branches by score
         let selected = expansions.sorted { $0.1 > $1.1 }.prefix(branching)
-        return selected.enumerated().map { i, (content, baseScore) in
-            ThoughtNode(content: content, depth: node.depth + 1, score: node.score * baseScore)
+        return selected.enumerated().map { _, pair in
+            let (content, baseScore) = pair
+            return ThoughtNode(content: content, depth: node.depth + 1, score: node.score * baseScore)
         }
     }
 

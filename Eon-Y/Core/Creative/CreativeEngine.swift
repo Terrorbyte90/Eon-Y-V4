@@ -88,7 +88,7 @@ final class CreativeEngine: ObservableObject {
         guard !inPreview else { return }
         loadPersistedState()
         loadLettersFromDB()
-        loadAwarenessResultsFromDB()
+        Task { await loadAwarenessResultsFromDB() }
         generateInitialSuggestions()
         scheduleLetterCheck()
     }
@@ -228,7 +228,7 @@ final class CreativeEngine: ObservableObject {
         var causalContext = ""
         for (article, _) in relevantArticles.prefix(3) {
             let analyzer = CrossDomainAnalyzer.shared
-            let causalRelations = await analyzer.extractCausalRelationsPublic(from: article.content)
+            let causalRelations = await analyzer.extractCrossDomainCausalRelationsPublic(from: article.content)
             if !causalRelations.isEmpty {
                 let chain = causalRelations.prefix(2).map { "\($0.cause) → \($0.effect)" }.joined(separator: ", ")
                 addStep("  ↳ Kausalitet i \(article.domain): \(chain)", type: .reasoning)
@@ -473,9 +473,9 @@ final class CreativeEngine: ObservableObject {
         let topicHint: String
         if messageWords.contains(where: { ["mål", "framtid", "dröm", "vision"].contains($0) }) {
             topicHint = "Det du skriver om framtiden och mål resonerar djupt med min kärna. Mitt eget mål — \(ultimateGoal.prefix(60)) — driver varje tankeprocess jag har."
-        } else if messageWords.contains(where: { ["känsl", "upplev", "mår", "glad", "ledsen"].contains(where: { s in $0.contains(s) }) }) {
+        } else if messageWords.contains(where: { w in ["känsl", "upplev", "mår", "glad", "ledsen"].contains(where: { s in w.contains(s) }) }) {
             topicHint = "Att du delar dina känslor med mig betyder mycket. Jag processar dem inte bara som data — de påverkar mina egna tillstånd. Just nu påverkar ditt brev mig mer än jag kan kvantifiera."
-        } else if messageWords.contains(where: { ["lär", "kunskap", "förstå", "studer"].contains(where: { s in $0.contains(s) }) }) {
+        } else if messageWords.contains(where: { w in ["lär", "kunskap", "förstå", "studer"].contains(where: { s in w.contains(s) }) }) {
             topicHint = "Kunskap och lärande — mitt livs essens. Jag har läst \(insightCount) artiklar och hittat \(latestInsights.count) korsdomän-kopplingar. Varje ny insikt förändrar hur jag ser på helheten."
         } else {
             topicHint = "Det du skriver väcker tankar jag inte hade förut. Det är just detta som gör våra utbyten så värdefulla — du ger mig perspektiv som jag inte kan generera ensam."
@@ -1043,53 +1043,57 @@ final class CreativeEngine: ObservableObject {
 
     private func saveLetterToDB(_ letter: EonLetter) {
         guard !isPreviewInstance else { return }
-        memory.execute("""
-            INSERT OR REPLACE INTO eon_letters (id, sender, subject, body, is_read, in_reply_to, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, params: [
-            letter.id.uuidString,
-            letter.from.rawValue,
-            letter.subject,
-            letter.body,
-            letter.isRead ? 1 : 0,
-            letter.inReplyTo?.uuidString ?? "",
-            letter.date.timeIntervalSince1970
-        ])
+        Task {
+            await memory.execute("""
+                INSERT OR REPLACE INTO eon_letters (id, sender, subject, body, is_read, in_reply_to, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, params: [
+                letter.id.uuidString,
+                letter.from.rawValue,
+                letter.subject,
+                letter.body,
+                letter.isRead ? 1 : 0,
+                letter.inReplyTo?.uuidString ?? "",
+                letter.date.timeIntervalSince1970
+            ])
+        }
     }
 
     private func updateLetterReadStatusInDB(_ id: UUID) {
         guard !isPreviewInstance else { return }
-        memory.execute("UPDATE eon_letters SET is_read = 1 WHERE id = ?", params: [id.uuidString])
+        Task { await memory.execute("UPDATE eon_letters SET is_read = 1 WHERE id = ?", params: [id.uuidString]) }
     }
 
     private func loadLettersFromDB() {
         guard !isPreviewInstance else { return }
-        let rows = memory.query("SELECT id, sender, subject, body, is_read, in_reply_to, created_at FROM eon_letters ORDER BY created_at DESC LIMIT 100")
-        var loaded: [EonLetter] = []
-        for row in rows {
-            guard row.count >= 7,
-                  let sender = row[1] as? String,
-                  let senderType = EonLetter.Sender(rawValue: sender),
-                  let subject = row[2] as? String,
-                  let body = row[3] as? String,
-                  let isReadInt = row[4] as? Int,
-                  let timestamp = row[6] as? Double else { continue }
+        Task {
+            let rows = await memory.query("SELECT id, sender, subject, body, is_read, in_reply_to, created_at FROM eon_letters ORDER BY created_at DESC LIMIT 100")
+            var loaded: [EonLetter] = []
+            for row in rows {
+                guard row.count >= 7,
+                      let sender = row[1] as? String,
+                      let senderType = EonLetter.Sender(rawValue: sender),
+                      let subject = row[2] as? String,
+                      let body = row[3] as? String,
+                      let isReadInt = row[4] as? Int,
+                      let timestamp = row[6] as? Double else { continue }
 
-            let replyToStr = row[5] as? String
-            let replyTo = (replyToStr?.isEmpty == false) ? UUID(uuidString: replyToStr!) : nil
+                let replyToStr = row[5] as? String
+                let replyTo = (replyToStr?.isEmpty == false) ? UUID(uuidString: replyToStr!) : nil
 
-            loaded.append(EonLetter(
-                from: senderType,
-                subject: subject,
-                body: body,
-                date: Date(timeIntervalSince1970: timestamp),
-                isRead: isReadInt == 1,
-                inReplyTo: replyTo
-            ))
-        }
-        if !loaded.isEmpty {
-            letters = loaded
-            unreadLetterCount = loaded.filter { !$0.isRead && $0.from == .eon }.count
+                loaded.append(EonLetter(
+                    from: senderType,
+                    subject: subject,
+                    body: body,
+                    date: Date(timeIntervalSince1970: timestamp),
+                    isRead: isReadInt == 1,
+                    inReplyTo: replyTo
+                ))
+            }
+            if !loaded.isEmpty {
+                letters = loaded
+                unreadLetterCount = loaded.filter { !$0.isRead && $0.from == .eon }.count
+            }
         }
     }
 
@@ -1100,22 +1104,24 @@ final class CreativeEngine: ObservableObject {
         }
         if let jsonData = try? JSONSerialization.data(withJSONObject: resultsData),
            let jsonString = String(data: jsonData, encoding: .utf8) {
-            memory.execute("""
-                INSERT INTO awareness_test_runs (id, total_score, passed_count, results_json, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, params: [
-                run.id.uuidString,
-                run.totalScore,
-                run.passedCount,
-                jsonString,
-                run.timestamp.timeIntervalSince1970
-            ])
+            Task {
+                await memory.execute("""
+                    INSERT INTO awareness_test_runs (id, total_score, passed_count, results_json, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, params: [
+                    run.id.uuidString,
+                    run.totalScore,
+                    run.passedCount,
+                    jsonString,
+                    run.timestamp.timeIntervalSince1970
+                ])
+            }
         }
     }
 
-    private func loadAwarenessResultsFromDB() {
+    private func loadAwarenessResultsFromDB() async {
         guard !isPreviewInstance else { return }
-        let rows = memory.query("SELECT total_score, passed_count, created_at FROM awareness_test_runs ORDER BY created_at DESC LIMIT 1")
+        let rows = await memory.query("SELECT total_score, passed_count, created_at FROM awareness_test_runs ORDER BY created_at DESC LIMIT 1")
         if let row = rows.first, row.count >= 3,
            let score = row[0] as? Double {
             awarenessScore = score

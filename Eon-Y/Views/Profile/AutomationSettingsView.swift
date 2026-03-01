@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 // MARK: - AutomationSettingsView
 // Visar och konfigurerar Eons autonoma kognitiva cykler.

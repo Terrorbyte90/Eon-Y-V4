@@ -94,7 +94,7 @@ actor CognitiveCycleEngine {
         await onMonologue(MonologueLine(text: "GPT-SW3 genererar svar (\(intent.rawValue))...", type: .thought))
 
         var generatedText = ""
-        let stream = await neuralEngine.generateStream(prompt: prompt, maxTokens: maxTokens, temperature: temperature)
+        let stream = await neuralEngine.generateStream(prompt: prompt, maxTokens: maxTokens, temperature: Float(temperature))
         for await token in stream {
             generatedText += token
             await onToken(token)
@@ -417,7 +417,7 @@ actor CognitiveCycleEngine {
         let registerHint: String
         switch context.register {
         case .formal:  registerHint = "Använd ett formellt, akademiskt tonläge."
-        case .casual:  registerHint = "Var avslappnad och vardaglig i tonen."
+        case .informal:  registerHint = "Var avslappnad och vardaglig i tonen."
         default:       registerHint = "Anpassa tonen efter användarens stil."
         }
 

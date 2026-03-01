@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 // MARK: - LearningEngine
 // Eons kontinuerliga inlärningssystem.

@@ -293,7 +293,7 @@ actor IntelligenceGapEngine {
         let qualityScore = lengthScore * 0.3 + diversity * 0.35 + density * 0.35
 
         // Gain is proportional to quality and expected gain, with diminishing returns
-        let currentLevel = CognitiveState.shared.dimensionLevel(dimension)
+        let currentLevel = await CognitiveState.shared.dimensionLevel(dimension)
         let diminishingFactor = max(0.3, 1.0 - currentLevel) // Harder to improve at higher levels
         return exercise.expectedGain * qualityScore * diminishingFactor
     }

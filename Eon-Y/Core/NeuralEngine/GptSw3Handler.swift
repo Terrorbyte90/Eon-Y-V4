@@ -171,6 +171,7 @@ actor GptSw3Handler {
 
 // MARK: - EonLanguageSession (Apple Foundation Models wrapper)
 
+#if canImport(FoundationModels)
 import FoundationModels
 
 final class EonLanguageSession {
@@ -249,6 +250,13 @@ final class EonLanguageSession {
         }
     }
 }
+#else
+// Fallback-stub when FoundationModels is not available (Xcode < 26 SDK)
+final class EonLanguageSession {
+    func isAvailable() async -> Bool { return false }
+    func streamResponse(prompt: String, onToken: @escaping (String) async -> Void) async {}
+}
+#endif
 
 // MARK: - NLResponseEngine
 // Resonerande konversationsmotor — fallback när GPT-modell ej är laddad.
@@ -264,10 +272,14 @@ struct NLResponseEngine {
         let input = extractLatestUserInput(from: prompt)
         let history = extractHistory(from: prompt)
         let analysis = SemanticAnalysis.analyze(input, history: history)
+        return ResponseComposer.compose(analysis: analysis, history: history, cognitiveContext: .empty)
+    }
 
-        // Hämta rik kontext från alla kognitiva system
-        let cognitiveContext = buildCognitiveContext(input: input, history: history)
-
+    static func generateAsync(for prompt: String) async -> String {
+        let input = extractLatestUserInput(from: prompt)
+        let history = extractHistory(from: prompt)
+        let analysis = SemanticAnalysis.analyze(input, history: history)
+        let cognitiveContext = await buildCognitiveContext(input: input, history: history)
         return ResponseComposer.compose(analysis: analysis, history: history, cognitiveContext: cognitiveContext)
     }
 
@@ -292,12 +304,12 @@ struct NLResponseEngine {
     }
 
     // Samlar rik kontext från ICA, minne, kunskapsgraf och artiklar
-    static func buildCognitiveContext(input: String, history: [(role: String, text: String)]) -> CognitiveResponseContext {
+    static func buildCognitiveContext(input: String, history: [(role: String, text: String)]) async -> CognitiveResponseContext {
         let state = CognitiveState.shared
         let memory = PersistentMemoryStore.shared
 
         // Hämta relevanta fakta — search by input + extracted nouns + verbs for broader coverage
-        var allFacts = memory.searchFacts(query: input, limit: 10)
+        var allFacts = await memory.searchFacts(query: input, limit: 10)
 
         let tagger = NLTagger(tagSchemes: [.lexicalClass])
         tagger.string = input
@@ -311,7 +323,7 @@ struct NLResponseEngine {
         }
         // Search by each key noun
         for noun in keyNouns.prefix(4) {
-            let nounFacts = memory.searchFacts(query: noun, limit: 4)
+            let nounFacts = await memory.searchFacts(query: noun, limit: 4)
             for fact in nounFacts {
                 if !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate && $0.object == fact.object }) {
                     allFacts.append(fact)
@@ -320,7 +332,7 @@ struct NLResponseEngine {
         }
 
         // Search articles for relevant content
-        let articles = memory.loadAllArticles(limit: 30)
+        let articles = await memory.loadAllArticles(limit: 30)
         let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
         var relevantArticleSummaries: [String] = []
         for article in articles {
@@ -337,18 +349,24 @@ struct NLResponseEngine {
             if relevantArticleSummaries.count >= 3 { break }
         }
 
-        let recentMessages = memory.recentUserMessages(limit: 8)
+        let recentMessages = await memory.recentUserMessages(limit: 8)
 
         // ICA-tillstånd
-        let ii = state.integratedIntelligence
-        let topDims = state.topDimensions(limit: 3).map { $0.0.rawValue }
-        let weakDims = state.weakestDimensions(limit: 2).map { $0.0.rawValue }
-        let hypothesis = state.currentHypothesis
-        let frontier = state.knowledgeFrontier
-        let metacogInsight = state.metacognitiveInsight
-        let causalChain = state.activeReasoningChain
+        let ii = await state.integratedIntelligence
+        let topDims = await state.topDimensions(limit: 3).map { $0.0.rawValue }
+        let weakDims = await state.weakestDimensions(limit: 2).map { $0.0.rawValue }
+        let hypothesis = await state.currentHypothesis
+        let frontier = await state.knowledgeFrontier
+        let metacogInsight = await state.metacognitiveInsight
+        let causalChain = await state.activeReasoningChain
 
-        let reasoningHint = buildReasoningHint(input: input, history: history, state: state)
+        let reasoningHint = buildReasoningHint(
+            input: input, history: history,
+            activeReasoningChain: causalChain,
+            currentHypothesis: hypothesis,
+            knowledgeFrontier: frontier,
+            topDimensions: topDims
+        )
 
         return CognitiveResponseContext(
             facts: allFacts,
@@ -359,39 +377,44 @@ struct NLResponseEngine {
             activeHypothesis: hypothesis,
             knowledgeFrontier: frontier,
             metacognitiveInsight: metacogInsight,
-            articleSummaries: relevantArticleSummaries,
             causalChain: causalChain,
-            reasoningHint: reasoningHint
+            reasoningHint: reasoningHint,
+            articleSummaries: relevantArticleSummaries
         )
     }
 
-    private static func buildReasoningHint(input: String, history: [(role: String, text: String)], state: CognitiveState) -> String {
+    private static func buildReasoningHint(
+        input: String,
+        history: [(role: String, text: String)],
+        activeReasoningChain: [String],
+        currentHypothesis: String,
+        knowledgeFrontier: [String],
+        topDimensions: [String]
+    ) -> String {
         let lower = input.lowercased()
         var hints: [String] = []
 
         // Causal question → use causal chain
         if lower.contains("varför") || lower.contains("orsak") || lower.contains("beror") || lower.contains("anledning") {
-            let chain = state.activeReasoningChain
-            if !chain.isEmpty {
-                hints.append("Kausalkedja: \(chain.joined(separator: " → "))")
+            if !activeReasoningChain.isEmpty {
+                hints.append("Kausalkedja: \(activeReasoningChain.joined(separator: " → "))")
             }
         }
 
         // Hypothetical question → use active hypothesis
         if lower.contains("om") && (lower.contains("hade") || lower.contains("skulle") || lower.contains("tänk")) {
-            let hyp = state.currentHypothesis
-            if !hyp.isEmpty { hints.append("Relevant hypotes: \(hyp)") }
+            if !currentHypothesis.isEmpty { hints.append("Relevant hypotes: \(currentHypothesis)") }
         }
 
         // Knowledge question → use frontier
         if lower.contains("vad") || lower.contains("berätta") || lower.contains("förklara") || lower.contains("hur") {
-            let frontier = state.knowledgeFrontier.prefix(2).joined(separator: ", ")
+            let frontier = knowledgeFrontier.prefix(2).joined(separator: ", ")
             if !frontier.isEmpty { hints.append("Kunskapsfrontier: \(frontier)") }
         }
 
         // Comparison question → note strongest and weakest dimensions
         if lower.contains("jämför") || lower.contains("skillnad") || lower.contains("likhet") {
-            let top = state.topDimensions(limit: 2).map { $0.0.rawValue }.joined(separator: ", ")
+            let top = topDimensions.prefix(2).joined(separator: ", ")
             hints.append("Starkaste förmågor: \(top)")
         }
 
