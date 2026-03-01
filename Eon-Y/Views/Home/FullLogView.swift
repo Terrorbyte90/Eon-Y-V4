@@ -14,6 +14,7 @@ struct FullLogView: View {
     @StateObject private var monitor = FullLogMonitor()
     @State private var copyDone = false
     @State private var autoScroll = true
+    @State private var showHistory = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -22,14 +23,51 @@ struct FullLogView: View {
             VStack(spacing: 0) {
                 header
                 Divider().background(Color.white.opacity(0.06))
-                liveMetricsBar
+                // Tab-väljare: Live / Historik
+                tabPicker
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
                 Divider().background(Color.white.opacity(0.06))
-                logScroll
+
+                if showHistory {
+                    SessionHistoryView()
+                } else {
+                    liveMetricsBar
+                    Divider().background(Color.white.opacity(0.06))
+                    logScroll
+                }
                 bottomBar
             }
         }
         .onAppear { monitor.start(brain: brain) }
         .onDisappear { monitor.stop() }
+    }
+
+    var tabPicker: some View {
+        HStack(spacing: 0) {
+            tabBtn("Live", icon: "waveform", selected: !showHistory) {
+                withAnimation(.easeInOut(duration: 0.2)) { showHistory = false }
+            }
+            tabBtn("Körningshistorik", icon: "clock.arrow.circlepath", selected: showHistory) {
+                withAnimation(.easeInOut(duration: 0.2)) { showHistory = true }
+            }
+        }
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func tabBtn(_ title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 10))
+                Text(title).font(.system(size: 11, weight: selected ? .semibold : .regular))
+            }
+            .foregroundStyle(selected ? .white : .white.opacity(0.4))
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(selected ? Color(hex: "#A78BFA").opacity(0.2) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Header
@@ -192,34 +230,34 @@ struct FullLogView: View {
 
     var bottomBar: some View {
         HStack(spacing: 12) {
-            Button {
-                let text = monitor.entries.map { "[\($0.timeString)] [\($0.category.rawValue)] \($0.text)" }.joined(separator: "\n")
-                UIPasteboard.general.string = text
-                withAnimation { copyDone = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    withAnimation { copyDone = false }
+            if !showHistory {
+                Button {
+                    let text = monitor.entries.map { "[\($0.timeString)] [\($0.category.rawValue)] \($0.text)" }.joined(separator: "\n")
+                    UIPasteboard.general.string = text
+                    withAnimation { copyDone = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        withAnimation { copyDone = false }
+                    }
+                } label: {
+                    Label(copyDone ? "Kopierat!" : "Kopiera live", systemImage: copyDone ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(copyDone ? Color(hex: "#34D399") : .white.opacity(0.75))
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(Color.white.opacity(0.07), in: Capsule())
                 }
-            } label: {
-                Label(copyDone ? "Kopierat!" : "Kopiera allt", systemImage: copyDone ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(copyDone ? Color(hex: "#34D399") : .white.opacity(0.75))
-                    .padding(.horizontal, 18).padding(.vertical, 10)
-                    .background(Color.white.opacity(0.07), in: Capsule())
+                .buttonStyle(.plain)
+
+                Button { monitor.clear() } label: {
+                    Label("Rensa", systemImage: "trash")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color(hex: "#EF4444").opacity(0.8))
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(Color(hex: "#EF4444").opacity(0.08), in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             Spacer()
-
-            Button {
-                monitor.clear()
-            } label: {
-                Label("Rensa", systemImage: "trash")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(hex: "#EF4444").opacity(0.8))
-                    .padding(.horizontal, 18).padding(.vertical, 10)
-                    .background(Color(hex: "#EF4444").opacity(0.08), in: Capsule())
-            }
-            .buttonStyle(.plain)
 
             Button { dismiss() } label: {
                 Label("Stäng", systemImage: "xmark")
@@ -326,8 +364,8 @@ final class FullLogMonitor: ObservableObject {
 
     func start(brain: EonBrain) {
         self.brain = brain
-        entries.append(FullLogEntry(date: Date(), category: .system,
-                                    text: "Full-log startad · Enhet: \(UIDevice.current.model) · iOS \(UIDevice.current.systemVersion) · RAM: \(Int(Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576)) MB"))
+        let startMsg = "Full-log startad · Enhet: \(UIDevice.current.model) · iOS \(UIDevice.current.systemVersion) · RAM: \(Int(Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576)) MB"
+        appendEntry(FullLogEntry(date: Date(), category: .system, text: startMsg))
 
         // Metrics var 1s
         metricTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -339,7 +377,6 @@ final class FullLogMonitor: ObservableObject {
         snapshotTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.appendSnapshot() }
         }
-        // Första snapshot direkt
         appendSnapshot()
 
         // Monolog-observer
@@ -360,9 +397,8 @@ final class FullLogMonitor: ObservableObject {
                     case .memory:      cat = .memory
                     case .insight:     cat = .insight
                     }
-                    self.entries.append(FullLogEntry(date: Date(), category: cat, text: line.text))
+                    self.appendEntry(FullLogEntry(date: Date(), category: cat, text: line.text))
                 }
-                self.trimIfNeeded()
             }
     }
 
@@ -375,7 +411,14 @@ final class FullLogMonitor: ObservableObject {
     func clear() {
         entries.removeAll()
         lastMonologueCount = 0
-        entries.append(FullLogEntry(date: Date(), category: .system, text: "Logg rensad"))
+        appendEntry(FullLogEntry(date: Date(), category: .system, text: "Logg rensad av användaren"))
+    }
+
+    // Centralt tillägg: skriver till UI-listan OCH direkt till disk
+    private func appendEntry(_ entry: FullLogEntry) {
+        entries.append(entry)
+        trimIfNeeded()
+        RunSessionLogger.shared.log(entry.text, category: entry.category.rawValue)
     }
 
     // MARK: - Metrics
@@ -399,8 +442,7 @@ final class FullLogMonitor: ObservableObject {
         if cpu > 0.70 {
             let msg = String(format: "CPU KRITISK: %.1f%% · Termisk: %@ · Läge: %@", cpu * 100, thermalLabel, perfModeLabel)
             if entries.last?.text != msg {
-                entries.append(FullLogEntry(date: Date(), category: .warning, text: msg))
-                trimIfNeeded()
+                appendEntry(FullLogEntry(date: Date(), category: .warning, text: msg))
             }
         }
     }
@@ -436,8 +478,16 @@ final class FullLogMonitor: ObservableObject {
         ─────────────────────────────────────────────────
         """
 
-        entries.append(FullLogEntry(date: Date(), category: .snapshot, text: text))
-        trimIfNeeded()
+        appendEntry(FullLogEntry(date: Date(), category: .snapshot, text: text))
+
+        // Skriv strukturerad snapshot direkt till disk
+        RunSessionLogger.shared.logSnapshot(
+            cpu: cpuNow, ramMB: ramNow, ramPct: totalRAMMB > 0 ? ramNow / totalRAMMB : 0,
+            gpu: gpuNow, thermal: thermalString(thermal) + " " + thermalEmoji(thermal),
+            battery: battStr, mode: "\(mode.displayName) → \(effectiveMode.displayName)",
+            ii: ii, thoughts: thoughts, knowledgeNodes: knowledgeNodes,
+            devProgress: brain?.developmentalProgress ?? 0
+        )
     }
 
     // MARK: - System reads

@@ -154,6 +154,8 @@ final class EonBrain: ObservableObject {
         autonomousProcessLabel = "Startar kognitivt system..."
         // Starta resursdiagnostik-loggning
         ResourceDiagnosticsLogger.shared.start()
+        // Starta ny körningssession — crash-säker logg till disk
+        RunSessionLogger.shared.startNewSession()
         startHeartbeat()
         startCognitiveSystems()
     }
