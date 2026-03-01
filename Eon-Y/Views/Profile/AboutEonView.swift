@@ -190,6 +190,23 @@ struct AboutEonView: View {
                         arousal, precis som i biologiska system.
                         """)
 
+                        subSectionTitle("Eon-läge — Motorstyrning")
+
+                        aboutText("""
+                        När "Eon-läge" är aktivt får Eon inflytande (inte kontroll) över \
+                        sina kognitiva motorer. Baserat på kroppsbudgetens valens, arousal \
+                        och termisk status bestämmer Eon vilka motorer som ska köra snabbare \
+                        eller långsammare. Sju motorer regleras: medvetande, tankar, \
+                        orkestrator, metakognition, pelare, autonomi och inlärning.
+
+                        Säkerhetsspärrar: Ingen motor kan stängas av helt (minimum 20%) \
+                        eller överdrivas (maximum 150%). Om Eon konsekvent underdrivs \
+                        (depressionsmönster) aktiveras en säkerhetsöverride som normaliserar \
+                        alla hastigheter. Termisk .critical tvingar också säkerhetsläge.
+
+                        "Motorrummet" visar alla beslut, hastigheter och resonemang i realtid.
+                        """)
+
                         Divider().background(Color.white.opacity(0.08))
 
                         // MARK: - Del 3: Hur allt hänger ihop
