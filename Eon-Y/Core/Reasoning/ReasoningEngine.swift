@@ -298,12 +298,39 @@ actor ReasoningEngine {
 
     private func selectBestStrategy(for input: String) -> ReasoningStrategy {
         let lower = input.lowercased()
-        if lower.contains("varför") || lower.contains("orsak") || lower.contains("beror") { return .causal }
-        if lower.contains("om") && lower.contains("hade") { return .counterfactual }
-        if lower.contains("liknar") || lower.contains("som") && lower.contains("precis") { return .analogical }
-        if lower.contains("alla") || lower.contains("generellt") || lower.contains("mönster") { return .inductive }
-        if lower.contains("slutsats") || lower.contains("bevis") || lower.contains("därför") { return .deductive }
-        if lower.contains("förklara") || lower.contains("vad är") { return .abductive }
+        let wordCount = lower.split(separator: " ").count
+
+        // Causal reasoning — "why" questions
+        if lower.contains("varför") || lower.contains("orsak") || lower.contains("beror") || lower.contains("leder till") || lower.contains("konsekvens") { return .causal }
+
+        // Counterfactual — hypothetical scenarios
+        if lower.contains("om") && (lower.contains("hade") || lower.contains("skulle")) { return .counterfactual }
+        if lower.contains("tänk om") || lower.contains("vad hade hänt") { return .counterfactual }
+
+        // Analogical — comparison and similarity
+        if lower.contains("liknar") || lower.contains("jämför") || lower.contains("skillnad") || lower.contains("gemensamt") { return .analogical }
+        if lower.contains("precis som") || lower.contains("påminner om") { return .analogical }
+
+        // Inductive — patterns and generalizations
+        if lower.contains("alla") || lower.contains("generellt") || lower.contains("mönster") || lower.contains("trend") { return .inductive }
+
+        // Deductive — logical inference
+        if lower.contains("slutsats") || lower.contains("bevis") || lower.contains("därför") || lower.contains("logiskt") { return .deductive }
+        if lower.contains("givet att") || lower.contains("om vi antar") { return .deductive }
+
+        // Abductive — best explanation
+        if lower.contains("förklara") || lower.contains("vad är") || lower.contains("hur kan det") { return .abductive }
+
+        // For complex multi-sentence inputs, use Tree-of-Thought
+        if wordCount > 15 { return .treeOfThought }
+
+        // Check reasoning history — prefer strategies that have been effective
+        let recentStrategies = reasoningHistory.suffix(10).map { $0.strategy }
+        let leastUsed: [ReasoningStrategy] = [.analogical, .counterfactual, .inductive]
+        for strategy in leastUsed {
+            if !recentStrategies.contains(strategy) { return strategy }
+        }
+
         return .treeOfThought
     }
 
@@ -381,11 +408,25 @@ actor ReasoningEngine {
     }
 
     private func deriveConclusion(from p1: String, and p2: String) -> String {
-        let words1 = Set(p1.lowercased().split(separator: " ").map(String.init))
-        let words2 = Set(p2.lowercased().split(separator: " ").map(String.init))
+        let stopwords: Set<String> = ["och", "i", "att", "det", "en", "ett", "är", "av", "för", "med", "på", "som", "den", "till", "har", "de", "inte", "om", "var"]
+        let words1 = Set(p1.lowercased().split(separator: " ").map(String.init).filter { $0.count > 3 && !stopwords.contains($0) })
+        let words2 = Set(p2.lowercased().split(separator: " ").map(String.init).filter { $0.count > 3 && !stopwords.contains($0) })
         let shared = words1.intersection(words2)
-        if shared.isEmpty { return "Ingen direkt koppling mellan premisserna" }
-        return "Givet '\(p1)' och '\(p2)': \(shared.joined(separator: ", ")) är centralt"
+
+        if shared.isEmpty {
+            // Try causal graph for indirect connection
+            let concept1 = extractMainConcept(p1)
+            let concept2 = extractMainConcept(p2)
+            let effects1 = causalGraph.findEffects(of: concept1)
+            let causes2 = causalGraph.findCauses(of: concept2)
+            let bridge = Set(effects1).intersection(Set(causes2))
+            if !bridge.isEmpty {
+                return "Indirekt koppling via \(bridge.first!): \(concept1) → \(bridge.first!) → \(concept2)"
+            }
+            return "Premisserna berör olika aspekter som kan komplettera varandra"
+        }
+        let key = shared.sorted { $0.count > $1.count }.first ?? shared.first!
+        return "Genom \(key): \(String(p1.prefix(40))) kopplas till \(String(p2.prefix(40)))"
     }
 
     private func findPatterns(in observations: [String]) -> [String] {
@@ -403,12 +444,37 @@ actor ReasoningEngine {
 
     private func generateHypotheses(for observation: String, count: Int) -> [Hypothesis] {
         let concept = extractMainConcept(observation)
-        return [
-            Hypothesis(statement: "\(concept) orsakas av strukturella faktorer", plausibility: 0.75),
-            Hypothesis(statement: "\(concept) är ett emergent fenomen", plausibility: 0.60),
-            Hypothesis(statement: "\(concept) beror på kontextuella variabler", plausibility: 0.65),
-            Hypothesis(statement: "\(concept) är ett slumpmässigt fenomen", plausibility: 0.25),
-        ].prefix(count).map { $0 }
+        let causes = causalGraph.findCauses(of: concept)
+        let effects = causalGraph.findEffects(of: concept)
+
+        var hypotheses: [Hypothesis] = []
+
+        // Evidence-based hypothesis from causal graph
+        if !causes.isEmpty {
+            let causeStr = causes.prefix(2).joined(separator: " och ")
+            hypotheses.append(Hypothesis(statement: "\(concept) orsakas primärt av \(causeStr)", plausibility: 0.80))
+        }
+        if !effects.isEmpty {
+            let effectStr = effects.prefix(2).joined(separator: " och ")
+            hypotheses.append(Hypothesis(statement: "\(concept) leder till \(effectStr) via kausala mekanismer", plausibility: 0.75))
+        }
+
+        // Structural hypothesis
+        hypotheses.append(Hypothesis(statement: "\(concept) är ett emergent fenomen som uppstår ur komplexa interaktioner", plausibility: 0.60))
+
+        // Contextual hypothesis
+        hypotheses.append(Hypothesis(statement: "\(concept) beror på kontextuella variabler som varierar mellan domäner", plausibility: 0.55))
+
+        // Analogical hypothesis — check if analogies suggest cross-domain links
+        let analogies = findAnalogies(for: concept)
+        if let first = analogies.first {
+            hypotheses.append(Hypothesis(statement: "\(concept) uppvisar liknande mönster som \(first.target) (\(first.inference))", plausibility: first.strength))
+        }
+
+        // Null hypothesis
+        hypotheses.append(Hypothesis(statement: "Observerade mönster i \(concept) kan förklaras av slumpmässig variation", plausibility: 0.20))
+
+        return Array(hypotheses.sorted { $0.plausibility > $1.plausibility }.prefix(count))
     }
 
     private func findAnalogies(for concept: String) -> [StructuralAnalogy] {
@@ -481,15 +547,35 @@ actor ReasoningEngine {
     }
 
     private func expandThought(_ node: ThoughtNode, branching: Int) -> [ThoughtNode] {
-        let expansions = [
-            "Vad innebär detta för \(node.content)?",
-            "Vad är konsekvensen av \(node.content)?",
-            "Hur relaterar \(node.content) till bredare kontext?",
-            "Vad är alternativet till \(node.content)?",
-            "Vad är den djupaste implikationen av \(node.content)?",
-        ]
-        return expansions.prefix(branching).enumerated().map { i, exp in
-            ThoughtNode(content: exp, depth: node.depth + 1, score: node.score * (0.9 - Double(i) * 0.05))
+        let concept = extractMainConcept(node.content)
+        let causes = causalGraph.findCauses(of: concept)
+        let effects = causalGraph.findEffects(of: concept)
+
+        var expansions: [(String, Double)] = []
+
+        // Causal expansion — use actual graph knowledge
+        if !causes.isEmpty {
+            expansions.append(("\(concept) drivs av \(causes.prefix(2).joined(separator: " och ")) — vilka mekanismer?", 0.92))
+        }
+        if !effects.isEmpty {
+            expansions.append(("Om \(concept) förstärks: effekt på \(effects.prefix(2).joined(separator: ", "))", 0.88))
+        }
+
+        // Analogy expansion
+        let analogies = findAnalogies(for: concept)
+        if let a = analogies.first {
+            expansions.append(("Analogi: \(concept) ↔ \(a.target) — \(a.inference)", a.strength))
+        }
+
+        // Standard expansions for remaining slots
+        expansions.append(("Vad är den djupaste implikationen av \(concept)?", 0.80))
+        expansions.append(("Alternativt perspektiv: hur ser \(concept) ut från motsatt ståndpunkt?", 0.75))
+        expansions.append(("Kontrafaktiskt: vad om \(concept) inte existerade?", 0.70))
+
+        // Select top branches by score
+        let selected = expansions.sorted { $0.1 > $1.1 }.prefix(branching)
+        return selected.enumerated().map { i, (content, baseScore) in
+            ThoughtNode(content: content, depth: node.depth + 1, score: node.score * baseScore)
         }
     }
 

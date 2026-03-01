@@ -297,11 +297,52 @@ actor MetacognitionCore {
             ))
         }
 
+        // Cross-dimension synergy detection
+        let dimensions = await state.dimensions
+        let causalInfluences = await state.causalInfluences
+        // Find pairs of dimensions that grow together (positive synergy)
+        let growing = audit.growingDimensions
+        if growing.count >= 2 {
+            // Check if growing dimensions have causal links
+            for i in 0..<min(growing.count - 1, 3) {
+                for j in (i+1)..<min(growing.count, 4) {
+                    let linked = causalInfluences.contains { inf in
+                        (inf.from == growing[i] && inf.to == growing[j]) ||
+                        (inf.from == growing[j] && inf.to == growing[i])
+                    }
+                    if linked {
+                        insights.append(MetacognitiveInsight(
+                            type: .growth,
+                            content: "Synergi detekterad: \(growing[i].rawValue) och \(growing[j].rawValue) förstärker varandra. Fortsätt investera i båda.",
+                            confidence: 0.80,
+                            actionable: true
+                        ))
+                        break  // One synergy insight per cycle
+                    }
+                }
+            }
+        }
+
+        // Bottleneck detection — dimension that blocks many others
+        let stagnated = audit.stagnatedDimensions
+        for dim in stagnated.prefix(2) {
+            let downstream = causalInfluences.filter { $0.from == dim && $0.strength > 0.15 }
+            if downstream.count >= 3 {
+                let blockedNames = downstream.prefix(3).map { $0.to.rawValue }.joined(separator: ", ")
+                insights.append(MetacognitiveInsight(
+                    type: .biasDetected,
+                    content: "Flaskhals: \(dim.rawValue) (stagnerad) blockerar \(downstream.count) dimensioner: \(blockedNames). Prioritera denna dimension.",
+                    confidence: 0.85,
+                    actionable: true
+                ))
+            }
+        }
+
         // Insikt om bias
-        for bias in biases where bias.severity == .high {
+        for bias in biases where bias.severity == .high || bias.severity == .medium {
             insights.append(MetacognitiveInsight(
                 type: .biasDetected,
-                content: "Kritisk bias: \(bias.description). Åtgärd: \(bias.recommendation)",
+                content: "Bias (\(bias.severity == .high ? "kritisk" : "medel")): \(bias.description). Åtgärd: \(bias.recommendation)",
                 confidence: 0.75,
                 actionable: true
             ))
@@ -315,6 +356,22 @@ actor MetacognitionCore {
             confidence: 0.95,
             actionable: false
         ))
+
+        // Trend-based prediction
+        if totalReflections > 10 {
+            let recentAudits = cognitiveAuditLog.suffix(5)
+            let recentVelocities = recentAudits.map { $0.growthVelocity }
+            let avgVelocity = recentVelocities.reduce(0, +) / max(1, Double(recentVelocities.count))
+            if avgVelocity > 0 {
+                let projectedII = ii + avgVelocity * 60 // 60 minutes
+                insights.append(MetacognitiveInsight(
+                    type: .statusUpdate,
+                    content: "Trend: II projiceras till \(String(format: "%.3f", min(0.95, projectedII))) om 1h (nuvarande tillväxt \(String(format: "%.5f", avgVelocity))/min).",
+                    confidence: 0.65,
+                    actionable: false
+                ))
+            }
+        }
 
         // Uppdatera självmodell om tillräckligt med data
         if totalReflections % 20 == 0 {

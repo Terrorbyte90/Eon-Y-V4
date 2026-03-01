@@ -103,6 +103,29 @@ actor LearningEngine {
         }
     }
 
+    // MARK: - Domain Interaction Matrix
+    // Models how learning in one domain accelerates learning in related domains
+    private let domainInteractions: [String: [(target: String, strength: Double)]] = [
+        "Morfologi":           [("Syntax", 0.6), ("Semantik", 0.4), ("Diskurs", 0.2)],
+        "Syntax":              [("Morfologi", 0.5), ("Pragmatik", 0.4), ("Semantik", 0.3)],
+        "Semantik":            [("Pragmatik", 0.5), ("Morfologi", 0.3), ("Kognitionsvetenskap", 0.2)],
+        "Pragmatik":           [("Diskurs", 0.6), ("Semantik", 0.4), ("Psykologi", 0.3)],
+        "Diskurs":             [("Pragmatik", 0.5), ("Semantik", 0.3)],
+        "Kausalitet":          [("Filosofi", 0.5), ("Kognitionsvetenskap", 0.4), ("Naturvetenskap", 0.3)],
+        "AI & Maskininlärning":[("Kognitionsvetenskap", 0.5), ("Filosofi", 0.3), ("Epistemologi", 0.2)],
+        "Kognitionsvetenskap": [("Psykologi", 0.6), ("Metakognition", 0.5), ("AI & Maskininlärning", 0.3)],
+        "Metakognition":       [("Kognitionsvetenskap", 0.5), ("Epistemologi", 0.4), ("Psykologi", 0.3)],
+        "Filosofi":            [("Epistemologi", 0.7), ("Kausalitet", 0.4), ("Psykologi", 0.2)],
+        "Epistemologi":        [("Filosofi", 0.6), ("Metakognition", 0.4), ("Kausalitet", 0.3)],
+        "Historia":            [("Filosofi", 0.3), ("Psykologi", 0.2)],
+        "Psykologi":           [("Kognitionsvetenskap", 0.5), ("Filosofi", 0.3), ("Metakognition", 0.3)],
+        "Naturvetenskap":      [("Kausalitet", 0.4), ("Epistemologi", 0.3)],
+        "Analogibyggande":     [("Kognitionsvetenskap", 0.4), ("Kausalitet", 0.3), ("Filosofi", 0.2)],
+    ]
+
+    // Track topic depth per domain — how deep we've gone into each topic
+    private var topicDepthTracker: [String: [String: Int]] = [:] // domain -> topic -> depth level
+
     // MARK: - Inlärningscykel
 
     func runLearningCycle() async -> LearningCycleResult {
@@ -115,9 +138,10 @@ actor LearningEngine {
         // 2. Välj vad som ska studeras (FSRS-baserat)
         let dueItems = getDueItems()
 
-        // 3. Studera och uppdatera kompetens
+        // 3. Studera och uppdatera kompetens (adaptive batch size based on gap urgency)
+        let batchSize = gaps.first.map { $0.urgency > 1.5 ? 7 : 5 } ?? 5
         var studiedItems: [String] = []
-        for item in dueItems.prefix(5) {
+        for item in dueItems.prefix(batchSize) {
             await studyItem(item)
             studiedItems.append(item.topic)
         }
@@ -125,7 +149,10 @@ actor LearningEngine {
         // 4. Generera ny kunskap från luckor
         let newKnowledge = await generateKnowledgeForGaps(gaps.prefix(3).map { $0 })
 
-        // 5. Uppdatera LoRA-simulering
+        // 5. Propagate cross-domain learning via interaction matrix
+        await propagateDomainInteractions(studiedDomains: Set(dueItems.prefix(batchSize).compactMap { $0.domain }))
+
+        // 6. Uppdatera LoRA-simulering
         if totalLearningCycles % 10 == 0 {
             loraSimVersion += 1
         }
@@ -139,6 +166,24 @@ actor LearningEngine {
         )
     }
 
+    /// Propagate learning gains across related domains
+    private func propagateDomainInteractions(studiedDomains: Set<String>) async {
+        for domain in studiedDomains {
+            guard let interactions = domainInteractions[domain],
+                  let sourceLevel = competencyBook[domain]?.level else { continue }
+            for interaction in interactions {
+                guard var target = competencyBook[interaction.target] else { continue }
+                // Transfer is proportional to source level, interaction strength, and target room to grow
+                let roomToGrow = 1.0 - target.level
+                let transfer = sourceLevel * interaction.strength * roomToGrow * 0.003
+                if transfer > 0.0005 {
+                    target.level = min(0.95, target.level + transfer)
+                    competencyBook[interaction.target] = target
+                }
+            }
+        }
+    }
+
     // MARK: - FSRS (Free Spaced Repetition Scheduler)
 
     private func getDueItems() -> [FSRSItem] {
@@ -149,51 +194,55 @@ actor LearningEngine {
     private func studyItem(_ item: FSRSItem) async {
         guard let idx = fsrsItems.firstIndex(where: { $0.id == item.id }) else { return }
 
-        // FSRS-algoritm: rating baseras på faktisk review-historik, inte slump
-        // Rating 1.0 = perfekt, 0.6 = svårt men ihågkommet, 0.0 = glömt
         let reviewCount = fsrsItems[idx].reviewCount
         let lastReview = fsrsItems[idx].lastReview
         let daysSinceLast = lastReview.map { Date().timeIntervalSince($0) / 86400 } ?? 1.0
 
-        // FSRS-4.5 förenklad: rating baseras på hur länge sedan senaste review
-        // Om vi studerar i tid → hög rating; om försenat → lägre
+        // Rating based on timeliness of review
         let scheduledInterval = fsrsItems[idx].dueDate.timeIntervalSince(lastReview ?? Date()) / 86400
         let actualInterval = daysSinceLast
         let rating: Double
         if scheduledInterval <= 0 {
-            rating = 0.9  // Nytt item, antag bra
+            rating = 0.9
         } else {
             let ratio = actualInterval / max(scheduledInterval, 1.0)
-            rating = ratio <= 1.2 ? 0.9 : ratio <= 2.0 ? 0.7 : 0.5  // I tid, lite sent, mycket sent
+            rating = ratio <= 1.2 ? 0.9 : ratio <= 2.0 ? 0.7 : ratio <= 3.0 ? 0.4 : 0.2
         }
 
-        // FSRS-4.5 stabilitetsfunktion: S_new = S * e^(w * (rating - d))
-        // w=0.14 (FSRS-4.5 parameter), d=difficulty
+        // FSRS-4.5 stability update
         let w = 0.14
-        let difficulty = fsrsItems[idx].difficulty
+        var difficulty = fsrsItems[idx].difficulty
         let newStability = max(0.1, fsrsItems[idx].stability * exp(w * (rating - difficulty)))
 
-        // FSRS korrekt intervalformel: I = S * (-ln(R_target)) / ln(0.9) ≈ S * 10.5
-        // ln(0.9) = -0.10536, så I = S * (-(-0.10536)) / (-0.10536) = S
-        // Korrekt: I(r=0.9) = S * ln(0.9) / ln(0.9) = S — men det är inte rätt.
-        // FSRS-4.5 spec: I = (R^(1/S) - 1) / (R^(1/S) - R) — förenkling: I = S * 9 * (1-r) + 1
-        // Praktisk FSRS-4.5: interval = S * retrievability_factor
+        // Adaptive difficulty: difficulty converges toward actual performance
+        // High ratings → easier, low ratings → harder
+        let difficultyDelta = 0.1 * (0.7 - rating) // rating < 0.7 increases difficulty
+        difficulty = min(1.0, max(0.05, difficulty + difficultyDelta))
+
+        // FSRS interval: I = S * 9 * (1 - R_target) + 1
         let targetRetention = 0.9
-        // Korrekt FSRS: I = S * ln(targetRetention) / ln(0.9) — men ln(0.9)/ln(0.9)=1 alltid.
-        // Rätt formel är: I = -S * ln(targetRetention) (eftersom ln(0.9) < 0)
-        let interval = max(1.0, newStability * (-log(targetRetention)))
+        let interval = max(1.0, newStability * 9.0 * (1.0 - targetRetention) + 1.0)
 
         fsrsItems[idx].stability = newStability
+        fsrsItems[idx].difficulty = difficulty
         fsrsItems[idx].dueDate = Date().addingTimeInterval(interval * 86400)
         fsrsItems[idx].reviewCount = reviewCount + 1
         fsrsItems[idx].lastReview = Date()
 
-        // Uppdatera kompetens baserat på faktisk rating och antal reviews
+        // Track topic depth: each successful review deepens understanding
+        if let domain = fsrsItems[idx].domain, rating >= 0.7 {
+            var domainDepth = topicDepthTracker[domain] ?? [:]
+            let currentDepth = domainDepth[item.topic] ?? 0
+            domainDepth[item.topic] = min(5, currentDepth + 1) // Max depth level 5
+            topicDepthTracker[domain] = domainDepth
+        }
+
+        // Update competency based on rating, review count, and mastery trajectory
         if let domain = fsrsItems[idx].domain {
-            let learningBoost = 0.005 * rating * (1.0 - (competencyBook[domain]?.level ?? 0.3))
+            let masteryFactor = min(1.0, Double(reviewCount + 1) / 5.0) // Full mastery after 5 reviews
+            let learningBoost = 0.005 * rating * masteryFactor * (1.0 - (competencyBook[domain]?.level ?? 0.3))
             competencyBook[domain]?.level = min(0.99, (competencyBook[domain]?.level ?? 0.05) + learningBoost)
             competencyBook[domain]?.lastStudied = Date()
-            // Persistera
             if let level = competencyBook[domain]?.level {
                 UserDefaults.standard.set(level, forKey: "competency_\(domain)")
             }
@@ -215,12 +264,50 @@ actor LearningEngine {
 
     // MARK: - Kunskapsluckor
 
+    // Prerequisite chains: domain A should be learned before domain B
+    private let prerequisites: [String: [String]] = [
+        "Syntax": ["Morfologi"],
+        "Pragmatik": ["Semantik", "Syntax"],
+        "Diskurs": ["Pragmatik"],
+        "Metakognition": ["Kognitionsvetenskap"],
+        "Epistemologi": ["Filosofi"],
+        "Analogibyggande": ["Semantik", "Kausalitet"],
+    ]
+
     private func identifyKnowledgeGaps() -> [KnowledgeGap] {
         var gaps: [KnowledgeGap] = []
 
         for (domain, competency) in competencyBook {
-            if competency.level < 0.5 {
-                let urgency = (0.5 - competency.level) * 2.0
+            // Dynamic threshold: lower for foundational domains, higher for advanced
+            let isFoundational = ["Morfologi", "Semantik", "Filosofi", "Kognitionsvetenskap"].contains(domain)
+            let threshold = isFoundational ? 0.6 : 0.5
+
+            if competency.level < threshold {
+                var urgency = (threshold - competency.level) * 2.0
+
+                // Boost urgency if this domain is a prerequisite for other domains the user is trying to learn
+                if let dependents = domainInteractions[domain] {
+                    for dep in dependents {
+                        if let depLevel = competencyBook[dep.target]?.level, depLevel > competency.level {
+                            // Dependent domain is ahead of prerequisite — urgency boost
+                            urgency += dep.strength * 0.5
+                        }
+                    }
+                }
+
+                // Penalize urgency if prerequisites are unmet (learn foundation first)
+                if let prereqs = prerequisites[domain] {
+                    let unmetPrereqs = prereqs.filter { (competencyBook[$0]?.level ?? 0) < 0.3 }
+                    if !unmetPrereqs.isEmpty {
+                        urgency *= 0.5 // Halve urgency — learn prereqs first
+                    }
+                }
+
+                // Factor in staleness: domains not studied recently get urgency boost
+                let daysSinceStudied = Date().timeIntervalSince(competency.lastStudied) / 86400
+                if daysSinceStudied > 7 { urgency += 0.2 }
+                if daysSinceStudied > 30 { urgency += 0.3 }
+
                 gaps.append(KnowledgeGap(
                     domain: domain,
                     currentLevel: competency.level,
@@ -344,20 +431,54 @@ actor LearningEngine {
     // MARK: - Meta-learning
 
     func metaLearnFromConversation(userMessage: String, eonResponse: String, feedback: Double) async {
-        // Identifiera domän
-        let domain = detectDomain(from: userMessage + " " + eonResponse)
+        // Detect all relevant domains (not just the best one)
+        let primaryDomain = detectDomain(from: userMessage + " " + eonResponse)
+        let secondaryDomain = detectDomain(from: userMessage) // Sometimes user's question and response diverge
 
-        // Uppdatera kompetens baserat på feedback
-        if var competency = competencyBook[domain] {
-            let delta = (feedback - 0.5) * 0.05
-            competency.level = min(0.99, max(0.01, competency.level + delta))
-            competencyBook[domain] = competency
+        // Update competency with scaled feedback
+        // Good feedback reinforces; bad feedback triggers active learning
+        for domain in Set([primaryDomain, secondaryDomain]) {
+            if var competency = competencyBook[domain] {
+                let delta: Double
+                if feedback >= 0.7 {
+                    // Strong positive: scale by how far from mastery
+                    delta = (feedback - 0.5) * 0.05 * (1.0 - competency.level)
+                } else if feedback >= 0.4 {
+                    // Neutral: minimal change
+                    delta = (feedback - 0.5) * 0.02
+                } else {
+                    // Negative: competency can decrease (previously only ratcheted up)
+                    delta = (feedback - 0.5) * 0.04
+                }
+                competency.level = min(0.99, max(0.01, competency.level + delta))
+                competency.lastStudied = Date()
+                competencyBook[domain] = competency
+                UserDefaults.standard.set(competency.level, forKey: "competency_\(domain)")
+            }
         }
 
-        // Lägg till FSRS-item för svaga punkter
+        // Add FSRS items for weak points — with difficulty proportional to failure
         if feedback < 0.5 {
             let topic = extractMainTopic(from: userMessage)
-            addFSRSItem(topic: topic, domain: domain, initialDifficulty: 0.7)
+            let difficulty = min(0.95, 0.5 + (0.5 - feedback)) // Worse feedback → harder item
+            addFSRSItem(topic: topic, domain: primaryDomain, initialDifficulty: difficulty)
+
+            // Also save the gap as a fact for future reference
+            await PersistentMemoryStore.shared.saveFact(
+                subject: primaryDomain,
+                predicate: "svagt_område",
+                object: topic,
+                confidence: 1.0 - feedback,
+                source: "meta_learning"
+            )
+        }
+
+        // Strong positive feedback → mark topic as well-understood
+        if feedback >= 0.8 {
+            let topic = extractMainTopic(from: userMessage)
+            var domainDepth = topicDepthTracker[primaryDomain] ?? [:]
+            domainDepth[topic] = max(domainDepth[topic] ?? 0, 3) // Mark as intermediate+
+            topicDepthTracker[primaryDomain] = domainDepth
         }
     }
 
@@ -417,18 +538,50 @@ actor LearningEngine {
     }
 
     private func extractMainTopic(from text: String) -> String {
-        // Use NLTagger to find the most significant noun
         let tagger = NLTagger(tagSchemes: [.lexicalClass])
         tagger.string = text
-        var nouns: [String] = []
+        var nouns: [(word: String, position: Int)] = []
+        var verbs: [String] = []
+        var position = 0
         tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, range in
-            if tag == .noun {
-                let word = String(text[range])
-                if word.count > 3 { nouns.append(word) }
+            let word = String(text[range])
+            if tag == .noun && word.count > 3 {
+                nouns.append((word, position))
+            } else if tag == .verb && word.count > 3 {
+                verbs.append(word)
             }
+            position += 1
             return true
         }
-        return nouns.first ?? String(text.prefix(30).split(separator: " ").filter { $0.count > 4 }.first ?? "okänt ämne")
+
+        // Prefer longer nouns (more specific) and earlier position
+        let scored = nouns.map { noun -> (String, Double) in
+            let lengthScore = min(1.0, Double(noun.word.count) / 10.0)
+            let positionScore = 1.0 / (1.0 + Double(noun.position) * 0.2) // Earlier = better
+            return (noun.word, lengthScore + positionScore)
+        }.sorted { $0.1 > $1.1 }
+
+        if let best = scored.first {
+            // Combine top noun with verb for richer topic description
+            if let verb = verbs.first, verb != best.0 {
+                return "\(verb) \(best.0)"
+            }
+            return best.0
+        }
+        return String(text.prefix(30).split(separator: " ").filter { $0.count > 4 }.first ?? "okänt ämne")
+    }
+
+    /// Get the current depth for a topic in a domain (0 = never studied, 5 = mastered)
+    func topicDepth(domain: String, topic: String) -> Int {
+        topicDepthTracker[domain]?[topic] ?? 0
+    }
+
+    /// Get domains that have stalled (no progress in recent cycles)
+    func stalledDomains(staleDays: Double = 7.0) -> [DomainCompetency] {
+        let threshold = Date().addingTimeInterval(-staleDays * 86400)
+        return competencyBook.values
+            .filter { $0.lastStudied < threshold && $0.level < 0.7 }
+            .sorted { $0.level < $1.level }
     }
 }
 
