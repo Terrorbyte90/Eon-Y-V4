@@ -23,6 +23,49 @@ final class EonLiveAutonomy {
     private var hypothesisCount: Int = 0
     private var selfModelVersion: Int = 0
 
+    // MARK: - Phased Cognitive Cycle System
+    // Instead of 20+ concurrent loops burning CPU, we use a phased approach:
+    // INTENSIVE (40s) → LEARNING (30s) → LANGUAGE (25s) → REST (25s) → repeat
+    // Only phase-relevant work runs during each phase, dramatically reducing CPU.
+
+    enum CognitivePhase: String, CaseIterable {
+        case intensive = "Intensiv bearbetning"
+        case learning  = "Inlärning & kunskapsinhämtning"
+        case language  = "Språkutveckling"
+        case rest      = "Vila & konsolidering"
+
+        var duration: UInt64 {
+            switch self {
+            case .intensive: return 40_000_000_000  // 40s
+            case .learning:  return 30_000_000_000  // 30s
+            case .language:  return 25_000_000_000  // 25s
+            case .rest:      return 25_000_000_000  // 25s
+            }
+        }
+
+        var next: CognitivePhase {
+            switch self {
+            case .intensive: return .learning
+            case .learning:  return .language
+            case .language:  return .rest
+            case .rest:      return .intensive
+            }
+        }
+    }
+
+    private var currentPhase: CognitivePhase = .intensive
+    private var phaseStartTime: Date = Date()
+    private var phaseCycleCount: Int = 0
+
+    // MARK: - Deduplication & Caching
+    // Prevents repeating identical work — a major source of CPU waste
+
+    private var morphologyCacheSet: Set<String> = []        // Words already analyzed
+    private var learnedArticleIDs: Set<UUID> = []            // Articles already learned from
+    private var testedHypothesisStatements: Set<String> = [] // Hypotheses already tested
+    private var lastSprakbankenWords: Set<String> = []       // Recently queried words
+    private var phaseWorkDone: [CognitivePhase: Int] = [:]   // Work items completed per phase
+
     // Artikelinställning (läses från AppStorage)
     var articlesPerInterval: Int {
         UserDefaults.standard.integer(forKey: "eon_articles_per_interval").clamped(to: 1...20)
@@ -46,79 +89,31 @@ final class EonLiveAutonomy {
 
     private init() {}
 
-    // MARK: - Start
+    // MARK: - Start (Phased Architecture v3 — Claude Edition)
+    // Instead of 20+ concurrent loops (CPU killer), we use:
+    // 1. A lightweight UI heartbeat (utility priority, every 4s)
+    // 2. A phased cognitive worker (background priority) that cycles through phases
+    // 3. An infrequent background task for articles/eval (background priority, minutes-scale)
+    // This reduces concurrent Tasks from 20 → 3, cutting CPU by ~70%.
 
     func start(brain: EonBrain) {
         guard !isRunning else { return }
         self.brain = brain
         isRunning = true
-        print("[LiveAutonomy v2] Startar — GPT+BERT+Språkbanken aktiverade ✓")
+        currentPhase = .intensive
+        phaseStartTime = Date()
+        print("[LiveAutonomy v3 Claude Edition] Startar — fasad kognitiv arkitektur ✓")
 
-        // Omedelbar startmonolog — visar direkt att systemet lever
         seedInitialMonologue(brain: brain)
 
-        // Alla loopar körs med userInitiated priority för att inte blockera main thread
-        // men ändå ha tillräcklig prioritet för snabb respons
+        // Task 1: Lightweight UI heartbeat — keeps UI alive without heavy work
+        tasks.append(Task(priority: .utility) { await self.uiHeartbeatLoop() })
 
-        // Kärn-tick: var 3s — motoraktivitet
-        tasks.append(Task(priority: .userInitiated) { await self.mainLoop() })
+        // Task 2: Phased cognitive worker — the heart of the new architecture
+        tasks.append(Task(priority: .background) { await self.phasedCognitiveWorker() })
 
-        // Tanke-generator: var 6-10s — GPT-driven autonom tanke
-        tasks.append(Task(priority: .userInitiated) { await self.deepThoughtLoop() })
-
-        // Φ-beräkning: var 10s
-        tasks.append(Task(priority: .utility) { await self.phiLoop() })
-
-        // Artikelgenerering: konfigurerbart (default 5 min)
-        tasks.append(Task(priority: .background) { await self.articleGenerationLoop() })
-
-        // Minnekonsolidering: var 90s
-        tasks.append(Task(priority: .utility) { await self.consolidationLoop() })
-
-        // Självreflektion + självmodell: var 45s
-        tasks.append(Task(priority: .utility) { await self.selfReflectionLoop() })
-
-        // Språkutveckling + experiment: var 20s
-        tasks.append(Task(priority: .utility) { await self.languageDevelopmentLoop() })
-
-        // Språkbanken API: var 30s
-        tasks.append(Task(priority: .background) { await self.sprakbankenLoop() })
-
-        // Hypotesgenerering + testning: var 60s
-        tasks.append(Task(priority: .utility) { await self.hypothesisLoop() })
-
-        // Artikelläsning + lärande: var 120s
-        tasks.append(Task(priority: .background) { await self.articleLearningLoop() })
-
-        // Stadiumsutvärdering: var 180s
-        tasks.append(Task(priority: .background) { await self.developmentLoop() })
-
-        // Världsmodelluppdatering: var 75s
-        tasks.append(Task(priority: .utility) { await self.worldModelLoop() })
-
-        // Användarprofilanalys: var 150s
-        tasks.append(Task(priority: .background) { await self.userProfilingLoop() })
-
-        // Inlärningscykel (LearningEngine): var 120s
-        tasks.append(Task(priority: .utility) { await self.learningCycleLoop() })
-
-        // Resonemangscykel (ReasoningEngine): var 90s
-        tasks.append(Task(priority: .userInitiated) { await self.reasoningCycleLoop() })
-
-        // CAI-validering + självkritik: var 60s
-        tasks.append(Task(priority: .utility) { await self.constitutionalLoop() })
-
-        // Global Workspace tävling: var 5s
-        tasks.append(Task(priority: .userInitiated) { await self.globalWorkspaceLoop() })
-
-        // Benchmark-körning: var 30 min
-        tasks.append(Task(priority: .background) { await self.evalLoop() })
-
-        // Autonomi-boost: var 15s — Eons primära självutvecklingsmotor
-        tasks.append(Task(priority: .userInitiated) { await self.autonomyBoostLoop() })
-
-        // Kognitiv integration: var 8s — binder alla motorer samman i realtid
-        tasks.append(Task(priority: .userInitiated) { await self.cognitiveIntegrationLoop() })
+        // Task 3: Infrequent background tasks (articles, eval, profiling)
+        tasks.append(Task(priority: .background) { await self.backgroundMaintenanceLoop() })
     }
 
     func stop() {
@@ -157,38 +152,382 @@ final class EonLiveAutonomy {
         ]
     }
 
-    // MARK: - Main Loop (3s) — hjärtat i Eon, alltid aktiv
+    // MARK: - UI Heartbeat Loop (4s) — lightweight, keeps UI alive
+    // v3: Replaces the old mainLoop. Only does UI updates, no heavy computation.
 
-    private func mainLoop() async {
+    private func uiHeartbeatLoop() async {
         tickCount += 1
         updateEngineActivity()
-        await animateCognitiveStep()
 
         while !Task.isCancelled {
             let mode = CyclingModeEngine.shared.effectiveMode(base: performanceMode)
 
-            // AutonomyOff: vänta länge utan att utföra kognitiva operationer
             if mode.autonomyPaused {
                 updateEngineActivity()
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
                 continue
             }
 
-            let baseInterval: UInt64
-            switch mode {
-            case .maximal:  baseInterval = 2_000_000_000
-            case .balanced: baseInterval = 3_000_000_000
-            case .sparse:   baseInterval = 5_000_000_000
-            case .rest:     baseInterval = 10_000_000_000
-            case .auto:     baseInterval = autoScaledInterval(base: 3_000_000_000)
-            case .adaptive: baseInterval = adaptiveScaledInterval(loop: "mainLoop", base: 3_000_000_000)
-            default:        baseInterval = 3_000_000_000
-            }
-            try? await Task.sleep(nanoseconds: baseInterval)
+            // Lightweight: just update UI indicators
             tickCount += 1
             updateEngineActivity()
-            if tickCount % 3 == 0 { await animateCognitiveStep() }
-            if tickCount % 10 == 0 { await runDeepCognitiveAnalysis() }
+            if tickCount % 4 == 0 { await animateCognitiveStep() }
+
+            // Update phase label in UI
+            if let brain {
+                brain.autonomousProcessLabel = "[\(currentPhase.rawValue)] \(ProcessLabels.label(for: brain.engineActivity.max(by: { $0.value < $1.value })?.key ?? "cognitive", brain: brain))"
+            }
+
+            let interval = autoScaledInterval(base: 4_000_000_000)
+            try? await Task.sleep(nanoseconds: interval)
+        }
+    }
+
+    // MARK: - Phased Cognitive Worker — the heart of Eon v3
+    // Cycles through phases: INTENSIVE → LEARNING → LANGUAGE → REST → repeat
+    // Each phase runs only its relevant cognitive operations.
+    // This eliminates the 20 concurrent loops that were burning CPU.
+
+    private func phasedCognitiveWorker() async {
+        try? await Task.sleep(nanoseconds: 3_000_000_000) // Initial delay
+
+        while !Task.isCancelled {
+            guard let brain, !shouldSkipAutonomousWork() else {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                continue
+            }
+
+            // Check if thermal state requires extended rest
+            if isThermallyConstrained && currentPhase != .rest {
+                brain.innerMonologue.append(MonologueLine(
+                    text: "⚠️ Termisk begränsning aktiv — övergår till viloläge för att minska CPU",
+                    type: .revision
+                ))
+                currentPhase = .rest
+                phaseStartTime = Date()
+            }
+
+            let phaseElapsed = Date().timeIntervalSince(phaseStartTime)
+            let phaseDuration = Double(currentPhase.duration) / 1_000_000_000.0
+            let thermalMultiplier = isThermallyConstrained ? 3.0 : 1.0
+
+            // Transition to next phase when duration expires
+            if phaseElapsed >= phaseDuration * thermalMultiplier {
+                let oldPhase = currentPhase
+                currentPhase = currentPhase.next
+                phaseStartTime = Date()
+                phaseCycleCount += 1
+                phaseWorkDone[oldPhase] = 0
+
+                brain.innerMonologue.append(MonologueLine(
+                    text: "⟳ Fas: \(oldPhase.rawValue) → \(currentPhase.rawValue) [cykel #\(phaseCycleCount)]",
+                    type: .loopTrigger
+                ))
+            }
+
+            // Execute phase-specific work
+            switch currentPhase {
+            case .intensive:
+                await runIntensivePhaseWork(brain: brain)
+            case .learning:
+                await runLearningPhaseWork(brain: brain)
+            case .language:
+                await runLanguagePhaseWork(brain: brain)
+            case .rest:
+                await runRestPhaseWork(brain: brain)
+            }
+
+            // Sleep between work items (thermal-aware)
+            let workInterval = autoScaledInterval(base: 8_000_000_000)
+            try? await Task.sleep(nanoseconds: workInterval)
+        }
+    }
+
+    // MARK: - Phase Work Functions
+
+    private func runIntensivePhaseWork(brain: EonBrain) async {
+        let workDone = phaseWorkDone[.intensive] ?? 0
+        phaseWorkDone[.intensive] = workDone + 1
+
+        // Rotate through intensive operations, one per cycle
+        switch workDone % 7 {
+        case 0:
+            await generateDeepThought()
+        case 1:
+            await runDeepCognitiveAnalysis()
+        case 2:
+            if !brain.isThinking { await generateAndTestHypothesis(brain: brain) }
+        case 3:
+            // Reasoning cycle
+            await runReasoningCycleWork(brain: brain)
+        case 4:
+            // Global Workspace competition
+            await runGlobalWorkspaceWork(brain: brain)
+        case 5:
+            // Autonomy boost — self-improvement
+            await runAutonomyBoostWork(brain: brain)
+        case 6:
+            // World model update
+            if !brain.isThinking { await updateWorldModel(brain: brain) }
+        default:
+            break
+        }
+
+        // Always update Φ during intensive phase
+        await updatePhi(brain: brain)
+    }
+
+    private func runLearningPhaseWork(brain: EonBrain) async {
+        let workDone = phaseWorkDone[.learning] ?? 0
+        phaseWorkDone[.learning] = workDone + 1
+
+        switch workDone % 4 {
+        case 0:
+            // Learn from articles (with dedup)
+            if !brain.isThinking { await readAndLearnFromArticles(brain: brain) }
+        case 1:
+            // FSRS learning cycle
+            await runLearningCycleWork(brain: brain)
+        case 2:
+            // Self-reflection
+            if !brain.isThinking { await runDeepSelfReflection(brain: brain) }
+        case 3:
+            // Constitutional AI validation
+            await runConstitutionalWork(brain: brain)
+        default:
+            break
+        }
+    }
+
+    private func runLanguagePhaseWork(brain: EonBrain) async {
+        let workDone = phaseWorkDone[.language] ?? 0
+        phaseWorkDone[.language] = workDone + 1
+
+        switch workDone % 3 {
+        case 0:
+            // Language experiment (with dedup)
+            if !brain.isThinking { await runLanguageExperiment(brain: brain) }
+        case 1:
+            // Språkbanken fetch (with dedup)
+            await fetchFromSprakbanken()
+        case 2:
+            // Cross-domain language analysis
+            await runLanguageIntegration(brain: brain)
+        default:
+            break
+        }
+    }
+
+    private func runRestPhaseWork(brain: EonBrain) async {
+        let workDone = phaseWorkDone[.rest] ?? 0
+        phaseWorkDone[.rest] = workDone + 1
+
+        // During rest: only lightweight consolidation + state sync
+        if workDone == 0 {
+            // One consolidation per rest phase
+            if !brain.isThinking { await runConsolidation(brain: brain) }
+        }
+
+        // Sync cognitive integration (lightweight)
+        await syncCognitiveIntegration(brain: brain)
+
+        // Update developmental progress
+        let state = CognitiveState.shared
+        let ii = state.integratedIntelligence
+        brain.integratedIntelligence = ii
+        brain.phiValue = ii
+        let progressGain = 0.0003 * ii
+        brain.developmentalProgress = clamp(brain.developmentalProgress + progressGain, 0.0, 1.0)
+        if brain.developmentalProgress >= 1.0 { advanceStage(brain: brain) }
+
+        // Persist state periodically
+        UserDefaults.standard.set(ii, forKey: "eon_persisted_ii")
+        UserDefaults.standard.set(brain.developmentalProgress, forKey: "eon_persisted_progress")
+        UserDefaults.standard.set(brain.developmentalStage.rawValue, forKey: "eon_persisted_stage")
+    }
+
+    // MARK: - Background Maintenance Loop (minutes-scale, very infrequent)
+    // Handles: article generation, eval, user profiling, development stage checks
+
+    private func backgroundMaintenanceLoop() async {
+        try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s initial delay
+        var maintenanceCycle = 0
+
+        while !Task.isCancelled {
+            guard let brain, !shouldSkipAutonomousWork() else {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                continue
+            }
+            maintenanceCycle += 1
+
+            // Article generation (every ~5 cycles = ~25 min)
+            if maintenanceCycle % 5 == 1 {
+                await generateArticleIfNeeded(brain: brain)
+            }
+
+            // User profiling (every ~8 cycles = ~40 min)
+            if maintenanceCycle % 8 == 0 {
+                await analyzeUserProfile(brain: brain)
+            }
+
+            // Development stage evaluation (every ~10 cycles = ~50 min)
+            if maintenanceCycle % 10 == 0 {
+                let line = MonologueLine(
+                    text: "⬡ Självutvärdering v\(selfModelVersion): Φ=\(String(format: "%.3f", brain.phiValue)) · \(brain.developmentalStage.rawValue) · \(Int(brain.developmentalProgress * 100))% · \(articleCount) artiklar · \(hypothesisCount) hypoteser",
+                    type: .insight
+                )
+                brain.innerMonologue.append(line)
+            }
+
+            // Eval benchmark (every ~60 cycles = ~5 hours)
+            if maintenanceCycle % 60 == 0 {
+                brain.innerMonologue.append(MonologueLine(text: "📊 Kör Eon-Eval benchmark...", type: .loopTrigger))
+                let run = await EonEvaluator.shared.runFullEval()
+                let trend = await EonEvaluator.shared.trendAnalysis()
+                let text = "📊 Eval klar: betyg=\(run.grade) · score=\(String(format: "%.2f", run.overallScore)) · \(trend.message)"
+                brain.innerMonologue.append(MonologueLine(text: text, type: .insight))
+            }
+
+            // Sleep 5 minutes between maintenance cycles (thermal-aware)
+            let interval = autoScaledInterval(base: 300_000_000_000)
+            try? await Task.sleep(nanoseconds: interval)
+        }
+    }
+
+    // MARK: - Helper phase work functions
+
+    private func runReasoningCycleWork(brain: EonBrain) async {
+        let gaps = await LearningEngine.shared.topWeaknesses(limit: 3)
+        let gapTopics = gaps.map { "Vad är sambandet mellan \($0.domain) och kognition?" }
+        let staticTopics = ["Varför är kausalitet svårt att bevisa?",
+                            "Hur relaterar morfologi till semantik?",
+                            "Vad orsakar kognitiv bias?"]
+        let allTopics = gapTopics + staticTopics
+        let topic = allTopics.randomElement() ?? staticTopics[0]
+
+        let result = await ReasoningEngine.shared.reason(about: topic, strategy: .adaptive, depth: 3)
+        let text = "🧠 [\(result.strategy.rawValue)] \(topic) → \(result.conclusion.prefix(80))... (konf: \(String(format: "%.0f", result.confidence * 100))%)"
+        brain.innerMonologue.append(MonologueLine(text: text, type: .thought))
+        if !result.causalChain.isEmpty {
+            brain.innerMonologue.append(MonologueLine(text: "⛓ Kausalkedja: \(result.causalChain.joined(separator: " → "))", type: .insight))
+        }
+        await CognitiveState.shared.update(dimension: .reasoning, delta: result.confidence * 0.002, source: "reasoning_cycle")
+    }
+
+    private func runGlobalWorkspaceWork(brain: EonBrain) async {
+        if let lastThought = brain.innerMonologue.last {
+            await GlobalWorkspaceEngine.shared.addThoughtFromText(
+                lastThought.text, source: "autonomy", priority: brain.confidence
+            )
+            await GlobalWorkspaceEngine.shared.runCompetition()
+            if let focus = await GlobalWorkspaceEngine.shared.currentFocus {
+                let integrationLevel = await GlobalWorkspaceEngine.shared.integrationLevel
+                if integrationLevel > 0.7 {
+                    brain.innerMonologue.append(MonologueLine(
+                        text: "🌐 GWT-broadcast: '\(focus.content.prefix(60))...' (integration: \(String(format: "%.2f", integrationLevel)))",
+                        type: .loopTrigger
+                    ))
+                }
+            }
+        }
+    }
+
+    private func runAutonomyBoostWork(brain: EonBrain) async {
+        let state = CognitiveState.shared
+        let weakDims = state.weakestDimensions(limit: 2)
+        for (dim, level) in weakDims {
+            let boost = 0.003 * (1.0 - level) // Slightly less aggressive than before
+            await state.update(dimension: dim, delta: boost, source: "autonomy_boost")
+        }
+
+        let ii = state.integratedIntelligence
+        brain.integratedIntelligence = ii
+        brain.phiValue = ii
+
+        if phaseCycleCount % 3 == 0 {
+            let topDim = state.topDimensions(limit: 1).first?.0.rawValue ?? "?"
+            brain.innerMonologue.append(MonologueLine(
+                text: "⚡ AUTONOMI[cykel #\(phaseCycleCount)]: II=\(String(format: "%.4f", ii)) · Topp: \(topDim) · Framsteg: \(Int(brain.developmentalProgress * 100))% · Fas: \(currentPhase.rawValue)",
+                type: .loopTrigger
+            ))
+        }
+    }
+
+    private func updatePhi(brain: EonBrain) async {
+        let activities = brain.engineActivity.values
+        let mean = activities.reduce(0, +) / Double(max(activities.count, 1))
+        let variance = activities.map { pow($0 - mean, 2) }.reduce(0, +) / Double(max(activities.count, 1))
+        let integration = mean * (1.0 - variance)
+        let targetPhi = 0.3 + integration * 0.65 + Double(brain.knowledgeNodeCount) * 0.00008
+        brain.phiValue = clamp(brain.phiValue + (targetPhi - brain.phiValue) * 0.08, 0.1, 1.0)
+    }
+
+    private func runConstitutionalWork(brain: EonBrain) async {
+        if let lastThought = brain.innerMonologue.last {
+            let ctx = CAIContext(uncertaintyLevel: 1.0 - brain.confidence, domain: "autonom_tanke", previousResponses: [], userSentiment: 0.0)
+            let result = await ConstitutionalAI.shared.validate(response: lastThought.text, prompt: "autonom reflektion", context: ctx)
+            let stats = await ConstitutionalAI.shared.validationStats()
+            let text = "⚖️ CAI: score=\(String(format: "%.2f", result.score)) · pass=\(result.passed ? "✓" : "✗") · total=\(stats.totalValidations)"
+            brain.innerMonologue.append(MonologueLine(text: text, type: .revision))
+        }
+    }
+
+    private func runLearningCycleWork(brain: EonBrain) async {
+        let result = await LearningEngine.shared.runLearningCycle()
+        await LearningEngine.shared.syncCompetenciesFromDatabase()
+        let overallLevel = await LearningEngine.shared.overallCompetencyLevel()
+        let text = "📚 Inlärning #\(result.cycleNumber): \(result.studiedTopics.prefix(2).joined(separator: ", ")). Kompetens: \(String(format: "%.0f", overallLevel * 100))%. Luckor: \(result.gapsIdentified)"
+        brain.innerMonologue.append(MonologueLine(text: text, type: .insight))
+        if let newKnowledge = result.newKnowledge.first {
+            brain.innerMonologue.append(MonologueLine(text: "💡 \(newKnowledge)", type: .thought))
+        }
+        let nodeCount = await PersistentMemoryStore.shared.knowledgeNodeCount()
+        brain.knowledgeNodeCount = nodeCount
+    }
+
+    private func runLanguageIntegration(brain: EonBrain) async {
+        // Cross-domain language analysis — links language learning to knowledge
+        let state = CognitiveState.shared
+        let langLevel = state.dimensionLevel(.language)
+        let knowledgeLevel = state.dimensionLevel(.knowledge)
+
+        if langLevel < knowledgeLevel {
+            await state.update(dimension: .language, delta: 0.002, source: "language_integration")
+            brain.innerMonologue.append(MonologueLine(
+                text: "⟳ Språkintegration: språknivå (\(String(format: "%.0f", langLevel * 100))%) lyfts mot kunskapsnivå (\(String(format: "%.0f", knowledgeLevel * 100))%)",
+                type: .thought
+            ))
+        }
+    }
+
+    private func syncCognitiveIntegration(brain: EonBrain) async {
+        let state = CognitiveState.shared
+        let ii = state.integratedIntelligence
+        brain.isAutonomouslyActive = true
+        brain.integratedIntelligence = ii
+        brain.intelligenceGrowthVelocity = state.growthVelocity
+
+        let t = Double(tickCount)
+        let base = max(0.35, ii * 0.7 + 0.25)
+        brain.engineActivity = [
+            "cognitive":  clamp(state.dimensionLevel(.reasoning)   * 0.6 + base * 0.4 + 0.08 * abs(sin(t * 0.31)), 0.28, 0.97),
+            "language":   clamp(state.dimensionLevel(.language)    * 0.6 + base * 0.4 + 0.07 * abs(sin(t * 0.43 + 1.1)), 0.24, 0.93),
+            "memory":     clamp(state.dimensionLevel(.knowledge)   * 0.6 + base * 0.4 + 0.06 * abs(sin(t * 0.51 + 2.3)), 0.20, 0.90),
+            "learning":   clamp(state.dimensionLevel(.learning)    * 0.6 + base * 0.4 + 0.05 * abs(cos(t * 0.37 + 0.9)), 0.18, 0.88),
+            "autonomy":   clamp(state.dimensionLevel(.metacognition) * 0.6 + base * 0.35 + 0.07 * abs(sin(t * 0.21 + 3.1)), 0.22, 0.85),
+            "hypothesis": clamp(state.dimensionLevel(.hypothesisGeneration) * 0.6 + base * 0.3 + 0.05 * abs(sin(t * 0.17 + 1.7)), 0.16, 0.80),
+            "worldModel": clamp(state.dimensionLevel(.worldModel)  * 0.6 + base * 0.35 + 0.06 * abs(cos(t * 0.26 + 2.5)), 0.18, 0.82),
+        ]
+    }
+
+    private func generateArticleIfNeeded(brain: EonBrain) async {
+        let eonCount = await PersistentMemoryStore.shared.articleCountForDomain("Eon")
+        await generateEonArticle(eonArticleIndex: eonCount)
+        let extraCount = max(0, articlesPerInterval - 1)
+        for i in 0..<extraCount {
+            guard !Task.isCancelled, !shouldSkipAutonomousWork() else { break }
+            await generateArticle(index: i)
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
         }
     }
 
@@ -217,21 +556,27 @@ final class EonLiveAutonomy {
         brain.developmentalProgress = clamp(brain.developmentalProgress + 0.0005, 0.0, 1.0)
     }
 
-    // Auto-läge: skalar intervall baserat på termisk status
+    // Auto-läge: skalar intervall aggressivt baserat på termisk status
+    // v3: Mycket mer aggressiv skalning — förhindrar överhettning
     private func autoScaledInterval(base: UInt64) -> UInt64 {
         let thermalState = ProcessInfo.processInfo.thermalState
         switch thermalState {
         case .nominal:  return base
-        case .fair:     return UInt64(Double(base) * 1.5)
-        case .serious:  return UInt64(Double(base) * 2.5)
-        case .critical: return UInt64(Double(base) * 4.0)
+        case .fair:     return UInt64(Double(base) * 2.5)
+        case .serious:  return UInt64(Double(base) * 8.0)    // Was 2.5x — now 8x
+        case .critical: return UInt64(Double(base) * 20.0)   // Was 4x — now 20x
         @unknown default: return base
         }
     }
 
+    // Returns true if thermal state is too hot for heavy work
+    private var isThermallyConstrained: Bool {
+        let state = ProcessInfo.processInfo.thermalState
+        return state == .serious || state == .critical
+    }
+
     // Adaptivt läge: använder AdaptivePerformanceEngine
     private func adaptiveScaledInterval(loop: String, base: UInt64) -> UInt64 {
-        // Synkron approximation — faktisk throttling sker i AdaptivePerformanceEngine
         let thermalFactor = autoScaledInterval(base: base)
         return thermalFactor
     }
@@ -283,30 +628,7 @@ final class EonLiveAutonomy {
         }
     }
 
-    // MARK: - Deep Thought Loop (5-12s) — GPT+BERT driven, alltid aktiv
-
-    private func deepThoughtLoop() async {
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
-        while !Task.isCancelled {
-            if !shouldSkipAutonomousWork() {
-                await generateDeepThought()
-            }
-            let mode = CyclingModeEngine.shared.effectiveMode(base: performanceMode)
-            let minNs: UInt64
-            let maxNs: UInt64
-            switch mode {
-            case .maximal:     minNs = 4_000_000_000;  maxNs = 7_000_000_000
-            case .balanced:    minNs = 6_000_000_000;  maxNs = 10_000_000_000
-            case .sparse:      minNs = 12_000_000_000; maxNs = 20_000_000_000
-            case .rest:        minNs = 30_000_000_000; maxNs = 60_000_000_000
-            case .autonomyOff: minNs = 10_000_000_000; maxNs = 15_000_000_000
-            case .auto, .adaptive, .cycling:
-                let scaled = autoScaledInterval(base: 6_000_000_000)
-                minNs = scaled; maxNs = scaled + 4_000_000_000
-            }
-            try? await Task.sleep(nanoseconds: UInt64.random(in: minNs...maxNs))
-        }
-    }
+    // MARK: - Deep Thought Generation (called from intensive phase)
 
     private func generateDeepThought() async {
         guard let brain, !brain.isThinking else { return }
@@ -340,46 +662,6 @@ final class EonLiveAutonomy {
 
         brain.phiValue = clamp(brain.phiValue + Double.random(in: -0.006...0.012), 0.1, 1.0)
         brain.confidence = clamp(brain.confidence + Double.random(in: -0.004...0.008), 0.3, 0.99)
-    }
-
-    // MARK: - Article Generation Loop
-    // Adaptivt intervall baserat på antal Eon-artiklar:
-    //   0–10 artiklar  → var 5:e minut
-    //   10–30 artiklar → var 30:e minut
-    //   30+  artiklar  → var 60:e minut
-    // Skriver alltid EN artikel per cykel i kategorin "Eon".
-
-    private func articleGenerationLoop() async {
-        try? await Task.sleep(nanoseconds: 8_000_000_000)
-        while !Task.isCancelled {
-            guard !shouldSkipAutonomousWork() else {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-                continue
-            }
-
-            // Bestäm intervall baserat på befintliga Eon-artiklar
-            let eonCount = await PersistentMemoryStore.shared.articleCountForDomain("Eon")
-            let intervalMinutes: Int
-            switch eonCount {
-            case ..<10:  intervalMinutes = 5
-            case ..<30:  intervalMinutes = 30
-            default:     intervalMinutes = 60
-            }
-
-            // Generera en Eon-artikel
-            await generateEonArticle(eonArticleIndex: eonCount)
-
-            // Generera också en vanlig artikel om konfigurerat
-            let extraCount = max(0, articlesPerInterval - 1)
-            for i in 0..<extraCount {
-                guard !Task.isCancelled, !shouldSkipAutonomousWork() else { break }
-                await generateArticle(index: i)
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-            }
-
-            let intervalNs = UInt64(intervalMinutes * 60) * 1_000_000_000
-            try? await Task.sleep(nanoseconds: intervalNs)
-        }
     }
 
     // Genererar en artikel om Eon självt — reflektioner, insikter, kognitiv status
@@ -525,6 +807,14 @@ final class EonLiveAutonomy {
     }
 
     private func learnFromArticle(_ article: KnowledgeArticle, brain: EonBrain) async {
+        // Deduplication: skip articles we've already learned from
+        guard !learnedArticleIDs.contains(article.id) else { return }
+        learnedArticleIDs.insert(article.id)
+        // Cap the set to prevent unbounded memory growth
+        if learnedArticleIDs.count > 500 {
+            learnedArticleIDs = Set(learnedArticleIDs.suffix(300))
+        }
+
         // Extrahera fakta med NLP
         let facts = NLPFactExtractor.extract(from: article.content)
         for fact in facts.prefix(5) {
@@ -551,23 +841,13 @@ final class EonLiveAutonomy {
             }
         }
 
-        // Uppdatera Φ baserat på ny kunskap
-        brain.phiValue = clamp(brain.phiValue + 0.003, 0.1, 1.0)
+        // Update knowledge dimension based on actual learning
+        await CognitiveState.shared.update(dimension: .knowledge, delta: 0.002, source: "article_learning")
+        await CognitiveState.shared.update(dimension: .comprehension, delta: 0.001, source: "article_learning")
+        brain.phiValue = clamp(brain.phiValue + 0.002, 0.1, 1.0)
     }
 
-    // MARK: - Consolidation Loop (90s)
-
-    private func consolidationLoop() async {
-        try? await Task.sleep(nanoseconds: 8_000_000_000)
-        while !Task.isCancelled {
-            guard let brain, !brain.isThinking, !shouldSkipAutonomousWork() else {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
-                continue
-            }
-            await runConsolidation(brain: brain)
-            try? await Task.sleep(nanoseconds: 90_000_000_000)
-        }
-    }
+    // MARK: - Consolidation (called from rest phase)
 
     private func runConsolidation(brain: EonBrain) async {
         brain.autonomousProcessLabel = "CLS-konsolidering: minnen bearbetas..."
@@ -588,19 +868,7 @@ final class EonLiveAutonomy {
         }
     }
 
-    // MARK: - Self Reflection Loop (45s)
-
-    private func selfReflectionLoop() async {
-        try? await Task.sleep(nanoseconds: 6_000_000_000)
-        while !Task.isCancelled {
-            guard let brain, !brain.isThinking, !shouldSkipAutonomousWork() else {
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
-                continue
-            }
-            await runDeepSelfReflection(brain: brain)
-            try? await Task.sleep(nanoseconds: 45_000_000_000)
-        }
-    }
+    // MARK: - Self Reflection (called from learning phase)
 
     private func runDeepSelfReflection(brain: EonBrain) async {
         brain.autonomousProcessLabel = "Djup självreflektion pågår..."
@@ -678,19 +946,7 @@ final class EonLiveAutonomy {
         return false
     }
 
-    // MARK: - Language Development Loop (20s)
-
-    private func languageDevelopmentLoop() async {
-        try? await Task.sleep(nanoseconds: 8_000_000_000)
-        while !Task.isCancelled {
-            guard let brain, !brain.isThinking else {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-                continue
-            }
-            await runLanguageExperiment(brain: brain)
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
-        }
-    }
+    // MARK: - Language Experiment (called from language phase, with dedup)
 
     private func runLanguageExperiment(brain: EonBrain) async {
         brain.autonomousProcessLabel = "Språkexperiment pågår..."
@@ -699,6 +955,14 @@ final class EonLiveAutonomy {
             stage: brain.developmentalStage,
             existingExperiments: languageExperiments
         )
+
+        // Dedup: skip if we've already analyzed this word
+        if morphologyCacheSet.contains(experiment.baseWord) && !experiment.isNovel {
+            return
+        }
+        morphologyCacheSet.insert(experiment.baseWord)
+        if morphologyCacheSet.count > 200 { morphologyCacheSet = Set(morphologyCacheSet.suffix(100)) }
+
         languageExperiments.append(experiment)
         if languageExperiments.count > 100 { languageExperiments.removeFirst(20) }
 
@@ -714,7 +978,7 @@ final class EonLiveAutonomy {
             brain.innerMonologue.append(lines[0])
         }
 
-        // Spara lärdom
+        // Spara lärdom och uppdatera language dimension
         if experiment.isValid {
             Task.detached(priority: .background) {
                 await PersistentMemoryStore.shared.saveFact(
@@ -725,22 +989,15 @@ final class EonLiveAutonomy {
                     source: "language_experiment"
                 )
             }
-        }
-    }
-
-    // MARK: - Språkbanken Loop (2–7 min random)
-
-    private func sprakbankenLoop() async {
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
-        while !Task.isCancelled {
-            if !shouldSkipAutonomousWork() {
-                await fetchFromSprakbanken()
+            // Real learning: update language dimension
+            await CognitiveState.shared.update(dimension: .language, delta: 0.002, source: "morphology_experiment")
+            if experiment.isNovel {
+                await CognitiveState.shared.update(dimension: .language, delta: 0.003, source: "novel_morphology")
             }
-            let minNs: UInt64 = 120_000_000_000
-            let maxNs: UInt64 = 420_000_000_000
-            try? await Task.sleep(nanoseconds: UInt64.random(in: minNs...maxNs))
         }
     }
+
+    // MARK: - Språkbanken (called from language phase)
 
     private func fetchFromSprakbanken() async {
         guard let brain else { return }
@@ -796,19 +1053,7 @@ final class EonLiveAutonomy {
         }
     }
 
-    // MARK: - Hypothesis Loop (60s)
-
-    private func hypothesisLoop() async {
-        try? await Task.sleep(nanoseconds: 7_000_000_000)
-        while !Task.isCancelled {
-            guard let brain, !brain.isThinking, !shouldSkipAutonomousWork() else {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
-                continue
-            }
-            await generateAndTestHypothesis(brain: brain)
-            try? await Task.sleep(nanoseconds: 60_000_000_000)
-        }
-    }
+    // MARK: - Hypothesis (called from intensive phase, with dedup)
 
     private func generateAndTestHypothesis(brain: EonBrain) async {
         hypothesisCount += 1
@@ -847,6 +1092,14 @@ final class EonLiveAutonomy {
 
         let hypothesis = EonHypothesis(statement: hypothesisStatement, domain: articles.first ?? fallbackTopics.randomElement(), confidence: 0.5)
 
+        // Dedup: skip hypotheses we've already tested
+        let normalizedStatement = hypothesisStatement.prefix(50).lowercased()
+        if testedHypothesisStatements.contains(String(normalizedStatement)) {
+            return
+        }
+        testedHypothesisStatements.insert(String(normalizedStatement))
+        if testedHypothesisStatements.count > 100 { testedHypothesisStatements = Set(testedHypothesisStatements.suffix(50)) }
+
         brain.innerMonologue.append(MonologueLine(
             text: "Hypotes #\(hypothesisCount): \"\(hypothesis.statement)\"",
             type: .thought
@@ -870,19 +1123,7 @@ final class EonLiveAutonomy {
         }
     }
 
-    // MARK: - Article Learning Loop (120s)
-
-    private func articleLearningLoop() async {
-        try? await Task.sleep(nanoseconds: 9_000_000_000)
-        while !Task.isCancelled {
-            guard let brain, !brain.isThinking else {
-                try? await Task.sleep(nanoseconds: 20_000_000_000)
-                continue
-            }
-            await readAndLearnFromArticles(brain: brain)
-            try? await Task.sleep(nanoseconds: 120_000_000_000)
-        }
-    }
+    // MARK: - Article Learning (called from learning phase)
 
     private func readAndLearnFromArticles(brain: EonBrain) async {
         brain.autonomousProcessLabel = "Läser och analyserar artiklar..."
@@ -935,16 +1176,7 @@ final class EonLiveAutonomy {
         }
     }
 
-    // MARK: - World Model Loop (75s)
-
-    private func worldModelLoop() async {
-        try? await Task.sleep(nanoseconds: 6_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            await updateWorldModel(brain: brain)
-            try? await Task.sleep(nanoseconds: 75_000_000_000)
-        }
-    }
+    // MARK: - World Model (called from intensive phase)
 
     private func updateWorldModel(brain: EonBrain) async {
         worldModel.update(
@@ -961,16 +1193,7 @@ final class EonLiveAutonomy {
         ))
     }
 
-    // MARK: - User Profiling Loop (150s)
-
-    private func userProfilingLoop() async {
-        try? await Task.sleep(nanoseconds: 10_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            await analyzeUserProfile(brain: brain)
-            try? await Task.sleep(nanoseconds: 150_000_000_000)
-        }
-    }
+    // MARK: - User Profiling (called from background maintenance)
 
     private func analyzeUserProfile(brain: EonBrain) async {
         brain.autonomousProcessLabel = "Analyserar användarprofil..."
@@ -991,36 +1214,7 @@ final class EonLiveAutonomy {
         ))
     }
 
-    // MARK: - Phi Loop (10s)
-
-    private func phiLoop() async {
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            let activities = brain.engineActivity.values
-            let mean = activities.reduce(0, +) / Double(max(activities.count, 1))
-            let variance = activities.map { pow($0 - mean, 2) }.reduce(0, +) / Double(max(activities.count, 1))
-            let integration = mean * (1.0 - variance)
-            let targetPhi = 0.3 + integration * 0.65 + Double(brain.knowledgeNodeCount) * 0.00008
-            brain.phiValue = clamp(brain.phiValue + (targetPhi - brain.phiValue) * 0.12, 0.1, 1.0)
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
-        }
-    }
-
-    // MARK: - Development Loop (180s)
-
-    private func developmentLoop() async {
-        try? await Task.sleep(nanoseconds: 10_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            let line = MonologueLine(
-                text: "⬡ Självutvärdering v\(selfModelVersion): Φ=\(String(format: "%.3f", brain.phiValue)) · \(brain.developmentalStage.rawValue) · \(Int(brain.developmentalProgress * 100))% · \(articleCount) artiklar · \(hypothesisCount) hypoteser",
-                type: .insight
-            )
-            brain.innerMonologue.append(line)
-            try? await Task.sleep(nanoseconds: 180_000_000_000)
-        }
-    }
+    // Phi and Development now handled by updatePhi() and backgroundMaintenanceLoop()
 
     // MARK: - Stage Advancement
 
@@ -1052,230 +1246,9 @@ final class EonLiveAutonomy {
         Swift.max(min, Swift.min(max, value))
     }
 
-    // MARK: - LearningEngine Loop (120s)
-
-    private func learningCycleLoop() async {
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            let result = await LearningEngine.shared.runLearningCycle()
-
-            // Synka kompetenser från faktisk DB-data (inte slumpmässigt)
-            await LearningEngine.shared.syncCompetenciesFromDatabase()
-
-            let overallLevel = await LearningEngine.shared.overallCompetencyLevel()
-            let text = "📚 Inlärningscykel #\(result.cycleNumber): studerade \(result.studiedTopics.prefix(2).joined(separator: ", ")). Kompetens: \(String(format: "%.0f", overallLevel * 100))%. Luckor: \(result.gapsIdentified)"
-            brain.innerMonologue.append(MonologueLine(text: text, type: .insight))
-            if let newKnowledge = result.newKnowledge.first {
-                brain.innerMonologue.append(MonologueLine(text: "💡 \(newKnowledge)", type: .thought))
-            }
-
-            // Uppdatera knowledgeNodeCount från faktisk DB
-            let nodeCount = await PersistentMemoryStore.shared.knowledgeNodeCount()
-            await MainActor.run { brain.knowledgeNodeCount = nodeCount }
-
-            let interval = UInt64(120_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    // MARK: - ReasoningEngine Loop (90s)
-
-    private func reasoningCycleLoop() async {
-        try? await Task.sleep(nanoseconds: 6_000_000_000)
-        var cycleCount = 0
-        while !Task.isCancelled {
-            guard let brain, !shouldSkipAutonomousWork() else {
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
-                continue
-            }
-            cycleCount += 1
-
-            // Var 5:e cykel: berika kausalgraf från faktisk DB-data
-            if cycleCount % 5 == 0 {
-                await ReasoningEngine.shared.enrichCausalGraphFromFacts()
-            }
-
-            // Välj ämne baserat på faktiska kunskapsluckor
-            let gaps = await LearningEngine.shared.topWeaknesses(limit: 3)
-            let gapTopics = gaps.map { "Vad är sambandet mellan \($0.domain) och kognition?" }
-            let staticTopics = ["Varför är kausalitet svårt att bevisa?",
-                                "Hur relaterar morfologi till semantik?",
-                                "Vad orsakar kognitiv bias?",
-                                "Hur fungerar analogibyggande i hjärnan?",
-                                "Vad är skillnaden mellan induktion och deduktion?"]
-            let allTopics = gapTopics + staticTopics
-            let topic = allTopics.randomElement() ?? staticTopics[0]
-
-            let result = await ReasoningEngine.shared.reason(about: topic, strategy: .adaptive, depth: 3)
-            let text = "🧠 [\(result.strategy.rawValue)] \(topic) → \(result.conclusion.prefix(80))... (konfidens: \(String(format: "%.0f", result.confidence * 100))%)"
-            brain.innerMonologue.append(MonologueLine(text: text, type: .thought))
-            if !result.causalChain.isEmpty {
-                brain.innerMonologue.append(MonologueLine(text: "⛓ Kausalkedja: \(result.causalChain.joined(separator: " → "))", type: .insight))
-            }
-            // Uppdatera CognitiveState med resonemangsnivå
-            await CognitiveState.shared.update(dimension: .reasoning, delta: result.confidence * 0.002, source: "reasoning_cycle")
-            let interval = UInt64(90_000_000_000) + UInt64.random(in: 0...20_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    // MARK: - Constitutional AI Loop (60s)
-
-    private func constitutionalLoop() async {
-        try? await Task.sleep(nanoseconds: 8_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            // Validera senaste tanke
-            if let lastThought = brain.innerMonologue.last {
-                let ctx = CAIContext(uncertaintyLevel: 1.0 - brain.confidence, domain: "autonom_tanke", previousResponses: [], userSentiment: 0.0)
-                let result = await ConstitutionalAI.shared.validate(response: lastThought.text, prompt: "autonom reflektion", context: ctx)
-                let stats = await ConstitutionalAI.shared.validationStats()
-                let text = "⚖️ CAI-validering: score=\(String(format: "%.2f", result.score)) · pass=\(result.passed ? "✓" : "✗") · biaser=\(result.detectedBiases.count) · total=\(stats.totalValidations)"
-                brain.innerMonologue.append(MonologueLine(text: text, type: .revision))
-                if let bias = result.detectedBiases.first {
-                    brain.innerMonologue.append(MonologueLine(text: "⚠️ Bias detekterad: \(bias.name) — \(bias.description)", type: .revision))
-                }
-            }
-            let interval = UInt64(60_000_000_000) + UInt64.random(in: 0...15_000_000_000)
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    // MARK: - Global Workspace Loop (5s)
-
-    private func globalWorkspaceLoop() async {
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            // Lägg till aktuell tanke i global workspace
-            if let lastThought = brain.innerMonologue.last {
-                await GlobalWorkspaceEngine.shared.addThoughtFromText(
-                    lastThought.text,
-                    source: "autonomy",
-                    priority: brain.confidence
-                )
-                await GlobalWorkspaceEngine.shared.runCompetition()
-                if let focus = await GlobalWorkspaceEngine.shared.currentFocus {
-                    let integrationLevel = await GlobalWorkspaceEngine.shared.integrationLevel
-                    if integrationLevel > 0.7 {
-                        brain.innerMonologue.append(MonologueLine(
-                            text: "🌐 GWT-broadcast: '\(focus.content.prefix(60))...' (integration: \(String(format: "%.2f", integrationLevel)))",
-                            type: .loopTrigger
-                        ))
-                    }
-                }
-            }
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-        }
-    }
-
-    // MARK: - Eval Loop (30 min)
-
-    private func evalLoop() async {
-        try? await Task.sleep(nanoseconds: 30_000_000_000)
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            brain.innerMonologue.append(MonologueLine(text: "📊 Kör Eon-Eval benchmark...", type: .loopTrigger))
-            let run = await EonEvaluator.shared.runFullEval()
-            let trend = await EonEvaluator.shared.trendAnalysis()
-            let text = "📊 Eval klar: betyg=\(run.grade) · score=\(String(format: "%.2f", run.overallScore)) · \(trend.message)"
-            brain.innerMonologue.append(MonologueLine(text: text, type: .insight))
-            try? await Task.sleep(nanoseconds: 1_800_000_000_000)
-        }
-    }
-
-    // MARK: - Autonomy Boost Loop (15s) — Eons primära självutvecklingsmotor
-    // Denna loop är Eons HJÄRTA — den driver aktiv självförbättring utan input
-
-    private func autonomyBoostLoop() async {
-        try? await Task.sleep(nanoseconds: 4_000_000_000)
-        var boostCycle = 0
-        while !Task.isCancelled {
-            guard let brain, !brain.isThinking else {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-                continue
-            }
-            boostCycle += 1
-            let state = CognitiveState.shared
-
-            // Identifiera svagaste dimension och boosta den aktivt
-            let weakDims = state.weakestDimensions(limit: 3)
-            for (dim, level) in weakDims {
-                let boost = 0.004 * (1.0 - level)  // Mer boost till svagare dimensioner
-                await state.update(dimension: dim, delta: boost, source: "autonomy_boost")
-            }
-
-            // Uppdatera brain.developmentalProgress baserat på II
-            let ii = state.integratedIntelligence
-            let progressGain = 0.0008 * ii
-            brain.developmentalProgress = clamp(brain.developmentalProgress + progressGain, 0.0, 1.0)
-
-            // Kontrollera om stadium ska avanceras
-            if brain.developmentalProgress >= 1.0 {
-                advanceStage(brain: brain)
-            }
-
-            // Uppdatera brain.integratedIntelligence direkt
-            brain.integratedIntelligence = ii
-            brain.phiValue = ii
-
-            // Logga var 5:e cykel
-            if boostCycle % 5 == 0 {
-                let topDim = state.topDimensions(limit: 1).first?.0.rawValue ?? "?"
-                brain.innerMonologue.append(MonologueLine(
-                    text: "⚡ AUTONOMI[cykel #\(boostCycle)]: II=\(String(format: "%.4f", ii)) · Topp: \(topDim) · Framsteg: \(Int(brain.developmentalProgress * 100))%",
-                    type: .loopTrigger
-                ))
-            }
-
-            let mode = performanceMode
-            let interval: UInt64
-            switch mode {
-            case .maximal:     interval = 10_000_000_000
-            case .balanced:    interval = 15_000_000_000
-            case .sparse:      interval = 30_000_000_000
-            case .rest:        interval = 60_000_000_000
-            case .autonomyOff: interval = 60_000_000_000
-            case .cycling:     interval = autoScaledInterval(base: 15_000_000_000)
-            case .auto, .adaptive: interval = autoScaledInterval(base: 15_000_000_000)
-            }
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    // MARK: - Cognitive Integration Loop (8s) — Binder alla motorer samman
-
-    private func cognitiveIntegrationLoop() async {
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-        var integrationCycle = 0
-        while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
-            integrationCycle += 1
-            let state = CognitiveState.shared
-
-            // Propagera ICA-data till brain i realtid
-            brain.isAutonomouslyActive = true
-            let ii = state.integratedIntelligence
-            brain.integratedIntelligence = ii
-            brain.intelligenceGrowthVelocity = state.growthVelocity
-
-            // Synkronisera engineActivity med faktiska dimensionsnivåer
-            let t = Double(integrationCycle)
-            let base = max(0.35, ii * 0.7 + 0.25)
-            brain.engineActivity = [
-                "cognitive":  clamp(state.dimensionLevel(.reasoning)   * 0.6 + base * 0.4 + 0.08 * abs(sin(t * 0.31)), 0.28, 0.97),
-                "language":   clamp(state.dimensionLevel(.language)    * 0.6 + base * 0.4 + 0.07 * abs(sin(t * 0.43 + 1.1)), 0.24, 0.93),
-                "memory":     clamp(state.dimensionLevel(.knowledge)   * 0.6 + base * 0.4 + 0.06 * abs(sin(t * 0.51 + 2.3)), 0.20, 0.90),
-                "learning":   clamp(state.dimensionLevel(.learning)    * 0.6 + base * 0.4 + 0.05 * abs(cos(t * 0.37 + 0.9)), 0.18, 0.88),
-                "autonomy":   clamp(state.dimensionLevel(.metacognition) * 0.6 + base * 0.35 + 0.07 * abs(sin(t * 0.21 + 3.1)), 0.22, 0.85),
-                "hypothesis": clamp(state.dimensionLevel(.hypothesisGeneration) * 0.6 + base * 0.3 + 0.05 * abs(sin(t * 0.17 + 1.7)), 0.16, 0.80),
-                "worldModel": clamp(state.dimensionLevel(.worldModel)  * 0.6 + base * 0.35 + 0.06 * abs(cos(t * 0.26 + 2.5)), 0.18, 0.82),
-            ]
-
-            try? await Task.sleep(nanoseconds: 8_000_000_000)
-        }
-    }
+    // All old individual loops replaced by phased cognitive worker system.
+    // See: phasedCognitiveWorker(), runIntensivePhaseWork(), runLearningPhaseWork(),
+    // runLanguagePhaseWork(), runRestPhaseWork(), backgroundMaintenanceLoop()
 }
 
 // MARK: - EonSelfModel

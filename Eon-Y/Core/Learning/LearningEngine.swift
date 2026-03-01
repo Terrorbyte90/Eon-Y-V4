@@ -48,7 +48,8 @@ actor LearningEngine {
         }
     }
 
-    // Kallas från EonLiveAutonomy efter varje inlärningscykel — driver kompetens från faktisk DB
+    // v3 Claude Edition: Improved competency sync with logarithmic scaling
+    // and FSRS review bonuses so competency actually grows over time
     func syncCompetenciesFromDatabase() async {
         let memory = PersistentMemoryStore.shared
         let domainKeywords: [String: [String]] = [
@@ -68,17 +69,35 @@ actor LearningEngine {
 
         for (domain, keywords) in domainKeywords {
             var totalFacts = 0
+            var uniqueSubjects: Set<String> = []
             for keyword in keywords {
-                let facts = await memory.searchFacts(query: keyword, limit: 20)
+                let facts = await memory.searchFacts(query: keyword, limit: 30)
                 totalFacts += facts.count
+                for fact in facts {
+                    uniqueSubjects.insert(fact.subject)
+                }
             }
-            // Kompetens = min(0.95, antal relevanta fakta / 50) — verklig mätning
-            let newLevel = min(0.95, Double(totalFacts) / 50.0)
+
+            // Logarithmic scaling: many facts = high competency, diminishing returns
+            // This naturally grows as more facts are added to the database
+            let factScore = totalFacts > 0 ? min(0.70, 0.10 * log2(Double(totalFacts) + 1)) : 0.0
+
+            // Diversity bonus: knowing many different subjects in a domain matters
+            let diversityBonus = uniqueSubjects.count > 0 ? min(0.15, 0.03 * log2(Double(uniqueSubjects.count) + 1)) : 0.0
+
+            // FSRS study bonus: active study drives competency
+            let domainFSRSItems = fsrsItems.filter { $0.domain == domain }
+            let reviewedItems = domainFSRSItems.filter { $0.reviewCount > 0 }
+            let fsrsBonus = min(0.10, Double(reviewedItems.count) * 0.01)
+
+            let newLevel = min(0.90, factScore + diversityBonus + fsrsBonus)
             if var comp = competencyBook[domain] {
-                // Ratchet: kompetens kan bara öka, aldrig minska (bevarar lärande)
-                comp.level = max(comp.level, newLevel)
+                // Ratchet: competency can only increase
+                // Plus gradual growth bonus if recently studied
+                let recentlyStudied = comp.lastStudied.timeIntervalSinceNow > -3600
+                let growthBonus = recentlyStudied ? 0.003 : 0.0
+                comp.level = min(0.95, max(comp.level, newLevel) + growthBonus)
                 competencyBook[domain] = comp
-                // Persistera
                 UserDefaults.standard.set(comp.level, forKey: "competency_\(domain)")
             }
         }
