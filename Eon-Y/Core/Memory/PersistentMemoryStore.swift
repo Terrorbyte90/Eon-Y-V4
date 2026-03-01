@@ -666,6 +666,35 @@ actor PersistentMemoryStore {
         return results
     }
 
+    func recentFactsWithConfidence(limit: Int = 50) -> [(subject: String, predicate: String, object: String, confidence: Double)] {
+        guard isReady else { return [] }
+        var results: [(String, String, String, Double)] = []
+        let sql = "SELECT subject, predicate, object, confidence FROM facts ORDER BY created_at DESC LIMIT ?"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let conf = sqlite3_column_double(stmt, 3)
+                results.append((sqlText(stmt, 0), sqlText(stmt, 1), sqlText(stmt, 2), conf))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    func articleCountForDomain(_ domain: String) -> Int {
+        guard isReady else { return 0 }
+        var count = 0
+        var stmt: OpaquePointer?
+        let sql = "SELECT COUNT(*) FROM articles WHERE domain = ?"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (domain as NSString).utf8String, -1, SQLITE_TRANSIENT_FUNC)
+            if sqlite3_step(stmt) == SQLITE_ROW { count = Int(sqlite3_column_int(stmt, 0)) }
+        }
+        sqlite3_finalize(stmt)
+        return count
+    }
+
     // MARK: - Helper
 
     @discardableResult

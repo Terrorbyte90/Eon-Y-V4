@@ -155,11 +155,15 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
             brain.integratedIntelligence = ii
             brain.intelligenceGrowthVelocity = velocity
 
-            // Aktiv självutveckling: öka alla dimensioner kontinuerligt (liten men konstant)
-            // Detta säkerställer att Eon alltid växer, även utan input
-            let baseGrowth = 0.0002 * (1.0 - ii)  // Avtar när II är hög (logistisk kurva)
-            for dim in CognitiveDimension.allCases.filter({ state.dimensionLevel($0) < 0.95 }) {
-                await state.update(dimension: dim, delta: baseGrowth, source: "orchestrator_growth")
+            // Riktad tillväxt: öka BARA dimensioner som aktivt tränas av pelare
+            // Ingen generell inflation — tillväxt måste förtjänas via verklig aktivitet.
+            // Boosta bara de svagaste dimensionerna (flaskhalsar) med ett litet nudge.
+            if currentCycle % 10 == 0 {  // Var ~20s istället för varje cykel
+                let bottlenecks = state.weakestDimensions(limit: 3)
+                for (dim, level) in bottlenecks where level < 0.5 {
+                    let nudge = 0.0003 * (0.5 - level)  // Proportionellt mot gap
+                    await state.update(dimension: dim, delta: nudge, source: "bottleneck_nudge")
+                }
             }
 
             // Trigga event baserat på tillstånd
@@ -801,34 +805,44 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Feedback-förstärkare (15s)
 
     private func feedbackAmplifier() async {
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        // Feedback-förstärkaren körs var 30s (inte var 3s) — förhindrar inflation
+        try? await Task.sleep(nanoseconds: 15_000_000_000)
         while !Task.isCancelled {
-            guard let brain else { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
+            guard let brain else { try? await Task.sleep(nanoseconds: 10_000_000_000); continue }
 
             let state = CognitiveState.shared
+            let ii = state.integratedIntelligence
 
-            // Kör alla feedback-loopar
+            // Förstärk bara loopar där ALLA dimensioner är genuint aktiva (> 0.55)
+            // och bara om II inte redan är hög (> 0.85) — förhindrar runaway inflation
+            guard ii < 0.88 else {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                continue
+            }
+
             let loops = state.feedbackLoops
             var amplified = 0
             for loop in loops where loop.type == .positive {
-                let avgLevel = loop.dimensions.compactMap { state.dimensionLevel($0) }.reduce(0, +) / Double(loop.dimensions.count)
-                if avgLevel > 0.45 {
-                    let boost = loop.strength * 0.002 * avgLevel
-                    for dim in loop.dimensions {
-                        await state.update(dimension: dim, delta: boost, source: "feedback_amplifier")
-                    }
-                    amplified += 1
+                let levels = loop.dimensions.compactMap { state.dimensionLevel($0) }
+                let minLevel = levels.min() ?? 0
+                let avgLevel = levels.reduce(0, +) / Double(levels.count)
+                // Kräv att ALLA dimensioner i loopen är aktiva (minLevel > 0.55)
+                guard minLevel > 0.55 else { continue }
+                let boost = loop.strength * 0.0015 * (avgLevel - 0.55)  // Reducerat och gated
+                for dim in loop.dimensions {
+                    await state.update(dimension: dim, delta: boost, source: "feedback_amplifier")
                 }
+                amplified += 1
             }
 
             if amplified > 0 {
                 brain.innerMonologue.append(MonologueLine(
-                    text: "🔄 FEEDBACK: \(amplified) positiva loopar aktiva · II=\(String(format: "%.4f", state.integratedIntelligence)) · v=\(String(format: "%.6f", state.growthVelocity))/min",
+                    text: "🔄 FEEDBACK: \(amplified) loopar förstärker · II=\(String(format: "%.4f", ii)) · v=\(String(format: "%.6f", state.growthVelocity))/min",
                     type: .loopTrigger
                 ))
             }
 
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
         }
     }
 }

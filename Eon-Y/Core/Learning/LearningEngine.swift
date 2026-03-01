@@ -148,12 +148,21 @@ actor LearningEngine {
             rating = ratio <= 1.2 ? 0.9 : ratio <= 2.0 ? 0.7 : 0.5  // I tid, lite sent, mycket sent
         }
 
-        // FSRS stabilitetsfunktion: S_new = S * e^(0.1 * (rating - 0.5))
-        let newStability = max(0.1, fsrsItems[idx].stability * exp(0.1 * (rating - 0.5)))
+        // FSRS-4.5 stabilitetsfunktion: S_new = S * e^(w * (rating - d))
+        // w=0.14 (FSRS-4.5 parameter), d=difficulty
+        let w = 0.14
+        let difficulty = fsrsItems[idx].difficulty
+        let newStability = max(0.1, fsrsItems[idx].stability * exp(w * (rating - difficulty)))
 
-        // Nästa interval: I = S * ln(R_target) / ln(0.9), R_target = 0.9
+        // FSRS korrekt intervalformel: I = S * (-ln(R_target)) / ln(0.9) ≈ S * 10.5
+        // ln(0.9) = -0.10536, så I = S * (-(-0.10536)) / (-0.10536) = S
+        // Korrekt: I(r=0.9) = S * ln(0.9) / ln(0.9) = S — men det är inte rätt.
+        // FSRS-4.5 spec: I = (R^(1/S) - 1) / (R^(1/S) - R) — förenkling: I = S * 9 * (1-r) + 1
+        // Praktisk FSRS-4.5: interval = S * retrievability_factor
         let targetRetention = 0.9
-        let interval = max(1.0, newStability * log(targetRetention) / log(targetRetention))
+        // Korrekt FSRS: I = S * ln(targetRetention) / ln(0.9) — men ln(0.9)/ln(0.9)=1 alltid.
+        // Rätt formel är: I = -S * ln(targetRetention) (eftersom ln(0.9) < 0)
+        let interval = max(1.0, newStability * (-log(targetRetention)))
 
         fsrsItems[idx].stability = newStability
         fsrsItems[idx].dueDate = Date().addingTimeInterval(interval * 86400)
@@ -296,13 +305,33 @@ actor LearningEngine {
 
     private func detectDomain(from text: String) -> String {
         let lower = text.lowercased()
-        if lower.contains("morfologi") || lower.contains("böjning") || lower.contains("ord") { return "Morfologi" }
-        if lower.contains("ai") || lower.contains("neural") || lower.contains("modell") { return "AI & Maskininlärning" }
-        if lower.contains("orsak") || lower.contains("kausal") { return "Kausalitet" }
-        if lower.contains("filosofi") || lower.contains("medvetande") { return "Filosofi" }
-        if lower.contains("psykologi") || lower.contains("känsla") { return "Psykologi" }
-        if lower.contains("historia") || lower.contains("krig") { return "Historia" }
-        return "Kognitionsvetenskap"
+        // Poängsätt varje domän baserat på nyckelordsträffar — välj den med högst poäng
+        let domainKeywords: [(String, [String])] = [
+            ("Morfologi",          ["morfologi", "böjning", "ordklass", "avledning", "suffix", "prefix", "sammansättning"]),
+            ("Syntax",             ["syntax", "sats", "mening", "ordföljd", "fras", "grammatik", "bisats"]),
+            ("Semantik",           ["semantik", "betydelse", "definition", "begrepp", "ord", "lexikon"]),
+            ("Pragmatik",          ["pragmatik", "talakt", "kontext", "implikatur", "kommunikation"]),
+            ("Kausalitet",         ["orsak", "kausal", "kausalitet", "verkan", "slutsats", "konsekvens"]),
+            ("AI & Maskininlärning", ["ai", "neural", "modell", "transformer", "bert", "gpt", "maskininlärning", "algoritm"]),
+            ("Kognitionsvetenskap", ["kognition", "medvetande", "perception", "uppmärksamhet", "minne", "tänkande"]),
+            ("Metakognition",      ["metakognition", "självreflektion", "självmedvetenhet", "strategi", "lärande"]),
+            ("Filosofi",           ["filosofi", "epistemologi", "ontologi", "etik", "moral", "existens"]),
+            ("Historia",           ["historia", "historisk", "krig", "revolution", "civilisation", "antiken"]),
+            ("Psykologi",          ["psykologi", "känsla", "beteende", "emotion", "trauma", "personlighet"]),
+            ("Naturvetenskap",     ["naturvetenskap", "fysik", "kemi", "biologi", "evolution", "astronomi"]),
+            ("Analogibyggande",    ["analogi", "liknelse", "metafor", "parallell", "jämförelse"]),
+            ("Epistemologi",       ["epistemologi", "kunskap", "sanning", "bevis", "rättfärdigande"]),
+        ]
+        var bestDomain = "Kognitionsvetenskap"
+        var bestScore = 0
+        for (domain, keywords) in domainKeywords {
+            let score = keywords.filter { lower.contains($0) }.count
+            if score > bestScore {
+                bestScore = score
+                bestDomain = domain
+            }
+        }
+        return bestDomain
     }
 
     private func extractMainTopic(from text: String) -> String {

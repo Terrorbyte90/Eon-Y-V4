@@ -316,18 +316,68 @@ final class CognitiveState: ObservableObject {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             updateFeedbackLoops()
+            applyHomeostaticDecay()
+            updateCognitiveLoad()
             identifyBottlenecks()
         }
+    }
+
+    // MARK: - Homeostas: dimensioner sjunker sakta mot baslinjen om de inte aktivt tränas
+    // Förhindrar att II alltid konvergerar mot 0.99 utan verklig aktivitet.
+    private func applyHomeostaticDecay() {
+        let baseline: Double = 0.35          // Naturlig vilonivå
+        let decayRate: Double = 0.00015      // Per 5s-cykel — mycket litet men konstant
+        let activeThreshold: Double = 0.75   // Dimensioner under detta decayas mot baseline
+
+        for dim in CognitiveDimension.allCases where dim != .cognitiveLoad {
+            guard let current = dimensions[dim] else { continue }
+            if current > baseline {
+                // Decay mot baseline, snabbare ju högre över baseline
+                let excess = current - baseline
+                let decay = decayRate * (1.0 + excess * 2.0)
+                dimensions[dim] = max(baseline, current - decay)
+            }
+        }
+    }
+
+    // MARK: - Verklig cognitiveLoad baserad på systemlast
+    private func updateCognitiveLoad() {
+        let thermal = ProcessInfo.processInfo.thermalState
+        let thermalLoad: Double
+        switch thermal {
+        case .nominal:  thermalLoad = 0.15
+        case .fair:     thermalLoad = 0.40
+        case .serious:  thermalLoad = 0.70
+        case .critical: thermalLoad = 0.90
+        @unknown default: thermalLoad = 0.20
+        }
+        // Blanda termisk last med antal aktiva processer
+        let processLoad = min(0.8, Double(activeProcesses.count) * 0.04)
+        let newLoad = min(0.95, thermalLoad * 0.7 + processLoad * 0.3)
+        // Smooth update
+        cognitiveLoad = cognitiveLoad * 0.7 + newLoad * 0.3
+        dimensions[.cognitiveLoad] = cognitiveLoad
     }
 
     private func updateFeedbackLoops() {
         for loop in feedbackLoops {
             let avgLevel = loop.dimensions.compactMap { dimensions[$0] }.reduce(0, +) / Double(loop.dimensions.count)
-            if loop.type == .positive && avgLevel > 0.4 {
-                // Förstärk alla dimensioner i loopen
+            if loop.type == .positive && avgLevel > 0.5 {
+                // Förstärk dimensioner i loopen — men bara om de är aktivt tränade (> baseline)
                 for dim in loop.dimensions {
-                    let boost = loop.strength * 0.005 * avgLevel
-                    dimensions[dim] = min(0.99, (dimensions[dim] ?? 0.3) + boost)
+                    let current = dimensions[dim] ?? 0.35
+                    guard current > 0.45 else { continue }  // Kräver verklig aktivitet
+                    let boost = loop.strength * 0.003 * (avgLevel - 0.5)  // Reducerat från 0.005
+                    dimensions[dim] = min(0.99, current + boost)
+                }
+            } else if loop.type == .negative {
+                // Negativ feedback: hög cognitiveLoad sänker adaptivitet
+                let loadLevel = dimensions[.cognitiveLoad] ?? 0.3
+                if loadLevel > 0.5 {
+                    let suppression = loop.strength * 0.002 * (loadLevel - 0.5)
+                    for dim in loop.dimensions where dim != .cognitiveLoad {
+                        dimensions[dim] = max(0.1, (dimensions[dim] ?? 0.3) - suppression)
+                    }
                 }
             }
         }
