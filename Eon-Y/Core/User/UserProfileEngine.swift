@@ -27,6 +27,16 @@ final class UserProfileEngine: ObservableObject {
         Task { await loadWordStats() }
     }
 
+    // Lätt preview-instans — ingen DB, inga Tasks
+    static func preview() -> UserProfileEngine {
+        let e = UserProfileEngine()
+        e.totalConversations = 7
+        e.totalWordCount = 1240
+        e.uniqueVocabularySize = 496
+        e.profile.eonDescription = "Intresserad av teknik och AI. Föredrar detaljerade svar."
+        return e
+    }
+
     func loadWordStats() async {
         totalWordCount = await memory.totalWordCount()
         // Vokabulärstorlek: approximation baserat på unika ord i konversationer
