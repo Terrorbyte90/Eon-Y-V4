@@ -113,6 +113,27 @@ actor SwedishLanguageCore {
         (["komma", "med", "korta", "varsel"], "informera sent", "come with short notice"),
         (["ställa", "till", "med"], "orsaka problem", "set up with"),
         (["göra", "slag", "i", "saken"], "ta ett snabbt beslut", "make a blow in the matter"),
+        // v6: Kognitiva och emotionella idiom
+        (["ha", "huvudet", "på", "skaft"], "vara klok och smart", "have the head on a shaft"),
+        (["tappa", "tråden"], "förlora fokus i samtalet", "lose the thread"),
+        (["ha", "tungan", "rätt", "i", "mun"], "uttrycka sig korrekt", "have tongue right in mouth"),
+        (["gå", "upp", "ett", "ljus"], "plötsligt förstå", "a light goes up"),
+        (["vara", "på", "det", "klara"], "förstå situationen", "be on the clear"),
+        (["ha", "koll", "på", "läget"], "vara välinformerad om situationen", "have control on the situation"),
+        (["ligga", "i", "startgroparna"], "vara redo att börja", "lie in the starting pit"),
+        (["ta", "saken", "i", "egna", "händer"], "agera självständigt", "take matter in own hands"),
+        (["vara", "i", "sitt", "esse"], "vara i sin bästa form", "be in one's element"),
+        (["ha", "alla", "tiders"], "vara fantastisk", "have all times"),
+        (["gå", "i", "taket"], "bli väldigt arg", "go in the ceiling"),
+        (["falla", "på", "plats"], "börja ge mening", "fall into place"),
+        (["ta", "en", "funderare"], "tänka djupt på något", "take a thinker"),
+        (["inte", "vara", "hundra"], "inte må helt bra", "not be a hundred"),
+        (["ha", "fjärilar", "i", "magen"], "känna nervositet/förälskelse", "have butterflies in the stomach"),
+        (["vara", "som", "natt", "och", "dag"], "vara helt olika", "be like night and day"),
+        (["ha", "skinn", "på", "näsan"], "vara tuff och motståndskraftig", "have skin on the nose"),
+        (["falla", "i", "god", "jord"], "bli väl mottagen", "fall in good soil"),
+        (["gå", "rakt", "på", "sak"], "vara direkt, inte krångla", "go straight to the matter"),
+        (["veta", "hut"], "förstå gränser för uppförande", "know decency"),
     ]
 
     private func detectIdioms(_ text: String) -> [DetectedIdiom] {
@@ -313,37 +334,51 @@ actor SwedishMorphologyEngine {
 
     // Swedish inflection suffixes for stemming back to base forms
     private static let inflectionPatterns: [(suffix: String, baseSuffix: String, pos: String)] = [
-        // Verb inflections
-        ("ade", "a", "verb"),       // pratade → prata
+        // Verb inflections — v6: expanded with all 4 Swedish conjugation groups
+        ("ade", "a", "verb"),       // pratade → prata (konj 1)
         ("ades", "a", "verb"),      // pratades → prata
         ("ande", "a", "verb"),      // pratande → prata
         ("ar", "a", "verb"),        // pratar → prata
-        ("arna", "a", "verb"),      // pratarna → prata (noun form)
-        ("ade", "a", "verb"),       // cyklade → cykla
-        ("er", "a", "verb"),        // springer → springa (irregular but common)
-        ("de", "", "verb"),         // sprangde → sprang
-        ("t", "a", "verb"),         // pratat → prata
-        ("s", "", "verb"),          // skrivs → skriv
+        ("at", "a", "verb"),        // pratat → prata
+        ("as", "a", "verb"),        // pratas → prata (passive)
+        ("de", "a", "verb"),        // ringde → ringa (konj 2a)
+        ("te", "a", "verb"),        // köpte → köpa (konj 2b)
+        ("er", "a", "verb"),        // ringer → ringa
+        ("t", "a", "verb"),         // ringt → ringa
+        ("d", "a", "verb"),         // anslöd → anslöa (irregular)
+        ("s", "", "verb"),          // skrivs → skriv (passive)
+        ("it", "a", "verb"),        // skrivit → skriva (konj 4)
+        ("erat", "era", "verb"),    // analyserat → analysera
+        ("erar", "era", "verb"),    // analyserar → analysera
+        ("erade", "era", "verb"),   // analyserade → analysera
+        ("ering", "era", "noun"),   // analysering → analysera (verbal noun)
 
-        // Noun inflections (definite/plural)
+        // Noun inflections (definite/plural) — v6: expanded
         ("en", "", "noun"),         // bilen → bil
         ("et", "", "noun"),         // huset → hus
-        ("arna", "a", "noun"),      // bilarna → bila?
+        ("arna", "a", "noun"),      // bilarna → bila
         ("erna", "", "noun"),       // männerna → männ
         ("orna", "", "noun"),       // flickorna → flick
         ("ar", "", "noun"),         // bilar → bil
         ("or", "", "noun"),         // flickor → flick
         ("er", "", "noun"),         // platser → plats
-        ("na", "", "noun"),         // husen → hus (already covered by -en)
+        ("na", "", "noun"),         // husen → hus
         ("ns", "", "noun"),         // bilens → bil (genitive)
+        ("ens", "", "noun"),        // bilens → bil (genitive)
+        ("ets", "", "noun"),        // husets → hus (genitive)
+        ("arnas", "a", "noun"),     // bilarnas → bil (genitive plural)
         ("s", "", "noun"),          // bils → bil (genitive)
 
-        // Adjective inflections
-        ("are", "", "adjective"),   // snabbare → snabb
-        ("ast", "", "adjective"),   // snabbast → snabb
+        // Adjective inflections — v6: expanded
+        ("are", "", "adjective"),   // snabbare → snabb (komparativ)
+        ("ast", "", "adjective"),   // snabbast → snabb (superlativ)
         ("aste", "", "adjective"),  // snabbaste → snabb
-        ("a", "", "adjective"),     // snabba → snabb
-        ("t", "", "adjective"),     // snabbt → snabb
+        ("a", "", "adjective"),     // snabba → snabb (plural/bestämd)
+        ("t", "", "adjective"),     // snabbt → snabb (neutrum)
+        ("igt", "ig", "adjective"), // viktigt → viktig (neutrum ig-adj)
+        ("iga", "ig", "adjective"), // viktiga → viktig (plural ig-adj)
+        ("liga", "lig", "adjective"), // möjliga → möjlig
+        ("ligt", "lig", "adjective"), // möjligt → möjlig
     ]
 
     func analyze(_ text: String) async -> [MorphemeAnalysis] {
@@ -401,11 +436,15 @@ actor SwedishMorphologyEngine {
         return nil
     }
 
-    /// Common Swedish compound linking morphemes ("fog")
-    private static let compoundLinks = ["s", "e", "o", "u", "es"]
+    /// Common Swedish compound linking morphemes ("fog") — v6: expanded set
+    private static let compoundLinks = ["s", "e", "o", "u", "es", "a", "ar", "er", "or", "nings", "ings"]
 
-    /// Known Swedish prefixes that modify meaning
-    private static let knownPrefixes = ["be", "för", "under", "över", "om", "an", "upp", "av", "ut", "in", "på", "fram", "till", "åter", "sam", "mot"]
+    /// Known Swedish prefixes that modify meaning — v6: expanded
+    private static let knownPrefixes = [
+        "be", "för", "under", "över", "om", "an", "upp", "av", "ut", "in",
+        "på", "fram", "till", "åter", "sam", "mot", "med", "bort", "ner",
+        "ur", "kring", "genom", "miss", "van", "o",
+    ]
 
     private func analyzeCompound(_ word: String) -> MorphemeAnalysis {
         // Strategy 1: Check known prefixes first (be-, för-, under-, etc.)
@@ -469,14 +508,26 @@ actor SwedishMorphologyEngine {
             )
         }
 
-        // Strategy 3: Suffix-based POS guessing for unknown words
+        // Strategy 3: Suffix-based POS guessing for unknown words — v6: expanded suffix rules
         let pos: String
-        if word.hasSuffix("het") || word.hasSuffix("tion") || word.hasSuffix("ning") || word.hasSuffix("ande") || word.hasSuffix("else") {
+        if word.hasSuffix("het") || word.hasSuffix("tion") || word.hasSuffix("ning") ||
+           word.hasSuffix("ande") || word.hasSuffix("else") || word.hasSuffix("skap") ||
+           word.hasSuffix("dom") || word.hasSuffix("nad") || word.hasSuffix("sel") ||
+           word.hasSuffix("ment") || word.hasSuffix("lek") || word.hasSuffix("eri") ||
+           word.hasSuffix("ist") || word.hasSuffix("itet") || word.hasSuffix("ism") ||
+           word.hasSuffix("ans") || word.hasSuffix("ens") {
             pos = "noun"
-        } else if word.hasSuffix("lig") || word.hasSuffix("bar") || word.hasSuffix("sam") || word.hasSuffix("isk") {
+        } else if word.hasSuffix("lig") || word.hasSuffix("bar") || word.hasSuffix("sam") ||
+                  word.hasSuffix("isk") || word.hasSuffix("aktig") || word.hasSuffix("mässig") ||
+                  word.hasSuffix("full") || word.hasSuffix("lös") || word.hasSuffix("artad") ||
+                  word.hasSuffix("betonad") || word.hasSuffix("ande") && word.count > 6 {
             pos = "adjective"
-        } else if word.hasSuffix("era") || word.hasSuffix("ade") || word.hasSuffix("ades") {
+        } else if word.hasSuffix("era") || word.hasSuffix("ade") || word.hasSuffix("ades") ||
+                  word.hasSuffix("erar") || word.hasSuffix("erat") || word.hasSuffix("eras") ||
+                  word.hasSuffix("ade") || word.hasSuffix("ades") || word.hasSuffix("ades") {
             pos = "verb"
+        } else if word.hasSuffix("vis") || word.hasSuffix("ligen") || word.hasSuffix("ledes") {
+            pos = "adverb"
         } else {
             pos = "unknown"
         }
@@ -709,6 +760,68 @@ actor SwedishWSDEngine {
             "bild": [
                 WordSense(id: "bild.1", definition: "visuell representation", examples: ["ta en bild", "bildskärm", "fotobild"], confidence: 0.0),
                 WordSense(id: "bild.2", definition: "metafor, föreställning", examples: ["ge en bild av", "världsbild", "självbild"], confidence: 0.0)
+            ],
+            // ── Utökad WSD v11: kognitiva och vetenskapliga termer ──
+            "modell": [
+                WordSense(id: "modell.1", definition: "förebild, mannekäng", examples: ["fotomodell", "stå modell"], confidence: 0.0),
+                WordSense(id: "modell.2", definition: "abstrakt representation", examples: ["klimatmodell", "språkmodell", "matematisk modell"], confidence: 0.0),
+                WordSense(id: "modell.3", definition: "produktvariant", examples: ["senaste modellen", "bilmodell"], confidence: 0.0)
+            ],
+            "process": [
+                WordSense(id: "process.1", definition: "förlopp, procedur", examples: ["lärandeprocess", "kognitiv process"], confidence: 0.0),
+                WordSense(id: "process.2", definition: "rättegång", examples: ["rättsprocess", "förlora processen"], confidence: 0.0),
+                WordSense(id: "process.3", definition: "datorprocess", examples: ["bakgrundsprocess", "processorkraft"], confidence: 0.0)
+            ],
+            "dimension": [
+                WordSense(id: "dimension.1", definition: "fysisk storlek", examples: ["tredimensionell", "dimensioner på rummet"], confidence: 0.0),
+                WordSense(id: "dimension.2", definition: "aspekt", examples: ["en ny dimension", "moralisk dimension"], confidence: 0.0)
+            ],
+            "ström": [
+                WordSense(id: "ström.1", definition: "vattenström", examples: ["stark ström", "mot strömmen"], confidence: 0.0),
+                WordSense(id: "ström.2", definition: "elektrisk ström", examples: ["strömavbrott", "strömmen gick"], confidence: 0.0),
+                WordSense(id: "ström.3", definition: "flöde av människor/data", examples: ["informationsström", "medvetandeström", "tankeström"], confidence: 0.0)
+            ],
+            "kärna": [
+                WordSense(id: "kärna.1", definition: "fruktkärna", examples: ["äpplekärna", "körsbärskärna"], confidence: 0.0),
+                WordSense(id: "kärna.2", definition: "central del", examples: ["kärnfråga", "problemets kärna", "kärnan i argumentet"], confidence: 0.0),
+                WordSense(id: "kärna.3", definition: "atomkärna", examples: ["kärnkraft", "kärnenergi", "kärnfysik"], confidence: 0.0)
+            ],
+            "fält": [
+                WordSense(id: "fält.1", definition: "jordbruksfält", examples: ["åkerfält", "öppet fält"], confidence: 0.0),
+                WordSense(id: "fält.2", definition: "ämnesområde", examples: ["forskningsfält", "expertis inom fältet"], confidence: 0.0),
+                WordSense(id: "fält.3", definition: "fysikaliskt fält", examples: ["magnetfält", "gravitationsfält", "elektriskt fält"], confidence: 0.0)
+            ],
+            "signal": [
+                WordSense(id: "signal.1", definition: "meddelande, varning", examples: ["ge en signal", "larmsignal"], confidence: 0.0),
+                WordSense(id: "signal.2", definition: "elektronisk/neural signal", examples: ["nervsignal", "radiosignal", "signalstyrka"], confidence: 0.0)
+            ],
+            "system": [
+                WordSense(id: "system.1", definition: "ordnad struktur", examples: ["skattesystem", "skolsystem", "värdesystem"], confidence: 0.0),
+                WordSense(id: "system.2", definition: "tekniskt system", examples: ["operativsystem", "nervsystem", "solsystem"], confidence: 0.0)
+            ],
+            "koppling": [
+                WordSense(id: "koppling.1", definition: "förbindelse, relation", examples: ["kopplingen mellan", "neural koppling"], confidence: 0.0),
+                WordSense(id: "koppling.2", definition: "bilkoppling", examples: ["släppa kopplingen", "kopplingsslitage"], confidence: 0.0)
+            ],
+            "nivå": [
+                WordSense(id: "nivå.1", definition: "höjdnivå", examples: ["havsnivå", "på samma nivå"], confidence: 0.0),
+                WordSense(id: "nivå.2", definition: "grad, kvalitet", examples: ["hög nivå", "medvetandenivå", "komplexitetsnivå"], confidence: 0.0)
+            ],
+            "flöde": [
+                WordSense(id: "flöde.1", definition: "vattenflöde", examples: ["blodflöde", "vattenflöde"], confidence: 0.0),
+                WordSense(id: "flöde.2", definition: "psykologiskt flöde", examples: ["kreativt flöde", "arbetsflöde", "informationsflöde"], confidence: 0.0)
+            ],
+            "yta": [
+                WordSense(id: "yta.1", definition: "fysisk yta", examples: ["arbetsyta", "golvyta", "slät yta"], confidence: 0.0),
+                WordSense(id: "yta.2", definition: "ytlighet", examples: ["skrapa på ytan", "på ytan verkar det"], confidence: 0.0)
+            ],
+            "vikt": [
+                WordSense(id: "vikt.1", definition: "tyngd", examples: ["kroppsvikt", "lyfta vikter"], confidence: 0.0),
+                WordSense(id: "vikt.2", definition: "betydelse", examples: ["stor vikt", "lägga vikt vid", "av stor vikt"], confidence: 0.0)
+            ],
+            "balans": [
+                WordSense(id: "balans.1", definition: "jämvikt, stabilitet", examples: ["hålla balansen", "i balans", "balansgång"], confidence: 0.0),
+                WordSense(id: "balans.2", definition: "ekonomisk balans", examples: ["balansräkning", "handelsbalans"], confidence: 0.0)
             ],
         ]
     }

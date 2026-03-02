@@ -30,6 +30,11 @@ final class GlobalWorkspaceEngine: ObservableObject {
     @Published var dominantCategory: WorkspaceThoughtCategory = .general
     @Published var focusStrength: Double = 0.0 // How focused the workspace is (0=scattered, 1=laser)
 
+    // v6: Embedding cache for BERT-based semantic similarity
+    private var embeddingCache: [UUID: [Float]] = [:]
+    private var embeddingCacheHits: Int = 0
+    private var useBertSimilarity: Bool = false // Enabled once BERT is loaded
+
     private init() {
         setupDefaultModules()
     }
@@ -55,6 +60,7 @@ final class GlobalWorkspaceEngine: ObservableObject {
         if activeThoughts.count >= maxActiveThoughts {
             // Ta bort svagaste tanken
             if let weakest = activeThoughts.min(by: { $0.activation < $1.activation }) {
+                embeddingCache.removeValue(forKey: weakest.id)
                 activeThoughts.removeAll { $0.id == weakest.id }
             }
         }
@@ -63,8 +69,23 @@ final class GlobalWorkspaceEngine: ObservableObject {
         newThought.activation = calculateInitialActivation(thought)
         activeThoughts.append(newThought)
 
+        // v6: Async BERT embedding for semantic similarity
+        if useBertSimilarity {
+            Task {
+                let embedding = await NeuralEngineOrchestrator.shared.embed(newThought.content)
+                if !embedding.allSatisfy({ $0 == 0 }) {
+                    await MainActor.run { self.embeddingCache[newThought.id] = embedding }
+                }
+            }
+        }
+
         // Kör tävling
         runCompetition()
+    }
+
+    /// v6: Enable BERT similarity once the model is loaded
+    func enableBertSimilarity() {
+        useBertSimilarity = true
     }
 
     // MARK: - Tävlingsmekanik
@@ -98,8 +119,10 @@ final class GlobalWorkspaceEngine: ObservableObject {
             activeThoughts[i].activation = max(0, activeThoughts[i].activation - inhibition)
         }
 
-        // Phase 3: Remove dead thoughts
+        // Phase 3: Remove dead thoughts (v6: also clean embedding cache)
+        let deadIDs = Set(activeThoughts.filter { $0.activation < 0.08 }.map { $0.id })
         activeThoughts.removeAll { $0.activation < 0.08 }
+        for id in deadIDs { embeddingCache.removeValue(forKey: id) }
 
         // Phase 4: Adaptive capacity — expand workspace when diverse, contract when focused
         let categoryCount = Set(activeThoughts.map { $0.category }).count
@@ -320,8 +343,29 @@ final class GlobalWorkspaceEngine: ObservableObject {
         "the", "is", "a", "an", "of", "to", "in", "and", "was", "that",
     ]
 
+    /// v6: Local cosine similarity for BERT embeddings (avoids actor isolation)
+    private func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        var dot: Float = 0, normA: Float = 0, normB: Float = 0
+        for i in 0..<a.count {
+            dot += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
+        }
+        let denom = sqrt(normA) * sqrt(normB)
+        return denom > 0 ? dot / denom : 0
+    }
+
     private func calculateSimilarity(_ a: WorkspaceThought, _ b: WorkspaceThought) -> Double {
-        // Weighted word overlap — filters stopwords and weights longer (more specific) words higher
+        // v6: Try BERT cosine similarity first (768-dim semantic vectors)
+        if let embA = embeddingCache[a.id], let embB = embeddingCache[b.id] {
+            embeddingCacheHits += 1
+            let cosine = cosineSimilarity(embA, embB)
+            let categoryBonus: Double = a.category == b.category ? 0.05 : 0.0
+            return min(1.0, max(0, Double(cosine)) + categoryBonus)
+        }
+
+        // Fallback: Weighted word overlap — filters stopwords and weights longer words
         let wordsA = Set(a.content.lowercased().split(separator: " ")
             .map(String.init)
             .filter { $0.count > 2 && !Self.stopwords.contains($0) })
@@ -408,13 +452,22 @@ final class GlobalWorkspaceEngine: ObservableObject {
         return bestCategory
     }
 
-    /// Estimate emotional valence from text (-1 negative to +1 positive)
+    /// v6: Estimate emotional valence from text (-1 negative to +1 positive) — expanded Swedish lexicon
     private func estimateEmotionalValence(_ text: String) -> Double {
         let lower = text.lowercased()
-        let positive = ["framgång", "förbättring", "stark", "lyckas", "bra", "utmärkt", "tillväxt", "positiv", "löst", "framsteg", "✓", "✅"]
-        let negative = ["problem", "svag", "stagnation", "misslyckades", "bristfällig", "regression", "fel", "låg", "⚠️", "❌"]
-        let posScore = Double(positive.filter { lower.contains($0) }.count) * 0.15
-        let negScore = Double(negative.filter { lower.contains($0) }.count) * 0.15
+        let positive = [
+            "framgång", "förbättring", "stark", "lyckas", "bra", "utmärkt", "tillväxt", "positiv",
+            "löst", "framsteg", "nyfiken", "intressant", "fascinerande", "kreativ", "harmoni",
+            "insikt", "förståelse", "koppling", "resonans", "koherens", "synkronisering",
+            "medveten", "vaken", "fokuserad", "uppmärksam", "klarhet", "balans",
+        ]
+        let negative = [
+            "problem", "svag", "stagnation", "misslyckades", "bristfällig", "regression", "fel",
+            "låg", "oviss", "förvirrad", "kaotisk", "inkonsistent", "osäkerhet", "konflikt",
+            "överbelastad", "trött", "fragmenterad", "superkritisk", "instabil",
+        ]
+        let posScore = Double(positive.filter { lower.contains($0) }.count) * 0.12
+        let negScore = Double(negative.filter { lower.contains($0) }.count) * 0.12
         return min(1.0, max(-1.0, posScore - negScore))
     }
 
@@ -431,7 +484,7 @@ final class GlobalWorkspaceEngine: ObservableObject {
 
 // MARK: - Data Models
 
-enum WorkspaceThoughtCategory: Equatable {
+enum WorkspaceThoughtCategory: String, Equatable {
     case perception, memory, reasoning, language, emotion, general
 }
 

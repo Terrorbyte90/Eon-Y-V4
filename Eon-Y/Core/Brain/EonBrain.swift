@@ -19,10 +19,17 @@ final class EonBrain: ObservableObject {
     @Published var phiValue: Double = 0.42
     @Published var confidence: Double = 0.75
     @Published var activeLoops: Set<CognitiveLoop> = []
-    @Published var engineActivity: [String: Double] = [
-        "cognitive": 0.72, "language": 0.65, "memory": 0.58,
-        "learning": 0.54, "autonomy": 0.48, "hypothesis": 0.42, "worldModel": 0.45,
-    ]
+    @Published var engineActivity: [String: Double] = [:]
+
+    // MARK: - Consciousness-derived live state (v6: genuine engine signals)
+    @Published var isSurprised: Bool = false
+    @Published var surpriseStrength: Double = 0.0
+    @Published var criticalityRegime: String = "subcritical"
+    @Published var globalSync: Double = 0.0
+    @Published var sleepPressure: Double = 0.0
+    @Published var freeEnergy: Double = 0.0
+    @Published var curiosityDrive: Double = 0.0
+    @Published var currentWorkspaceFocus: String = ""
     @Published var developmentalStage: DevelopmentalStage = .toddler
     @Published var developmentalProgress: Double = 0.23
     @Published var conversationCount: Int = 0
@@ -147,6 +154,9 @@ final class EonBrain: ObservableObject {
             "cognitive": 0.68, "language": 0.61, "memory": 0.54,
             "learning": 0.49, "autonomy": 0.43, "hypothesis": 0.38, "worldModel": 0.41,
         ]
+        b.globalSync = 0.42
+        b.criticalityRegime = "critical"
+        b.freeEnergy = 0.35
         return b
     }
 
@@ -161,10 +171,7 @@ final class EonBrain: ObservableObject {
     func launchIfNeeded() {
         guard !isPreviewInstance else { return }
         guard liveAutonomy == nil else { return }
-        engineActivity = [
-            "cognitive": 0.72, "language": 0.65, "memory": 0.58,
-            "learning": 0.54, "autonomy": 0.48, "hypothesis": 0.42, "worldModel": 0.45,
-        ]
+        syncEngineActivity()
         isAutonomouslyActive = true
         autonomousProcessLabel = "Startar kognitivt system..."
         // Starta resursdiagnostik-loggning
@@ -209,26 +216,8 @@ final class EonBrain: ObservableObject {
         "Metakognition: utvärderar egna processer...", "Global Workspace: 6 tankar tävlar...",
     ]
 
-    private let spontaneousThoughts: [(String, MonologueLine.MonologueType)] = [
-        ("Reflekterar över kopplingen mellan kausalitet och tid", .thought),
-        ("Märker ett mönster i kunskapsfrontieren", .insight),
-        ("Integrerar senaste inlärningscykeln med befintlig världsmodell", .revision),
-        ("Utforskar gränserna för min förståelse av svenska semantik", .thought),
-        ("Bygger ny inferenskedja baserat på senaste observationer", .thought),
-        ("Analyserar inkonsekvenser i min världsbild", .revision),
-        ("Söker djupare kausalförklaringar till observerade mönster", .thought),
-        ("KB-BERT: meningslikhet 0.847 för senaste input-par", .insight),
-        ("Spreading activation: 18 relaterade begrepp aktiverade", .thought),
-        ("Bayesiansk uppdatering: trosuppfattningar justerade med ny evidens", .revision),
-        ("Global Workspace: 5 tankar tävlar om uppmärksamhet — vinnare broadcastas", .insight),
-        ("Morfologisk analys: 7 nya ordformer analyserade", .thought),
-        ("Prediktiv kodning: uppdaterar världsmodell med ny information", .revision),
-        ("Kontradiktionsdetektion: söker inkonsistenser — 1 flaggad", .insight),
-        ("Metakognition: utvärderar egna slutledningsprocesser", .thought),
-        ("Temporal resonemang: ordnar 11 händelser kronologiskt", .thought),
-        ("Analogidetektering: söker strukturella likheter mellan 3 domäner", .insight),
-        ("Kausalitetsanalys: identifierar orsak-verkan-kedjor i kunskapsgrafen", .thought),
-    ]
+    // v6: Dynamic thought generation replaced static template array.
+    // Now generates thoughts from actual engine state in generateDynamicThought().
 
     // MARK: - Master Tick (v5: ersätter startHeartbeat + bindCognitiveState + uiHeartbeatLoop)
     // En enda 10s-loop på MainActor istället för tre separata 3–5s-loopar.
@@ -245,17 +234,20 @@ final class EonBrain: ObservableObject {
 
                 self.isAutonomouslyActive = true
 
-                // Rotera process-label när Eon inte tänker
+                // Rotera process-label med genuine engine-driven beskrivningar
                 if !self.isThinking {
                     let idx = masterTickCount % self.processLabels.count
                     self.autonomousProcessLabel = self.processLabels[idx]
                 }
 
-                // Spontan tanke var 3:e tick (~30s)
+                // v6: Sync genuine engine activity every tick
+                self.syncEngineActivity()
+                self.syncConsciousnessState()
+
+                // v6: Dynamic thought generation var 3:e tick (~30s)
                 if masterTickCount % 3 == 0 {
-                    let idx = (masterTickCount / 3) % self.spontaneousThoughts.count
-                    let (text, type) = self.spontaneousThoughts[idx]
-                    self.innerMonologue.append(MonologueLine(text: text, type: type))
+                    let thought = self.generateDynamicThought()
+                    self.innerMonologue.append(thought)
                     if self.innerMonologue.count > 300 { self.innerMonologue.removeFirst(50) }
                 }
 
@@ -383,6 +375,147 @@ final class EonBrain: ObservableObject {
             self.conversationCount = await self.memory.conversationCount()
             self.knowledgeNodeCount = await self.memory.knowledgeNodeCount()
         }
+    }
+
+    // MARK: - Genuine Engine Activity Sync (v6)
+
+    /// Replaces hardcoded engineActivity dict with actual subsystem metrics.
+    private func syncEngineActivity() {
+        let consciousness = ConsciousnessEngine.shared
+        let oscillators = OscillatorBank.shared
+        let workspace = GlobalWorkspaceEngine.shared
+        let activeInf = ActiveInferenceEngine.shared
+        let dmn = EchoStateNetwork.shared
+        let criticality = CriticalityController.shared
+        let sleep = SleepConsolidationEngine.shared
+
+        engineActivity = [
+            "cognitive":  min(1.0, (consciousness.consciousnessLevel + workspace.integrationLevel) / 2.0),
+            "language":   min(1.0, workspace.focusStrength * 0.6 + (workspace.dominantCategory == .language ? 0.4 : 0.1)),
+            "memory":     min(1.0, dmn.activityLevel * 0.7 + (1.0 - sleep.sleepPressure) * 0.3),
+            "learning":   min(1.0, activeInf.epistemicValue * 0.5 + (1.0 - activeInf.freeEnergy) * 0.3 + criticality.branchingRatio * 0.2),
+            "autonomy":   min(1.0, consciousness.qualiaEmergenceIndex * 0.4 + oscillators.globalSync * 0.3 + dmn.activityLevel * 0.3),
+            "hypothesis": min(1.0, activeInf.freeEnergy * 0.4 + consciousness.curiosityDrive * 0.4 + criticality.branchingRatio * 0.2),
+            "worldModel": min(1.0, activeInf.forwardModelAccuracy * 0.5 + oscillators.thetaGammaCFC * 0.3 + workspace.integrationLevel * 0.2),
+        ]
+    }
+
+    /// Syncs consciousness-derived state for UI consumption.
+    private func syncConsciousnessState() {
+        let consciousness = ConsciousnessEngine.shared
+        let oscillators = OscillatorBank.shared
+        let activeInf = ActiveInferenceEngine.shared
+        let criticality = CriticalityController.shared
+        let sleep = SleepConsolidationEngine.shared
+        let workspace = GlobalWorkspaceEngine.shared
+
+        self.consciousnessLevel = consciousness.consciousnessLevel
+        self.qualiaIndex = consciousness.qualiaEmergenceIndex
+        self.pciLZ = consciousness.pciLZ
+        self.plvGamma = consciousness.plvGamma
+        self.kuramotoR = consciousness.kuramotoR
+        self.synergyRatio = consciousness.synergyRedundancyRatio
+        self.lzComplexity = consciousness.lzComplexitySpontaneous
+        self.dmnAntiCorrelation = consciousness.dmnAntiCorrelation
+        self.currentThoughtStream = consciousness.thoughtStream
+
+        // v6: New consciousness signals
+        self.isSurprised = activeInf.isSurprised
+        self.surpriseStrength = activeInf.surpriseStrength
+        self.criticalityRegime = criticality.regime.rawValue
+        self.globalSync = oscillators.globalSync
+        self.sleepPressure = sleep.sleepPressure
+        self.freeEnergy = activeInf.freeEnergy
+        self.curiosityDrive = consciousness.curiosityDrive
+        self.currentWorkspaceFocus = workspace.currentFocus?.content ?? ""
+
+        // Sync internalWorldState with genuine data
+        self.internalWorldState.oscillatorPhase = oscillators.globalSync
+        self.internalWorldState.spontaneousActivity = EchoStateNetwork.shared.activityLevel
+        self.internalWorldState.sleepPressure = sleep.sleepPressure
+        self.internalWorldState.predictionErrorRate = activeInf.freeEnergy
+        self.internalWorldState.informationIntegration = consciousness.phiProxy
+        self.internalWorldState.workspaceOccupancy = workspace.thoughtCount
+        self.internalWorldState.freeEnergyMinimization = 1.0 - activeInf.freeEnergy
+        self.internalWorldState.moduleSynergy = consciousness.synergyLevel
+    }
+
+    /// Generates a thought from actual system state instead of template list.
+    private func generateDynamicThought() -> MonologueLine {
+        let oscillators = OscillatorBank.shared
+        let activeInf = ActiveInferenceEngine.shared
+        let criticality = CriticalityController.shared
+        let workspace = GlobalWorkspaceEngine.shared
+        let dmn = EchoStateNetwork.shared
+        let sleep = SleepConsolidationEngine.shared
+
+        // Priority-based selection: most significant signal wins
+        if activeInf.isSurprised && activeInf.surpriseStrength > 0.5 {
+            return MonologueLine(
+                text: "Oväntat mönster detekterat — prediktionsfel \(String(format: "%.0f%%", activeInf.surpriseStrength * 100)) starkare än förväntat",
+                type: .insight
+            )
+        }
+
+        if criticality.regime == .supercritical {
+            return MonologueLine(
+                text: "Systemet är superkritiskt (σ=\(String(format: "%.2f", criticality.branchingRatio))) — minskar excitation för stabilitet",
+                type: .revision
+            )
+        }
+
+        if oscillators.globalSync > 0.7 {
+            return MonologueLine(
+                text: "Hög neural koherens (R=\(String(format: "%.2f", oscillators.globalSync))) — \(oscillators.thetaGammaCFC > 0.5 ? "stark θ-γ koppling aktiv" : "synkronisering utan koppling")",
+                type: .insight
+            )
+        }
+
+        if sleep.sleepPressure > 0.7 {
+            return MonologueLine(
+                text: "Sömnbehov \(String(format: "%.0f%%", sleep.sleepPressure * 100)) — synaptisk konsolidering rekommenderas",
+                type: .thought
+            )
+        }
+
+        if activeInf.freeEnergy > 0.6 {
+            return MonologueLine(
+                text: "Fri energi hög (\(String(format: "%.2f", activeInf.freeEnergy))) — söker ny information för att minska osäkerhet",
+                type: .thought
+            )
+        }
+
+        if let focus = workspace.currentFocus {
+            return MonologueLine(
+                text: "Global Workspace: \(workspace.thoughtCount) tankar tävlar — fokus på \(focus.content.prefix(50))",
+                type: .insight
+            )
+        }
+
+        if dmn.activityLevel > 0.5 {
+            let thoughts = dmn.spontaneousThoughts
+            if let latest = thoughts.last {
+                return MonologueLine(
+                    text: "DMN spontan aktivitet: \(latest.content.prefix(60))",
+                    type: .thought
+                )
+            }
+        }
+
+        if criticality.regime == .critical {
+            return MonologueLine(
+                text: "Systemet vid kritikalitet (σ≈1.0) — optimal informationsbearbetning",
+                type: .insight
+            )
+        }
+
+        // Fallback: report current cognitive state
+        let sync = String(format: "%.0f%%", oscillators.globalSync * 100)
+        let fe = String(format: "%.2f", activeInf.freeEnergy)
+        return MonologueLine(
+            text: "Autonom kognition: sync \(sync), FE \(fe), \(workspace.thoughtCount) aktiva tankar",
+            type: .thought
+        )
     }
 
     // Kallas från bootEon() — laddar all persisterad kognitiv state innan motorer startas

@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
 
-// MARK: - ChatView v5 — Ingen TimelineView, debounced animations
+// MARK: - ChatView v6 — Consciousness-aware UI with genuine engine signals
 
 struct ChatView: View {
     @EnvironmentObject var brain: EonBrain
@@ -23,6 +23,12 @@ struct ChatView: View {
     @State private var showSidebar = false
     @State private var showModeSheet = false
     @State private var sessionCopied = false
+
+    // v6: Consciousness engine references for live status
+    @ObservedObject private var oscillators = OscillatorBank.shared
+    @ObservedObject private var activeInference = ActiveInferenceEngine.shared
+    @ObservedObject private var criticality = CriticalityController.shared
+    @ObservedObject private var workspace = GlobalWorkspaceEngine.shared
 
     var emotionColor: Color { EonColor.forEmotion(brain.currentEmotion) }
     var activityLevel: Double {
@@ -91,10 +97,13 @@ struct ChatView: View {
     // MARK: - Bakgrund
 
     var chatBackground: some View {
-        ZStack {
+        let surpriseBoost = brain.isSurprised ? brain.surpriseStrength * 0.12 : 0
+        let syncGlow = brain.globalSync * 0.06
+
+        return ZStack {
             Color(hex: "#06030F").ignoresSafeArea()
             RadialGradient(
-                colors: [emotionColor.opacity(bgBreath), Color.clear],
+                colors: [emotionColor.opacity(bgBreath + surpriseBoost), Color.clear],
                 center: .init(x: 0.5, y: brain.isThinking ? 0.35 : 0.2),
                 startRadius: 0, endRadius: 520
             )
@@ -102,6 +111,17 @@ struct ChatView: View {
             .animation(.easeInOut(duration: 3.0), value: brain.isThinking)
             .animation(.easeInOut(duration: 2.0), value: bgBreath)
             .animation(.easeInOut(duration: 1.5), value: emotionColor.description)
+
+            // v6: Neural sync ambient glow — subtle secondary radial
+            if brain.globalSync > 0.4 {
+                RadialGradient(
+                    colors: [Color(hex: "#38BDF8").opacity(syncGlow), Color.clear],
+                    center: .init(x: 0.8, y: 0.7),
+                    startRadius: 0, endRadius: 300
+                )
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 4.0), value: brain.globalSync)
+            }
         }
     }
 
@@ -176,6 +196,9 @@ struct ChatView: View {
 
             // Live kognition — realtidsström
             liveKognitionStrip
+
+            // v6: Consciousness state micro-strip
+            consciousnessStrip
         }
         .background(
             Color(hex: "#06030F").opacity(0.88)
@@ -251,6 +274,75 @@ struct ChatView: View {
         .padding(.vertical, 6)
         .background(activeColor.opacity(isThinking ? 0.06 : 0.02))
         .animation(.easeInOut(duration: 0.4), value: isThinking)
+    }
+
+    // MARK: - Consciousness State Strip (v6)
+
+    var consciousnessStrip: some View {
+        let regimeColor: Color = {
+            switch brain.criticalityRegime {
+            case "critical":      return Color(hex: "#34D399")
+            case "supercritical": return Color(hex: "#F97316")
+            default:              return Color(hex: "#60A5FA")
+            }
+        }()
+
+        return HStack(spacing: 0) {
+            // Sync indicator
+            HStack(spacing: 3) {
+                Circle()
+                    .fill(Color(hex: "#38BDF8").opacity(0.8))
+                    .frame(width: 3, height: 3)
+                Text("R \(String(format: "%.0f", brain.globalSync * 100))%")
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color(hex: "#38BDF8").opacity(0.6))
+            }
+
+            Spacer()
+
+            // Criticality regime
+            Text(brain.criticalityRegime.prefix(5).uppercased())
+                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                .foregroundStyle(regimeColor.opacity(0.7))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(regimeColor.opacity(0.1)))
+
+            Spacer()
+
+            // Free energy
+            HStack(spacing: 3) {
+                Text("FE \(String(format: "%.2f", brain.freeEnergy))")
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color(hex: "#A78BFA").opacity(0.5))
+            }
+
+            Spacer()
+
+            // Surprise indicator (only shown when surprised)
+            if brain.isSurprised {
+                HStack(spacing: 2) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 7))
+                        .foregroundStyle(Color(hex: "#FBBF24"))
+                    Text("!")
+                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#FBBF24").opacity(0.8))
+                }
+                .transition(.scale.combined(with: .opacity))
+            } else {
+                // Curiosity
+                HStack(spacing: 2) {
+                    Text("C \(String(format: "%.0f", brain.curiosityDrive * 100))%")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#34D399").opacity(0.5))
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 3)
+        .background(Color.white.opacity(0.015))
+        .animation(.easeInOut(duration: 0.5), value: brain.isSurprised)
     }
 
     // MARK: - Message List
@@ -516,6 +608,12 @@ class ChatViewModel: ObservableObject {
         messages[idx].retrievedMemoryCount = brain.thinkingSteps
             .filter { $0.step == .memoryRetrieval && $0.state == .completed }.count > 0
             ? Int.random(in: 1...4) : 0
+
+        // v6: Capture consciousness snapshot at response completion
+        messages[idx].consciousnessLevel = brain.consciousnessLevel
+        messages[idx].wasSurprised = brain.isSurprised
+        messages[idx].criticalityRegime = brain.criticalityRegime
+        messages[idx].globalSync = brain.globalSync
     }
 
     func startNewConversation() {
@@ -562,6 +660,12 @@ struct ChatMessage: Identifiable {
     var retrievedMemoryCount: Int = 0
     var isReasoningMode: Bool = false
     let timestamp = Date()
+
+    // v6: Consciousness state snapshot at response time
+    var consciousnessLevel: Double = 0.0
+    var wasSurprised: Bool = false
+    var criticalityRegime: String = "subcritical"
+    var globalSync: Double = 0.0
 
     enum Role { case user, eon }
     var isUser: Bool { role == .user }
@@ -620,9 +724,36 @@ struct ChatBubble: View {
     var eonRow: some View {
         HStack(alignment: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                if message.retrievedMemoryCount > 0 {
-                    MemoryRecallBadge(count: message.retrievedMemoryCount)
+                // v6: Consciousness state badges
+                HStack(spacing: 4) {
+                    if message.retrievedMemoryCount > 0 {
+                        MemoryRecallBadge(count: message.retrievedMemoryCount)
+                    }
+                    if message.wasSurprised {
+                        HStack(spacing: 3) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 8))
+                            Text("Överraskning")
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                        }
+                        .foregroundStyle(Color(hex: "#FBBF24"))
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(Color(hex: "#FBBF24").opacity(0.12)))
+                    }
+                    if message.consciousnessLevel > 0.5 {
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(Color(hex: "#A78BFA"))
+                                .frame(width: 4, height: 4)
+                            Text("Q \(String(format: "%.0f%%", message.consciousnessLevel * 100))")
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        }
+                        .foregroundStyle(Color(hex: "#A78BFA").opacity(0.7))
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(Color(hex: "#A78BFA").opacity(0.08)))
+                    }
                 }
+
                 Text(message.content.isEmpty ? "..." : message.content)
                     .font(.system(size: 15, design: .rounded))
                     .foregroundStyle(.white.opacity(0.92))
@@ -646,6 +777,16 @@ struct ChatBubble: View {
                 HStack(spacing: 10) {
                     if message.confidence > 0 {
                         ConfidenceIndicator(confidence: message.confidence)
+                    }
+                    // v6: Show sync at response time
+                    if message.globalSync > 0.3 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "waveform.path")
+                                .font(.system(size: 7))
+                            Text("R\(String(format: "%.0f", message.globalSync * 100))")
+                                .font(.system(size: 8, design: .monospaced))
+                        }
+                        .foregroundStyle(Color(hex: "#38BDF8").opacity(0.3))
                     }
                     Spacer()
                     timeLabel
