@@ -184,12 +184,24 @@ final class GlobalWorkspaceEngine: ObservableObject {
         focusStrength = totalActivation > 0 ? dominantActivation / totalActivation : 0
     }
 
-    // MARK: - Broadcast
+    // MARK: - Ignition & Broadcast (v9: non-linear ignition som i README)
+
+    /// Antal ignitions (icke-linjär tändning där tanken plötsligt blir tillgänglig för hela systemet)
+    @Published var ignitionCount: Int = 0
 
     private func broadcast(_ thought: WorkspaceThought) {
+        // IGNITION: icke-linjär tändning — tanken "exploderar" i medvetandet
+        // README: "en icke-linjär tändning där tanken plötsligt blir tillgänglig för hela systemet"
+        ignitionCount += 1
+
+        // Meddela ConsciousnessEngine om ignition
+        ConsciousnessEngine.shared.workspaceIgnitions = ignitionCount
+        ConsciousnessEngine.shared.broadcastCount = broadcastHistory.count
+        ConsciousnessEngine.shared.competingThoughts = activeThoughts.count
+
         // Select receiving modules based on thought category — targeted broadcast
         let relevantModules = registeredModules.filter { module in
-            if module.priority > 0.85 { return true } // High-priority always receives
+            if module.priority > 0.85 { return true }
             switch thought.category {
             case .reasoning: return ["reasoning", "metacognition", "attention"].contains(module.id)
             case .memory:    return ["memory", "language", "reasoning"].contains(module.id)
@@ -216,6 +228,29 @@ final class GlobalWorkspaceEngine: ObservableObject {
                 activeThoughts[i].activation = min(1.0, activeThoughts[i].activation + boostAmount)
             }
         }
+
+        // Driva oscillatorer med broadcast-signal (kopplar GWT till neural synkronisering)
+        let driveSignal = Array(repeating: thought.activation * 0.5, count: 12)
+        OscillatorBank.shared.tick(dt: 0.01, externalDrive: driveSignal)
+
+        // Meddela AttentionSchema om ny broadcast
+        let broadcastItem = BroadcastItem(
+            source: thought.source,
+            content: thought.content,
+            salience: thought.activation,
+            isUrgent: thought.category == .emotion || thought.activation > 0.8,
+            category: thought.category.rawValue
+        )
+        AttentionSchemaEngine.shared.tick(
+            broadcastContents: [broadcastItem],
+            bodyState: BodyBudgetSnapshot(
+                thermalStress: ConsciousnessEngine.shared.bodyBudget.thermalLevel,
+                energyUrgency: 0.3,
+                overallStress: ConsciousnessEngine.shared.bodyBudget.thermalLevel * 0.5,
+                arousal: ConsciousnessEngine.shared.bodyBudget.arousal,
+                valence: ConsciousnessEngine.shared.bodyBudget.valence
+            )
+        )
 
         // Notify modules — cross-module feedback
         notifyModules(event: event)

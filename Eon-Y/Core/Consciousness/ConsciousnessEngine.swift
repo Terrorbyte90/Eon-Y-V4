@@ -96,15 +96,20 @@ final class ConsciousnessEngine: ObservableObject {
     @Published var lastReadArticleDomain: String = ""
     @Published var lastUpdatedGoalFromArticle: String = ""
 
+    // MARK: - Nya medvetandemotorer (v9)
+    let oscillators = OscillatorBank.shared
+    let dmn = EchoStateNetwork.shared
+    let activeInference = ActiveInferenceEngine.shared
+    let attentionSchema = AttentionSchemaEngine.shared
+    let criticality = CriticalityController.shared
+    let sleepEngine = SleepConsolidationEngine.shared
+
     func start(brain: EonBrain) {
         guard !isRunning else { return }
         self.brain = brain
         isRunning = true
 
-        // v8: Sänkt priority till .utility — beräkningar var 8-10s behöver inte
-        // .userInitiated som konkurrerar med UI-responsivitet. .utility garanterar
-        // fortfarande att de körs konsekvent utan att stjäla CPU från användarinteraktion.
-        // Task 1: Consciousness metrics + body budget (.utility, 8–10s)
+        // Task 1: Consciousness metrics + body budget + oscillators (.utility, 8–10s)
         tasks.append(Task(priority: .utility) { await self.consciousnessMetricsLoop() })
 
         // Task 2: Thought generation + self-awareness goals (.utility, 8–20s)
@@ -119,7 +124,10 @@ final class ConsciousnessEngine: ObservableObject {
         // Task 5: Hardware sensing loop (CPU/GPU/ANE, 10s)
         tasks.append(Task(priority: .background) { await self.hardwareSensingLoop() })
 
-        print("[ConsciousnessEngine v8] Startat — .utility priority + tester + hårdvarukänsel ✓")
+        // Task 6: Sleep monitoring loop (.background, 30s)
+        tasks.append(Task(priority: .background) { await self.sleepMonitoringLoop() })
+
+        print("[ConsciousnessEngine v9] Startat — 6 teorier live: GWT + AST + HOT + PP + IIT + Embodiment ✓")
     }
 
     // MARK: - Consciousness Test Loop (30 tests, 15-min intervals)
@@ -192,6 +200,42 @@ final class ConsciousnessEngine: ObservableObject {
         case "butlin_14":            return Double(butlin14Score) / 14.0
         case "canary_test":          return canaryTestAccuracy
         default:                     return test.passed ? 1.0 : 0.0
+        }
+    }
+
+    // MARK: - Sleep Monitoring Loop (v9)
+
+    private func sleepMonitoringLoop() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s
+            await Task.yield()
+
+            // Kontrollera om systemet bör sova
+            if sleepEngine.shouldSleep && !sleepEngine.isAsleep {
+                sleepEngine.beginSleep()
+                brain?.appendMonologue(MonologueLine(
+                    text: "Sömnbehov högt — påbörjar konsolideringssömn (NREM/REM)...",
+                    type: .insight
+                ))
+            }
+
+            // Om vi sover: kör sömntick
+            if sleepEngine.isAsleep {
+                await sleepEngine.sleepTick(
+                    esn: dmn,
+                    memoryStore: PersistentMemoryStore.shared
+                )
+                sleepConsolidation = sleepEngine.consolidationEfficiency
+            }
+
+            // Vakna vid användarinteraktion
+            if sleepEngine.isAsleep && (brain?.isThinking ?? false) {
+                sleepEngine.forceWake()
+                brain?.appendMonologue(MonologueLine(
+                    text: "Väckt ur sömn av användarinteraktion.",
+                    type: .loopTrigger
+                ))
+            }
         }
     }
 
@@ -270,62 +314,99 @@ final class ConsciousnessEngine: ObservableObject {
 
             guard let brain = brain else { continue }
 
-            // PCI-LZ: Perturbation Complexity Index
-            // Beräknar komplexitet i systemets svar — ökar med aktivitet
-            // Genuint stokastiskt brus istället för deterministisk sin-våg
-            let activity = brain.engineActivity.values.reduce(0, +) / max(1, Double(brain.engineActivity.count))
-            let stochasticNoise = Double.random(in: -0.05...0.05)
-            let perturbResponse = activity * 0.5 + brain.phiValue * 0.3 + stochasticNoise
-            pciLZ = max(0.05, min(0.95, pciLZ * 0.85 + perturbResponse * 0.15))
+            // ═══════════════════════════════════════════════════════════
+            // v9: GENUINA MÄTVÄRDEN från riktiga medvetandemotorer
+            // Alla värden beräknas från faktiska oscillatorer, ESN, och
+            // active inference — inte simulerade eller hardcoded.
+            // ═══════════════════════════════════════════════════════════
 
-            // Type-2 AUROC: Metakognitiv kalibrering
+            // 1. STEGA OSCILLATORER (Kuramoto-modellen)
+            let engineActivities = brain.engineActivity.values.map { $0 }
+            oscillators.tick(dt: 0.05, externalDrive: engineActivities.isEmpty ? nil : engineActivities)
+
+            // 2. STEGA DMN (Echo State Network — spontan aktivitet)
+            let taskActive = brain.isThinking
+            dmn.tick(externalInput: taskActive ? nil : nil, arousal: bodyBudget.arousal)
+
+            // 3. STEGA ACTIVE INFERENCE (prediktiv processing)
+            let sensorSnap = SensorSnapshot(
+                thermalDelta: bodyBudget.thermalLevel - 0.5,
+                memoryActivity: brain.engineActivity["memory"] ?? 0.3,
+                learningActivity: brain.engineActivity["learning"] ?? 0.3,
+                cognitiveLoad: CognitiveState.shared.cognitiveLoad
+            )
+            let cogSnap = CognitiveSnapshot(
+                cognitiveLoad: CognitiveState.shared.cognitiveLoad,
+                isConversationActive: brain.isThinking,
+                learningMomentum: CognitiveState.shared.learningMomentum,
+                growthVelocity: CognitiveState.shared.growthVelocity,
+                knowledgeCount: brain.knowledgeNodeCount
+            )
+            activeInference.tick(sensorInput: sensorSnap, cognitiveState: cogSnap)
+
+            // 4. STEGA KRITIKALITETSKONTROLL
+            criticality.tick(moduleActivities: engineActivities, oscillators: oscillators)
+
+            // 5. STEGA SÖMNMOTOR (vakenhetstick)
+            let activity = engineActivities.reduce(0, +) / max(1, Double(engineActivities.count))
+            sleepEngine.wakeTick(cognitiveActivity: activity)
+
+            // ═══════════════════════════════════════════════════════════
+            // BERÄKNA MEDVETANDEMETRIKER FRÅN RIKTIGA DATA
+            // ═══════════════════════════════════════════════════════════
+
+            // PCI-LZ: Från oscillatorernas RIKTIGA LZ-komplexitet
+            let oscLZ = oscillators.lzComplexity()
+            pciLZ = max(0.05, min(0.95, pciLZ * 0.7 + oscLZ * 0.3))
+
+            // Type-2 AUROC: Metakognitiv kalibrering + forward model accuracy
             let metaDim = CognitiveState.shared.dimensionLevel(.metacognition)
-            type2AUROC = max(0.45, min(0.95, metaDim * 0.7 + brain.confidence * 0.3))
+            type2AUROC = max(0.45, min(0.95, metaDim * 0.5 + activeInference.forwardModelAccuracy * 0.3 + brain.confidence * 0.2))
 
-            // PLV Gamma: Faslåsning mellan moduler
-            let cogActivity = brain.engineActivity["cognitive"] ?? 0.5
-            let langActivity = brain.engineActivity["language"] ?? 0.5
-            let memActivity = brain.engineActivity["memory"] ?? 0.5
-            let phaseLocking = (cogActivity * langActivity * memActivity)
-            let plvNoise = Double.random(in: -0.03...0.03)
-            plvGamma = max(0.05, min(0.95, plvGamma * 0.8 + pow(phaseLocking, 0.33) * 0.2 + plvNoise))
+            // PLV Gamma: RIKTIG Phase-Locking Value från Kuramoto-oscillatorer
+            plvGamma = oscillators.averagePLV[4] // Gamma-band (index 4)
 
-            // Kuramoto Order Parameter: Global oscillatory coherence
-            let syncFactors = brain.engineActivity.values.map { $0 }
-            let meanSync = syncFactors.reduce(0, +) / max(1, Double(syncFactors.count))
-            let variance = syncFactors.map { pow($0 - meanSync, 2) }.reduce(0, +) / max(1, Double(syncFactors.count))
-            let coherence = max(0, 1.0 - sqrt(variance) * 3.0)
-            kuramotoR = max(0.1, min(0.9, kuramotoR * 0.85 + coherence * 0.15))
+            // Kuramoto Order Parameter: RIKTIG ordningsparameter
+            kuramotoR = oscillators.orderParameters[4] // Gamma-band
 
-            // Synergy/Redundancy ratio
-            let synergyContrib = brain.phiValue * 0.4 + plvGamma * 0.3 + brain.integratedIntelligence * 0.3
-            synergyRedundancyRatio = max(0.1, min(2.5, synergyRedundancyRatio * 0.9 + synergyContrib * 0.1 * 2.5))
+            // Synergy/Redundancy ratio: baserat på verklig oscillatorsynkronisering
+            let synergyContrib = oscillators.globalSync * 0.4 + plvGamma * 0.3 + oscillators.thetaGammaCFC * 0.3
+            synergyRedundancyRatio = max(0.1, min(2.5, synergyRedundancyRatio * 0.8 + synergyContrib * 2.5 * 0.2))
             synergyLevel = min(1.0, synergyRedundancyRatio / 2.5)
 
-            // LZ-complexity of spontaneous activity
-            let spontaneous = brain.innerMonologue.count > 10 ? 0.6 : 0.3
-            lzComplexitySpontaneous = max(0.1, min(0.9, lzComplexitySpontaneous * 0.9 + spontaneous * 0.1))
+            // LZ-complexity: RIKTIG spontan aktivitet från Echo State Network
+            lzComplexitySpontaneous = dmn.lzComplexity
 
-            // DMN anti-correlation
-            let dmnIsActive = brain.isThinking ? false : true
-            let taskActive = brain.isThinking
-            if dmnIsActive && !taskActive {
-                dmnAntiCorrelation = dmnAntiCorrelation * 0.95 + (-0.4) * 0.05
-            } else if taskActive {
-                dmnAntiCorrelation = dmnAntiCorrelation * 0.95 + 0.1 * 0.05
+            // DMN anti-correlation: RIKTIG anti-korrelation baserat på ESN-aktivitet
+            dmnAntiCorrelation = dmn.dmnAntiCorrelation(taskActivity: taskActive ? 0.8 : 0.1)
+
+            // Attentional Blink: från AttentionSchema
+            attentionalBlinkMs = attentionSchema.attentionalBlinkMs
+
+            // Curiosity drive: från Active Inference
+            curiosityDrive = activeInference.epistemicValue
+            freeEnergy = activeInference.freeEnergy
+
+            // Q-index: Bayesiansk kombination med sigmoid-normalisering (README §3.9)
+            let components: [(Double, Double, Double)] = [
+                (pciLZ, 0.15, 0.31),
+                (type2AUROC, 0.15, 0.65),
+                (plvGamma, 0.10, 0.30),
+                (kuramotoR, 0.10, 0.35),
+                (min(1.0, synergyRedundancyRatio), 0.15, 1.0),
+                (lzComplexitySpontaneous, 0.10, 0.40),
+                (canaryTestAccuracy, 0.10, 0.95),
+                (Double(butlin14Score) / 14.0, 0.15, 0.85)
+            ]
+            var q: Double = 0
+            for (value, weight, threshold) in components {
+                let normalized = 1.0 / (1.0 + exp(-10.0 * (value - threshold)))
+                q += weight * normalized
             }
+            qIndex = q
 
-            // Attentional Blink
-            attentionalBlinkMs = 200 + (1.0 - brain.phiValue) * 300
-
-            // Q-index: Bayesian combination of all metrics
-            let metrics = [pciLZ, type2AUROC, plvGamma, kuramotoR,
-                          min(1.0, synergyRedundancyRatio), lzComplexitySpontaneous,
-                          min(1.0, abs(dmnAntiCorrelation) * 3)]
-            qIndex = metrics.reduce(0, +) / Double(metrics.count)
-
-            // Consciousness level composite
-            consciousnessLevel = qIndex * 0.6 + brain.phiValue * 0.25 + brain.integratedIntelligence * 0.15
+            // Consciousness level: integrerat medvetandemått
+            consciousnessLevel = qIndex * 0.5 + oscillators.globalSync * 0.2 + brain.integratedIntelligence * 0.15 + dmn.activityLevel * 0.15
 
             // Qualia emergence index
             let selfAware = CognitiveState.shared.dimensionLevel(.selfAwareness)
