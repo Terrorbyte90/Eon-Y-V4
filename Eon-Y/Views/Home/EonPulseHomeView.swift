@@ -16,6 +16,7 @@ struct EonPulseHomeView: View {
     @State private var showContent = false
     @State private var showCognitionLog = false
     @State private var showFullLog = false
+    @State private var showSmartDash = false
 
     // Flip meter states
     @State private var autonomFlipped = false
@@ -252,16 +253,32 @@ struct EonPulseHomeView: View {
         let dominant = dominantColor
         let label = brain.autonomousProcessLabel
         return VStack(spacing: 10) {
-            Text("E O N")
-                .font(.system(size: 54, weight: .black, design: .rounded))
-                .tracking(18)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color(hex: "#C4B5FD"), Color(hex: "#38BDF8"), Color(hex: "#34D399")],
-                        startPoint: .leading, endPoint: .trailing
+            HStack(spacing: 18) {
+                // "E" — tappbar, navigerar till SmartDash
+                Text("E")
+                    .font(.system(size: 54, weight: .black, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(colors: [Color(hex: "#C4B5FD"), Color(hex: "#A78BFA")], startPoint: .top, endPoint: .bottom)
                     )
-                )
-                .shadow(color: dominant.opacity(0.5), radius: 24)
+                    .shadow(color: Color(hex: "#A78BFA").opacity(0.6), radius: 16)
+                    .onTapGesture { showSmartDash = true }
+                Text("O")
+                    .font(.system(size: 54, weight: .black, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(colors: [Color(hex: "#38BDF8"), Color(hex: "#06B6D4")], startPoint: .top, endPoint: .bottom)
+                    )
+                    .shadow(color: dominant.opacity(0.4), radius: 16)
+                Text("N")
+                    .font(.system(size: 54, weight: .black, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(colors: [Color(hex: "#34D399"), Color(hex: "#10B981")], startPoint: .top, endPoint: .bottom)
+                    )
+                    .shadow(color: Color(hex: "#34D399").opacity(0.4), radius: 16)
+            }
+            .shadow(color: dominant.opacity(0.5), radius: 24)
+            .fullScreenCover(isPresented: $showSmartDash) {
+                SmartDashView().environmentObject(brain)
+            }
 
             HStack(spacing: 10) {
                 FlipMeterView(

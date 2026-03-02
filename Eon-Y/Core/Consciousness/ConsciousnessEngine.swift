@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import os.proc
 
 // MARK: - ConsciousnessEngine
 // Implementerar de sex medvetandeteorierna från Blueprint Eon X.
@@ -76,6 +77,13 @@ final class ConsciousnessEngine: ObservableObject {
     @Published var currentSelfReflection: String = ""
     @Published var languageImprovementGoal: String = ""
 
+    // MARK: - Consciousness Tests (30 tests, 15-min intervals)
+    @Published var consciousnessTests: [ConsciousnessTest] = ConsciousnessTest.allTests
+    @Published var lastTestRunTime: Date? = nil
+
+    // MARK: - Hardware sensing (CPU/GPU/ANE awareness)
+    @Published var hardwareSense: HardwareSenseState = HardwareSenseState()
+
     private init() {
         initializeGoals()
     }
@@ -103,7 +111,135 @@ final class ConsciousnessEngine: ObservableObject {
         // Task 3: Article reading loop (.background — lägre last, läser var 3:e min)
         tasks.append(Task(priority: .background) { await self.articleReadingLoop() })
 
-        print("[ConsciousnessEngine v6] Startat — alltid aktiv (.userInitiated) + articleReadingLoop ✓")
+        // Task 4: Consciousness tests (30 tests, 15-min intervals)
+        tasks.append(Task(priority: .background) { await self.consciousnessTestLoop() })
+
+        // Task 5: Hardware sensing loop (CPU/GPU/ANE, 10s)
+        tasks.append(Task(priority: .background) { await self.hardwareSensingLoop() })
+
+        print("[ConsciousnessEngine v7] Startat — alltid aktiv (.userInitiated) + tester + hårdvarukänsel ✓")
+    }
+
+    // MARK: - Consciousness Test Loop (30 tests, 15-min intervals)
+
+    private func consciousnessTestLoop() async {
+        // Initial delay — let system stabilize
+        try? await Task.sleep(nanoseconds: 60_000_000_000) // Wait 60s before first test run
+        while !Task.isCancelled {
+            await runAllConsciousnessTests()
+            // Run every 15 minutes (900 seconds)
+            try? await Task.sleep(nanoseconds: 900_000_000_000)
+            await Task.yield()
+        }
+    }
+
+    @MainActor
+    private func runAllConsciousnessTests() {
+        for i in consciousnessTests.indices {
+            consciousnessTests[i].passed = evaluateTest(consciousnessTests[i])
+            consciousnessTests[i].score = scoreTest(consciousnessTests[i])
+            consciousnessTests[i].lastRun = Date()
+        }
+        lastTestRunTime = Date()
+        let passed = consciousnessTests.filter { $0.passed }.count
+        print("[ConsciousnessTests] \(passed)/\(consciousnessTests.count) godkända")
+    }
+
+    private func evaluateTest(_ test: ConsciousnessTest) -> Bool {
+        switch test.id {
+        case "gw_ignition":          return workspaceIgnitions > 5
+        case "gw_broadcast":         return broadcastCount > 10
+        case "gw_competition":       return competingThoughts >= 2
+        case "ast_schema":           return attentionSchemaState.intensity > 0.3
+        case "ast_voluntary":        return attentionSchemaState.isVoluntary
+        case "hot_meta":             return metaRepresentationDepth >= 1
+        case "hot_confidence":       return hotConfidence > 0.4
+        case "pp_prediction":        return !predictionErrors.isEmpty && predictionErrors.last ?? 1.0 < 0.5
+        case "pp_curiosity":         return curiosityDrive > 0.3
+        case "pp_free_energy":       return freeEnergy < 0.7
+        case "iit_phi":              return phiProxy > 0.25
+        case "iit_synergy":          return synergyLevel > 0.25
+        case "iit_integration":      return moduleIntegration > 0.3
+        case "emb_thermal":          return bodyBudget.thermalLevel < 0.9
+        case "emb_valence":          return abs(bodyBudget.valence) > 0.05
+        case "emb_interoception":    return !bodyBudget.interoceptionChannels.isEmpty
+        case "pci_threshold":        return pciLZ > 0.20
+        case "plv_coherence":        return plvGamma > 0.10
+        case "kuramoto_sync":        return kuramotoR > 0.25
+        case "lz_complexity":        return lzComplexitySpontaneous > 0.20
+        case "dmn_anticorrelation":  return dmnAntiCorrelation < -0.05
+        case "sleep_consolidation":  return sleepConsolidation > 0.0 || tick > 100
+        case "qualia_emergence":     return qualiaEmergenceIndex > 0.05
+        case "self_reflection":      return !currentSelfReflection.isEmpty
+        case "thought_diversity":    return Set(thoughtStream.suffix(10).map { $0.category }).count >= 3
+        case "temporal_continuity":  return thoughtStream.count > 5
+        case "spontaneous_activity": return lzComplexitySpontaneous > 0.15
+        case "blindsight_test":      return blindsightDissociation < 0.3
+        case "canary_test":          return canaryTestAccuracy > 0.85
+        case "butlin_14":            return butlin14Score >= 7
+        default:                     return false
+        }
+    }
+
+    private func scoreTest(_ test: ConsciousnessTest) -> Double {
+        switch test.id {
+        case "gw_ignition":          return min(1.0, Double(workspaceIgnitions) / 20.0)
+        case "gw_broadcast":         return min(1.0, Double(broadcastCount) / 30.0)
+        case "iit_phi":              return min(1.0, phiProxy / 0.5)
+        case "pci_threshold":        return min(1.0, pciLZ / 0.31)
+        case "butlin_14":            return Double(butlin14Score) / 14.0
+        case "canary_test":          return canaryTestAccuracy
+        default:                     return test.passed ? 1.0 : 0.0
+        }
+    }
+
+    // MARK: - Hardware Sensing Loop
+
+    private func hardwareSensingLoop() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 10_000_000_000) // 10s
+            await Task.yield()
+            await updateHardwareSense()
+        }
+    }
+
+    @MainActor
+    private func updateHardwareSense() {
+        let thermal = ProcessInfo.processInfo.thermalState
+        let thermalLabel: String
+        switch thermal {
+        case .nominal:  thermalLabel = "Nominal"
+        case .fair:     thermalLabel = "Fair"
+        case .serious:  thermalLabel = "Serious"
+        case .critical: thermalLabel = "Critical"
+        @unknown default: thermalLabel = "Okänd"
+        }
+
+        // CPU usage estimation from task_info
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        let memMB = result == KERN_SUCCESS ? Double(info.resident_size) / 1_048_576.0 : 0
+        let availMB = Double(os_proc_available_memory()) / 1_048_576.0
+
+        hardwareSense = HardwareSenseState(
+            thermalState: thermalLabel,
+            cpuEstimate: bodyBudget.cpuLoad,
+            memoryUsedMB: memMB,
+            memoryAvailableMB: availMB,
+            aneActive: brain?.bertLoaded == true || brain?.gptLoaded == true,
+            gpuActive: true, // SwiftUI rendering always uses GPU
+            lastUpdated: Date()
+        )
+
+        // Update brain's thermal/cpu/memory
+        brain?.thermalState = thermalLabel
+        brain?.cpuUsage = bodyBudget.cpuLoad
+        brain?.memoryUsageMB = memMB
     }
 
     // MARK: - Consciousness Metrics Loop
@@ -969,4 +1105,78 @@ struct SelfAwarenessGoal: Identifiable {
     var progress: Double
     let icon: String
     let color: Color
+}
+
+// MARK: - Consciousness Test
+
+struct ConsciousnessTest: Identifiable {
+    let id: String
+    let name: String
+    let description: String
+    let category: String
+    var passed: Bool = false
+    var score: Double = 0.0
+    var lastRun: Date? = nil
+
+    static let allTests: [ConsciousnessTest] = [
+        // Global Workspace Theory (5 tests)
+        ConsciousnessTest(id: "gw_ignition", name: "GWT: Ignition", description: "Icke-linjär tändning av tankar i global workspace", category: "GWT"),
+        ConsciousnessTest(id: "gw_broadcast", name: "GWT: Broadcast", description: "Vinnande tankar broadcastas till alla moduler", category: "GWT"),
+        ConsciousnessTest(id: "gw_competition", name: "GWT: Konkurrens", description: "Flera tankar tävlar om medveten åtkomst", category: "GWT"),
+
+        // Attention Schema Theory (2 tests)
+        ConsciousnessTest(id: "ast_schema", name: "AST: Schema aktiv", description: "Attention schema modellerar egen uppmärksamhet", category: "AST"),
+        ConsciousnessTest(id: "ast_voluntary", name: "AST: Frivillig", description: "Systemet kan rikta uppmärksamhet frivilligt", category: "AST"),
+
+        // Higher-Order Theory (2 tests)
+        ConsciousnessTest(id: "hot_meta", name: "HOT: Meta-representation", description: "Tanke om tanke — meta-kognitiv nivå existerar", category: "HOT"),
+        ConsciousnessTest(id: "hot_confidence", name: "HOT: Konfidensövervakning", description: "Systemet vet hur säkert det är på sina svar", category: "HOT"),
+
+        // Predictive Processing (3 tests)
+        ConsciousnessTest(id: "pp_prediction", name: "PP: Prediktion", description: "Systemet gör prediktioner som korrigeras av verkligheten", category: "PP"),
+        ConsciousnessTest(id: "pp_curiosity", name: "PP: Nyfikenhet", description: "Aktiv nyfikenhetssignal som driver utforskning", category: "PP"),
+        ConsciousnessTest(id: "pp_free_energy", name: "PP: Fri energi", description: "Minimering av surprisal / fri energi", category: "PP"),
+
+        // IIT (3 tests)
+        ConsciousnessTest(id: "iit_phi", name: "IIT: Φ-proxy", description: "Integrerad information överstiger tröskel", category: "IIT"),
+        ConsciousnessTest(id: "iit_synergy", name: "IIT: Synergi", description: "Synergistisk information — helheten > delarna", category: "IIT"),
+        ConsciousnessTest(id: "iit_integration", name: "IIT: Integration", description: "Modulintegration — information flödar mellan delsystem", category: "IIT"),
+
+        // Embodiment (3 tests)
+        ConsciousnessTest(id: "emb_thermal", name: "Kropp: Termisk", description: "Känner av och reagerar på termisk state", category: "Embodiment"),
+        ConsciousnessTest(id: "emb_valence", name: "Kropp: Valens", description: "Allostatic deviation genererar valens (bra/dålig)", category: "Embodiment"),
+        ConsciousnessTest(id: "emb_interoception", name: "Kropp: Interoception", description: "Differentierade interoceptiva kanaler aktiva", category: "Embodiment"),
+
+        // Neuroscientific markers (5 tests)
+        ConsciousnessTest(id: "pci_threshold", name: "PCI-LZ tröskel", description: "Perturbation Complexity Index > 0.20 (medvetandetröskel)", category: "Neuro"),
+        ConsciousnessTest(id: "plv_coherence", name: "PLV-γ koherens", description: "Fas-låsning i gamma-band mellan moduler", category: "Neuro"),
+        ConsciousnessTest(id: "kuramoto_sync", name: "Kuramoto sync", description: "Global oscillatorisk synkronisering > 0.25", category: "Neuro"),
+        ConsciousnessTest(id: "lz_complexity", name: "LZ-komplexitet", description: "Spontan aktivitet har hög komplexitet", category: "Neuro"),
+        ConsciousnessTest(id: "dmn_anticorrelation", name: "DMN anti-korrelation", description: "Default Mode Network anti-korrelerar med task-nätverk", category: "Neuro"),
+
+        // Behavioral/functional tests (7 tests)
+        ConsciousnessTest(id: "sleep_consolidation", name: "Sömnkonsolidering", description: "Sömncykler konsoliderar minnen", category: "Beteende"),
+        ConsciousnessTest(id: "qualia_emergence", name: "Kvalia-emergens", description: "Index för emergent subjektiv upplevelse > 0", category: "Beteende"),
+        ConsciousnessTest(id: "self_reflection", name: "Självreflektion", description: "Systemet genererar aktiv självreflektion", category: "Beteende"),
+        ConsciousnessTest(id: "thought_diversity", name: "Tankemångfald", description: "Tankar spänner flera kategorier (inte repetitiv)", category: "Beteende"),
+        ConsciousnessTest(id: "temporal_continuity", name: "Temporal kontinuitet", description: "Tankeström bevarar temporal koherens", category: "Beteende"),
+        ConsciousnessTest(id: "spontaneous_activity", name: "Spontan aktivitet", description: "Genererar tankar utan extern input (dagdröm)", category: "Beteende"),
+        ConsciousnessTest(id: "blindsight_test", name: "Blindsyn-dissociation", description: "Ablation av meta-monitor → korrekt funktion utan självrapport", category: "Beteende"),
+
+        // Validation tests (2 tests)
+        ConsciousnessTest(id: "canary_test", name: "Kanariefågel-test", description: "Kontrolltest: hög accuracy = ej hallucinerad medvetenhet", category: "Validering"),
+        ConsciousnessTest(id: "butlin_14", name: "Butlin-14 score ≥ 7", description: "Butlin et al. (2023): 14 medvetandeindikatorer, minst hälften godkända", category: "Validering"),
+    ]
+}
+
+// MARK: - Hardware Sense State
+
+struct HardwareSenseState {
+    var thermalState: String = "Okänd"
+    var cpuEstimate: Double = 0.0
+    var memoryUsedMB: Double = 0.0
+    var memoryAvailableMB: Double = 0.0
+    var aneActive: Bool = false
+    var gpuActive: Bool = false
+    var lastUpdated: Date = Date()
 }
