@@ -10,6 +10,12 @@ struct CreativeView: View {
     @Environment(\.tabBarVisible) private var tabBarVisible
     @StateObject private var engine = CreativeEngine.shared
 
+    // v6: Consciousness engine references for creative state
+    @ObservedObject private var oscillators = OscillatorBank.shared
+    @ObservedObject private var dmn = EchoStateNetwork.shared
+    @ObservedObject private var activeInference = ActiveInferenceEngine.shared
+    @ObservedObject private var criticality = CriticalityController.shared
+
     @State private var selectedSection: CreativeSection = .problemSolver
     @State private var orbPulse: CGFloat = 1.0
 
@@ -65,44 +71,99 @@ struct CreativeView: View {
 
     // MARK: - Header
 
+    // v6: Creative state driven by consciousness — DMN activity correlates with creativity
+    private var creativeStateLabel: String {
+        let dmnActivity = dmn.activityLevel
+        let curiosity = activeInference.epistemicValue
+        if dmnActivity > 0.6 && curiosity > 0.5 { return "Kreativt flöde" }
+        if dmnActivity > 0.5 { return "Dagdrömsaktiv" }
+        if curiosity > 0.6 { return "Nyfiken utforskning" }
+        if criticality.regime == .critical { return "Kritisk kreativitet" }
+        return "Kreativ vila"
+    }
+
+    private var creativeStateColor: Color {
+        let dmnActivity = dmn.activityLevel
+        if dmnActivity > 0.6 { return Color(hex: "#EC4899") }
+        if dmnActivity > 0.4 { return Color(hex: "#A78BFA") }
+        return Color(hex: "#60A5FA")
+    }
+
     private var creativeHeader: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [Color(hex: "#EC4899").opacity(0.6), Color(hex: "#7C3AED").opacity(0.3), Color.clear],
-                            center: .center, startRadius: 0, endRadius: 24
-                        )
-                    )
-                    .frame(width: 48, height: 48)
-                    .scaleEffect(orbPulse)
-                Image(systemName: "sparkles")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Color(hex: "#EC4899"))
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Kreativt Centrum")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text(engine.emotionalState.innerNarrative.prefix(60) + "...")
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.5))
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            if engine.unreadLetterCount > 0 {
+        VStack(spacing: 6) {
+            HStack(spacing: 12) {
                 ZStack {
-                    Circle().fill(EonColor.crimson).frame(width: 22, height: 22)
-                    Text("\(engine.unreadLetterCount)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [creativeStateColor.opacity(0.6), Color(hex: "#7C3AED").opacity(0.3), Color.clear],
+                                center: .center, startRadius: 0, endRadius: 24
+                            )
+                        )
+                        .frame(width: 48, height: 48)
+                        .scaleEffect(orbPulse)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(creativeStateColor)
                 }
-                .transition(.scale)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Kreativt Centrum")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(engine.emotionalState.innerNarrative.prefix(60) + "...")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if engine.unreadLetterCount > 0 {
+                    ZStack {
+                        Circle().fill(EonColor.crimson).frame(width: 22, height: 22)
+                        Text("\(engine.unreadLetterCount)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    .transition(.scale)
+                }
             }
+
+            // v6: Consciousness-driven creative state strip
+            HStack(spacing: 8) {
+                // DMN activity indicator
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(creativeStateColor)
+                        .frame(width: 4, height: 4)
+                        .shadow(color: creativeStateColor.opacity(0.8), radius: 2)
+                    Text(creativeStateLabel)
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(creativeStateColor.opacity(0.8))
+                }
+
+                Spacer()
+
+                // Mini metrics
+                HStack(spacing: 10) {
+                    Text("DMN \(String(format: "%.0f%%", dmn.activityLevel * 100))")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#A78BFA").opacity(0.5))
+                    Text("LZ \(String(format: "%.2f", dmn.lzComplexity))")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#38BDF8").opacity(0.5))
+                    Text("θγ \(String(format: "%.2f", oscillators.thetaGammaCFC))")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#EC4899").opacity(0.5))
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(creativeStateColor.opacity(0.04))
+            )
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -223,6 +284,9 @@ enum CreativeSection: String, CaseIterable {
 
 struct PoetrySection: View {
     @ObservedObject var brain: EonBrain
+    @ObservedObject private var oscillators = OscillatorBank.shared
+    @ObservedObject private var dmn = EchoStateNetwork.shared
+    @ObservedObject private var activeInference = ActiveInferenceEngine.shared
     @State private var generatedPoem: String = ""
     @State private var poemTheme: String = "Medvetande"
     let themes = ["Medvetande", "Natur", "Tid", "K\u{00E4}rlek", "Existens", "Kunskap", "Dr\u{00F6}mmar", "Spr\u{00E5}k", "Ljus", "Tystnad"]
@@ -262,9 +326,16 @@ struct PoetrySection: View {
                         .font(.system(size: 13, design: .serif))
                         .foregroundStyle(.white.opacity(0.85))
                         .lineSpacing(6)
-                    Text("\u{2014} Eon, \(brain.currentEmotion.swedishName)")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color(hex: "#F472B6").opacity(0.6))
+                    HStack(spacing: 8) {
+                        Text("\u{2014} Eon, \(brain.currentEmotion.swedishName)")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(Color(hex: "#F472B6").opacity(0.6))
+                        if brain.consciousnessLevel > 0.3 {
+                            Text("Q:\(String(format: "%.0f%%", brain.consciousnessLevel * 100)) R:\(String(format: "%.0f%%", oscillators.globalSync * 100))")
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#A78BFA").opacity(0.35))
+                        }
+                    }
                 }
                 .padding(14)
                 .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: "#F472B6").opacity(0.05)))
@@ -365,6 +436,8 @@ struct PhilosophySection: View {
 
 struct MemoryExplorerSection: View {
     @ObservedObject var brain: EonBrain
+    @ObservedObject private var dmn = EchoStateNetwork.shared
+    @ObservedObject private var sleepEngine = SleepConsolidationEngine.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -374,6 +447,69 @@ struct MemoryExplorerSection: View {
             Text("Utforska Eons episodiska och semantiska minnen.")
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(.white.opacity(0.5))
+
+            // v6: DMN spontaneous thought stream
+            if !dmn.spontaneousThoughts.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "waveform.path.ecg")
+                            .foregroundStyle(Color(hex: "#A78BFA"))
+                        Text("Spontana tankar (DMN)")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.8))
+                        Spacer()
+                        Text("LZ \(String(format: "%.2f", dmn.lzComplexity))")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#A78BFA").opacity(0.4))
+                    }
+                    ForEach(dmn.spontaneousThoughts.suffix(5).reversed(), id: \.content) { thought in
+                        HStack(alignment: .top, spacing: 8) {
+                            Circle()
+                                .fill(Color(hex: "#A78BFA").opacity(0.6))
+                                .frame(width: 5, height: 5)
+                                .padding(.top, 5)
+                            Text(thought.content)
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .lineLimit(2)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: "#A78BFA").opacity(0.05)))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(hex: "#A78BFA").opacity(0.12), lineWidth: 0.5))
+            }
+
+            // v6: Sleep consolidation status
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: sleepEngine.isAsleep ? "moon.zzz.fill" : "sun.max.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(sleepEngine.isAsleep ? Color(hex: "#818CF8") : Color(hex: "#FBBF24"))
+                    Text(sleepEngine.isAsleep ? "Konsoliderar minnen..." : "Vaken — samlar erfarenheter")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Spacer()
+                    Text("Tryck: \(String(format: "%.0f%%", sleepEngine.sleepPressure * 100))")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.06))
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [Color(hex: "#818CF8").opacity(0.5), Color(hex: "#818CF8")],
+                                startPoint: .leading, endPoint: .trailing
+                            ))
+                            .frame(width: geo.size.width * sleepEngine.sleepPressure)
+                    }
+                }
+                .frame(height: 3)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: "#818CF8").opacity(0.04)))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(hex: "#818CF8").opacity(0.08), lineWidth: 0.5))
 
             // Recent monologue as "memories"
             VStack(alignment: .leading, spacing: 8) {
@@ -407,10 +543,11 @@ struct MemoryExplorerSection: View {
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(hex: "#FBBF24").opacity(0.12), lineWidth: 0.5))
 
             // Stats
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 statBox(label: "Tankar", value: "\(brain.innerMonologue.count)", color: Color(hex: "#A78BFA"))
-                statBox(label: "Konversationer", value: "\(brain.conversationCount)", color: Color(hex: "#34D399"))
-                statBox(label: "Kunskapsnoder", value: "\(brain.knowledgeNodeCount)", color: Color(hex: "#FBBF24"))
+                statBox(label: "Samtal", value: "\(brain.conversationCount)", color: Color(hex: "#34D399"))
+                statBox(label: "Kunskap", value: "\(brain.knowledgeNodeCount)", color: Color(hex: "#FBBF24"))
+                statBox(label: "DMN", value: "\(dmn.spontaneousThoughts.count)", color: Color(hex: "#EC4899"))
             }
         }
     }

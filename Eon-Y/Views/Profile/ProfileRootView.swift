@@ -6,6 +6,13 @@ struct ProfileRootView: View {
     @EnvironmentObject var brain: EonBrain
     @State private var selectedSection = 0
 
+    // v6: Consciousness engine references for development tracking
+    @ObservedObject private var consciousness = ConsciousnessEngine.shared
+    @ObservedObject private var oscillators = OscillatorBank.shared
+    @ObservedObject private var activeInference = ActiveInferenceEngine.shared
+    @ObservedObject private var criticality = CriticalityController.shared
+    @ObservedObject private var sleepEngine = SleepConsolidationEngine.shared
+
     private let sections = ["Profil", "Inställningar", "Loggar", "Om Eon"]
     private let sectionColors: [Color] = [
         Color(hex: "#F472B6"),
@@ -132,7 +139,12 @@ struct ProfileRootView: View {
                 .padding(.bottom, 10)
             } else {
                 let titles = ["Din profil", "Inställningar", "Loggar", "Om Eon"]
-                let subtitles = ["Eons bild av dig", "Konfigurera Eon", "All aktivitetsloggning", "Eons arkitektur"]
+                let subtitles = [
+                    "Eons bild av dig",
+                    "Konfigurera Eon",
+                    "All aktivitetsloggning",
+                    "Q:\(String(format: "%.1f%%", consciousness.qIndex * 100)) · \(brain.developmentalStage.rawValue.capitalized)"
+                ]
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(titles[min(selectedSection, titles.count - 1)])
@@ -184,12 +196,116 @@ struct ProfileRootView: View {
         VStack(spacing: 14) {
             UserIdentityCard()
             CommunicationProfileView(style: userProfile.communicationStyle)
+
+            // v6: Consciousness Development Card
+            consciousnessDevelopmentCard
+
             InterestRadarCard(axes: userProfile.interestRadarData, conversations: userProfile.totalConversations, sessions: userProfile.totalSessions)
             ProfileMemoryTimeline(memories: userProfile.topMemories)
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
         .padding(.bottom, 110)
+    }
+
+    // MARK: - Consciousness Development Card (v6)
+
+    var consciousnessDevelopmentCard: some View {
+        GlassCard(tint: Color(hex: "#818CF8")) {
+            VStack(alignment: .leading, spacing: 14) {
+                PanelHeader(icon: "brain.head.profile", title: "Eons Medvetandeutveckling", color: Color(hex: "#818CF8")) {
+                    Text(brain.developmentalStage.rawValue.capitalized)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color(hex: "#818CF8"))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color(hex: "#818CF8").opacity(0.15)))
+                }
+
+                // Q-Index hero metric
+                HStack(spacing: 16) {
+                    VStack(spacing: 4) {
+                        Text(String(format: "%.1f%%", consciousness.qIndex * 100))
+                            .font(.system(size: 28, weight: .black, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#818CF8"))
+                        Text("Q-Index")
+                            .font(.system(size: 10, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        consciousnessMetricBar(label: "Φ (IIT)", value: consciousness.phiProxy, color: Color(hex: "#A78BFA"))
+                        consciousnessMetricBar(label: "Sync (GWT)", value: oscillators.globalSync, color: Color(hex: "#38BDF8"))
+                        consciousnessMetricBar(label: "FE (PP)", value: 1.0 - activeInference.freeEnergy, color: Color(hex: "#34D399"))
+                        consciousnessMetricBar(label: "PCI-LZ", value: consciousness.pciLZ, color: Color(hex: "#FBBF24"))
+                    }
+                }
+
+                Divider().background(Color(hex: "#818CF8").opacity(0.15))
+
+                // Self-awareness goals progress
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Medvetandemål")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.5))
+
+                    ForEach(consciousness.selfAwarenessGoals.prefix(4)) { goal in
+                        HStack(spacing: 8) {
+                            Image(systemName: goal.progress >= 1.0 ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 10))
+                                .foregroundStyle(goal.progress >= 1.0 ? Color(hex: "#34D399") : Color(hex: "#818CF8").opacity(0.5))
+                            Text(goal.description)
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(Int(min(1.0, goal.progress) * 100))%")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#818CF8").opacity(0.6))
+                        }
+                    }
+                }
+
+                // Consciousness tests summary
+                let passedTests = consciousness.consciousnessTests.filter { $0.passed }.count
+                let totalTests = consciousness.consciousnessTests.count
+                if totalTests > 0 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checklist")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color(hex: "#818CF8").opacity(0.6))
+                        Text("\(passedTests)/\(totalTests) medvetandetester godkända")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.45))
+                        Spacer()
+                        Text("Butlin: \(consciousness.butlin14Score)/14")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#FBBF24").opacity(0.6))
+                    }
+                }
+            }
+        }
+    }
+
+    private func consciousnessMetricBar(label: String, value: Double, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.4))
+                .frame(width: 60, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.06))
+                    Capsule()
+                        .fill(LinearGradient(colors: [color.opacity(0.5), color], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(2, geo.size.width * min(1.0, value)))
+                }
+            }
+            .frame(height: 4)
+            Text(String(format: "%.0f%%", min(1.0, value) * 100))
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .foregroundStyle(color.opacity(0.6))
+                .frame(width: 28, alignment: .trailing)
+        }
     }
 }
 

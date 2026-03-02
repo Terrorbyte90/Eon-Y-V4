@@ -16,6 +16,11 @@ struct KnowledgeView: View {
     @State private var pulse: CGFloat = 1.0
     @State private var searchFocused = false
 
+    // v6: Consciousness engine references for curiosity-driven learning
+    @ObservedObject private var activeInference = ActiveInferenceEngine.shared
+    @ObservedObject private var workspace = GlobalWorkspaceEngine.shared
+    @ObservedObject private var oscillators = OscillatorBank.shared
+
     // Alla kategorier med metadata
     let categories = KnowledgeCategory.all
 
@@ -44,7 +49,12 @@ struct KnowledgeView: View {
                 searchBar
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 4)
+
+                // v6: Learning consciousness strip
+                learningMetricsStrip
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
 
                 if !searchText.isEmpty {
                     // Sök-läge: visa resultat direkt
@@ -97,6 +107,19 @@ struct KnowledgeView: View {
                     Text("\(viewModel.articles.count) artiklar  ·  \(categories.count) kategorier")
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(.white.opacity(0.4))
+
+                    // v6: Curiosity drive indicator
+                    if activeInference.epistemicValue > 0.3 {
+                        Text("·")
+                            .foregroundStyle(.white.opacity(0.2))
+                        HStack(spacing: 2) {
+                            Image(systemName: "sparkle")
+                                .font(.system(size: 8))
+                            Text("Nyfiken \(String(format: "%.0f%%", activeInference.epistemicValue * 100))")
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .foregroundStyle(Color(hex: "#FBBF24").opacity(0.6))
+                    }
                 }
             }
             Spacer()
@@ -196,6 +219,64 @@ struct KnowledgeView: View {
                 )
         )
         .animation(.easeInOut(duration: 0.2), value: searchText.isEmpty)
+    }
+
+    // MARK: - Learning Metrics Strip (v6)
+
+    var learningMetricsStrip: some View {
+        HStack(spacing: 0) {
+            // Free energy (prediction error — lower is better)
+            HStack(spacing: 3) {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color(hex: "#A78BFA").opacity(0.6))
+                Text("FE \(String(format: "%.2f", activeInference.freeEnergy))")
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color(hex: "#A78BFA").opacity(0.5))
+            }
+
+            Spacer()
+
+            // Epistemic value (curiosity)
+            HStack(spacing: 3) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color(hex: "#FBBF24").opacity(0.6))
+                Text("Nyfikenhet \(String(format: "%.0f%%", activeInference.epistemicValue * 100))")
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color(hex: "#FBBF24").opacity(0.5))
+            }
+
+            Spacer()
+
+            // Workspace focus (what Eon is learning about)
+            HStack(spacing: 3) {
+                Image(systemName: "target")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color(hex: "#34D399").opacity(0.6))
+                Text("\(workspace.thoughtCount) tankar")
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color(hex: "#34D399").opacity(0.5))
+            }
+
+            Spacer()
+
+            // Neural sync
+            HStack(spacing: 3) {
+                Image(systemName: "waveform.path")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color(hex: "#38BDF8").opacity(0.6))
+                Text("R \(String(format: "%.0f%%", oscillators.globalSync * 100))")
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color(hex: "#38BDF8").opacity(0.5))
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.02))
+        )
     }
 
     // MARK: - Category Grid

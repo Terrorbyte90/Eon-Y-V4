@@ -114,57 +114,64 @@ final class EchoStateNetwork: ObservableObject {
         }
     }
 
-    // MARK: - Tick: stega nätverket framåt
+    // MARK: - Tick: stega nätverket framåt (v6: Accelerate-optimized)
+
+    // v6: Reusable buffers to avoid per-tick allocations
+    private var tickBuffer: [Double] = []
+    private var inputBuffer: [Double] = []
+    private var lzTickCounter: Int = 0
+    private let lzTickInterval: Int = 3 // Only recompute LZ every 3 ticks
 
     /// Kör ett tidssteg. Kan ta extern input (t.ex. sensorisk data) eller köra spontant.
-    /// body: kroppsbudget-data (arousal modulerar aktivitet)
     func tick(externalInput: [Double]? = nil, arousal: Double = 0.5) {
-        var newState = [Double](repeating: 0, count: N)
+        if tickBuffer.count != N { tickBuffer = [Double](repeating: 0, count: N) }
+        if inputBuffer.count != N { inputBuffer = [Double](repeating: 0, count: N) }
 
-        // Reservoarberäkning: newState = tanh(W_res · state + W_in · input + noise)
+        // v6: Reservoir computation using Accelerate vDSP matrix-vector multiply
+        // newState = W_res · state (N×N matrix × N-vector)
+        vDSP_mmulD(W_res, 1, state, 1, &tickBuffer, 1,
+                   vDSP_Length(N), vDSP_Length(1), vDSP_Length(N))
+
+        // Add external input via W_in if available
+        if let ext = externalInput {
+            let L = min(ext.count, outputSize)
+            // inputContrib = W_in · ext (N×outputSize matrix × L-vector)
+            var paddedExt = [Double](repeating: 0, count: outputSize)
+            for k in 0..<L { paddedExt[k] = ext[k] }
+            vDSP_mmulD(W_in, 1, paddedExt, 1, &inputBuffer, 1,
+                       vDSP_Length(N), vDSP_Length(1), vDSP_Length(outputSize))
+            vDSP_vaddD(tickBuffer, 1, inputBuffer, 1, &tickBuffer, 1, vDSP_Length(N))
+        }
+
+        // Arousal scaling + noise + tanh activation
+        let arousalScale = 0.7 + 0.3 * arousal
         for i in 0..<N {
-            var sum: Double = 0
-
-            // Reservoar-kopplingar: W_res · state
-            for j in 0..<N {
-                sum += W_res[i * N + j] * state[j]
-            }
-
-            // Extern input via W_in (om tillgänglig)
-            if let ext = externalInput {
-                let L = min(ext.count, outputSize)
-                for k in 0..<L {
-                    sum += W_in[i * outputSize + k] * ext[k]
-                }
-            }
-
-            // Stokastiskt brus — genuint slumpmässigt
-            sum += Double.random(in: -noiseLevel...noiseLevel)
-
-            // Arousal-modulering: hög arousal → starkare dynamik
-            sum *= (0.7 + 0.3 * arousal)
-
-            // Tanh-aktivering (sigmoid-liknande, begränsar till [-1, 1])
-            newState[i] = tanh(sum)
+            tickBuffer[i] = tanh((tickBuffer[i] + Double.random(in: -noiseLevel...noiseLevel)) * arousalScale)
         }
 
-        state = newState
+        state = tickBuffer
 
-        // Beräkna output (komprimerad aktivitet)
-        for k in 0..<outputSize {
-            var sum: Double = 0
-            for i in 0..<N {
-                sum += state[i] * W_in[i * outputSize + k]
-            }
-            output[k] = sum / Double(N)
-        }
+        // v6: Output computation using Accelerate
+        // output[k] = (1/N) * Σ state[i] * W_in[i*outputSize + k]
+        // This is state^T · W_in (1×N × N×outputSize = 1×outputSize)
+        var rawOutput = [Double](repeating: 0, count: outputSize)
+        vDSP_mmulD(state, 1, W_in, 1, &rawOutput, 1,
+                   vDSP_Length(1), vDSP_Length(outputSize), vDSP_Length(N))
+        var invN = 1.0 / Double(N)
+        vDSP_vsmulD(rawOutput, 1, &invN, &output, 1, vDSP_Length(outputSize))
 
-        // Mätvärden
-        activityLevel = state.map { abs($0) }.reduce(0, +) / Double(N)
+        // Activity level using Accelerate absolute sum
+        var absSum: Double = 0
+        vDSP_svemgD(state, 1, &absSum, vDSP_Length(N))
+        activityLevel = absSum / Double(N)
 
-        // LZ-komplexitet: kvantisera output till symboler
+        // v6: LZ-komplexitet only every N ticks (expensive)
         recordSymbols()
-        computeLZComplexity()
+        lzTickCounter += 1
+        if lzTickCounter >= lzTickInterval {
+            lzTickCounter = 0
+            computeLZComplexity()
+        }
 
         // Generera spontan tanke (om cooldown tillåter)
         if thoughtCooldown <= 0 {
@@ -186,8 +193,9 @@ final class EchoStateNetwork: ObservableObject {
             else { symbol = 3 }
             symbolHistory.append(symbol)
         }
-        if symbolHistory.count > maxSymbolHistory {
-            symbolHistory.removeFirst(symbolHistory.count - maxSymbolHistory)
+        // v6: Circular buffer semantics — avoid O(n) removeFirst
+        if symbolHistory.count > maxSymbolHistory + 64 {
+            symbolHistory = Array(symbolHistory.suffix(maxSymbolHistory))
         }
     }
 

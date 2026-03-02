@@ -56,6 +56,9 @@ final class OscillatorBank: ObservableObject {
 
     private var phaseHistory: [Int] = [] // Kvantiserade faser för LZ-beräkning
     private let maxHistory = 2048
+    private var cachedLZComplexity: Double = 0.5
+    private var lzComputeCounter: Int = 0
+    private let lzComputeInterval: Int = 5 // Only recompute every N ticks
 
     // MARK: - Init
 
@@ -130,29 +133,37 @@ final class OscillatorBank: ObservableObject {
         branchingRatio = branchingRatio * 0.95 + avgActivation * 2.0 * 0.05
     }
 
-    // MARK: - Beräkna mätvärden
+    // MARK: - Beräkna mätvärden (v6: optimized with Accelerate)
 
     private func computeMetrics() {
-        // Kuramoto ordningsparameter per band: R = |1/N Σ exp(iθ_j)|
+        // v6: Pre-compute sin/cos for all phases (reused for both R and PLV)
+        // Flatten phases by band for vectorized ops
         for b in 0..<bandCount {
+            var bandPhases = [Double](repeating: 0, count: moduleCount)
+            for m in 0..<moduleCount { bandPhases[m] = phases[m][b] }
+
+            // Kuramoto R: R = |1/N Σ exp(iθ_j)| using Accelerate vDSP
+            var cosValues = [Double](repeating: 0, count: moduleCount)
+            var sinValues = [Double](repeating: 0, count: moduleCount)
+            vForce.cos(bandPhases, result: &cosValues)
+            vForce.sin(bandPhases, result: &sinValues)
+
             var realSum: Double = 0
             var imagSum: Double = 0
-            for m in 0..<moduleCount {
-                realSum += cos(phases[m][b])
-                imagSum += sin(phases[m][b])
-            }
+            vDSP_sveD(cosValues, 1, &realSum, vDSP_Length(moduleCount))
+            vDSP_sveD(sinValues, 1, &imagSum, vDSP_Length(moduleCount))
             let r = sqrt(realSum * realSum + imagSum * imagSum) / Double(moduleCount)
             orderParameters[b] = r
-        }
 
-        // PLV per band: genomsnittlig faslåsning mellan alla modulpar
-        for b in 0..<bandCount {
+            // PLV: average |cos(phase_i - phase_j)| over all pairs
+            // v6: Use pre-computed cos values to approximate PLV more efficiently
+            // For each pair (i,j): cos(φi - φj) = cos(φi)cos(φj) + sin(φi)sin(φj)
             var plvSum: Double = 0
             var pairCount: Double = 0
             for i in 0..<moduleCount {
                 for j in (i + 1)..<moduleCount {
-                    let phaseDiff = phases[i][b] - phases[j][b]
-                    plvSum += abs(cos(phaseDiff))
+                    let cosDiff = cosValues[i] * cosValues[j] + sinValues[i] * sinValues[j]
+                    plvSum += abs(cosDiff)
                     pairCount += 1
                 }
             }
@@ -181,14 +192,27 @@ final class OscillatorBank: ObservableObject {
             let symbol = Int(gammaPhase / (.pi / 2.0)) % 4
             phaseHistory.append(symbol)
         }
-        if phaseHistory.count > maxHistory {
-            phaseHistory.removeFirst(phaseHistory.count - maxHistory)
+        // v6: Use circular buffer semantics to avoid O(n) removeFirst
+        if phaseHistory.count > maxHistory + 128 {
+            phaseHistory = Array(phaseHistory.suffix(maxHistory))
+        }
+
+        // v6: Only recompute LZ every N ticks (expensive operation)
+        lzComputeCounter += 1
+        if lzComputeCounter >= lzComputeInterval {
+            lzComputeCounter = 0
+            cachedLZComplexity = computeLZComplexity()
         }
     }
 
     /// Beräknar Lempel-Ziv 76 komplexitet av oscillatorbeteendet.
-    /// Detta är samma mått som Massimini använder för PCI — det skiljer medvetna från omedvetna system.
+    /// v6: Returns cached value (updated every N ticks for performance).
     func lzComplexity() -> Double {
+        cachedLZComplexity
+    }
+
+    /// Actual LZ-76 computation (called periodically)
+    private func computeLZComplexity() -> Double {
         guard phaseHistory.count > 10 else { return 0 }
 
         var dictionary = Set<[Int]>()
