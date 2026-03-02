@@ -153,16 +153,31 @@ actor CognitiveCycleEngine {
         context.register = analysis.register
         await onStepUpdate(.wsd, .completed)
 
-        // Steg 3: Minneshämtning
+        // Steg 3: Minneshämtning (v7: BERT semantic ranking when available)
         await onStepUpdate(.memoryRetrieval, .active)
         await onMonologue(MonologueLine(text: "Söker i minnet efter relevanta kontexter...", type: .memory))
-        let memories = await memory.searchConversations(query: input, limit: 5)
-        context.retrievedMemories = memories
+        let rawMemories = await memory.searchConversations(query: input, limit: 8)
+        // v7: If BERT is available, re-rank memories by semantic similarity
+        let inputEmb = await neuralEngine.embed(input)
+        let bertAvailable = !inputEmb.allSatisfy({ $0 == 0 })
+        if bertAvailable && rawMemories.count > 2 {
+            var scored: [(record: ConversationRecord, score: Float)] = []
+            for mem in rawMemories {
+                let memEmb = await neuralEngine.embed(String(mem.content.prefix(200)))
+                let sim = await neuralEngine.cosineSimilarity(inputEmb, memEmb)
+                scored.append((mem, sim))
+            }
+            context.retrievedMemories = scored.sorted { $0.score > $1.score }
+                .prefix(5).map { $0.record }
+        } else {
+            context.retrievedMemories = Array(rawMemories.prefix(5))
+        }
         // Hämta senaste konversationsturerna för kontextmedvetenhet
         let recentHistory = await memory.getRecentConversation(limit: 8)
         context.conversationHistory = recentHistory
-        if !memories.isEmpty {
-            await onMonologue(MonologueLine(text: "Hittade \(memories.count) relevanta minnen, \(recentHistory.count) historikturer laddade", type: .memory))
+        if !context.retrievedMemories.isEmpty {
+            let rankMethod = bertAvailable ? "BERT-rankade" : "nyckelord"
+            await onMonologue(MonologueLine(text: "Hittade \(context.retrievedMemories.count) relevanta minnen (\(rankMethod)), \(recentHistory.count) historikturer laddade", type: .memory))
         }
         await onStepUpdate(.memoryRetrieval, .completed)
 
@@ -794,53 +809,94 @@ actor CognitiveCycleEngine {
         return parts.joined(separator: ", ")
     }
 
-    // MARK: - Intent Detection
+    // MARK: - Intent Detection (v7: NLTagger-assisted + multi-signal)
+    // Uses NLTagger lexical class analysis combined with keyword patterns
+    // for more accurate intent classification.
 
     private func detectIntent(input: String, history: [ConversationRecord]) -> ConversationIntent {
         let lower = input.lowercased().trimmingCharacters(in: .whitespaces)
         let wordCount = lower.split(separator: " ").count
 
+        // --- Phase 1: Quick structural checks ---
+
         // Greeting detection — only very short inputs
-        let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "tjena", "hejhej", "yo", "tjo"]
+        let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "god natt",
+                         "tjena", "hejhej", "yo", "tjo", "morsning", "tjabba", "tjenare"]
         if greetings.contains(where: { lower.hasPrefix($0) }) && wordCount <= 4 { return .greeting }
 
         // Short follow-up (1-3 words) — only when there is conversation history
-        let followUps = ["ja", "nej", "ok", "okej", "mm", "japp", "precis", "exakt", "visst", "aha", "oh", "absolut", "korrekt", "stämmer", "just det"]
+        let followUps = ["ja", "nej", "ok", "okej", "mm", "japp", "precis", "exakt", "visst",
+                         "aha", "oh", "absolut", "korrekt", "stämmer", "just det", "klart",
+                         "självklart", "naturligtvis", "verkligen", "sant", "inte alls", "aldrig"]
         if wordCount <= 3 && followUps.contains(where: { lower.hasPrefix($0) }) && !history.isEmpty { return .followUp }
 
-        // Multi-part or long input → complex (check early to give generous token budget)
+        // --- Phase 2: NLTagger POS analysis for structural intent ---
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = input
+        var verbCount = 0, nounCount = 0, adjCount = 0
+        var firstWordTag: NLTag?
+        var isFirst = true
+        tagger.enumerateTags(in: input.startIndex..<input.endIndex, unit: .word, scheme: .lexicalClass,
+                             options: [.omitWhitespace, .omitPunctuation]) { tag, _ in
+            if isFirst { firstWordTag = tag; isFirst = false }
+            if tag == .verb { verbCount += 1 }
+            else if tag == .noun { nounCount += 1 }
+            else if tag == .adjective { adjCount += 1 }
+            return true
+        }
+
+        // Multi-part or long input → complex
         if wordCount > 15 || (lower.contains("?") && wordCount > 8) { return .complex }
 
         // Self-reference questions about Eon
-        let selfPatterns = ["vem är du", "vad är du", "berätta om dig", "hur fungerar du", "vad kan du", "hur smart", "hur intelligent", "vad vet du", "vad tänker du om dig"]
+        let selfPatterns = ["vem är du", "vad är du", "berätta om dig", "hur fungerar du", "vad kan du",
+                            "hur smart", "hur intelligent", "vad vet du", "vad tänker du om dig",
+                            "vad tycker du om dig", "är du medveten", "har du känslor", "upplever du",
+                            "kan du tänka", "vad är medvetande", "är du levande"]
         if selfPatterns.contains(where: { lower.contains($0) }) { return .selfReference }
 
         // Explanation request — broad matching
         let explainPatterns = ["förklara", "hur fungerar", "vad innebär", "vad betyder", "kan du beskriva",
-                               "berätta om", "beskriv", "vad är skillnaden", "hur skiljer", "vad menas"]
+                               "berätta om", "beskriv", "vad är skillnaden", "hur skiljer", "vad menas",
+                               "redogör", "vad handlar", "hur uppstår", "hur bildas"]
         if explainPatterns.contains(where: { lower.contains($0) }) { return .explanation }
 
         // Why/opinion/reasoning — deep thought questions
         let opinionPatterns = ["varför", "tycker du", "vad anser", "vad tror du", "vad tänker du",
-                               "vad är din syn", "hur ser du på", "vad är ditt", "resonera", "reflektera"]
+                               "vad är din syn", "hur ser du på", "vad är ditt", "resonera", "reflektera",
+                               "vad menar du", "håller du med", "argumentera för", "argumentera mot"]
         if opinionPatterns.contains(where: { lower.contains($0) }) { return .opinion }
 
-        // Imperative / Command — Swedish imperative verb first word
-        let imperative = ["gör", "visa", "beräkna", "sök", "skriv", "skapa", "lista", "sammanfatta",
-                          "analysera", "jämför", "definiera", "exemplifiera", "argumentera", "diskutera"]
-        if imperative.contains(where: { lower.hasPrefix($0) }) { return .command }
+        // Imperative / Command — Swedish imperative first word OR verb-initial sentence
+        let imperative: Set<String> = ["gör", "visa", "beräkna", "sök", "skriv", "skapa", "lista",
+                          "sammanfatta", "analysera", "jämför", "definiera", "exemplifiera",
+                          "argumentera", "diskutera", "räkna", "hitta", "lös", "förklara",
+                          "svara", "hjälp", "generera", "översätt", "korrigera"]
+        let firstWord = String(lower.prefix(while: { $0 != " " }))
+        if imperative.contains(firstWord) || (firstWordTag == .verb && wordCount <= 10) { return .command }
 
-        // Factual query
-        let factualStarters = ["vad", "vem", "var", "när", "hur många", "hur mycket", "vilket", "vilken", "vilka"]
+        // Factual query — question words + NLTagger detecting noun-heavy structure
+        let factualStarters = ["vad", "vem", "var", "när", "hur många", "hur mycket", "vilket", "vilken", "vilka", "hur långt", "hur stor", "hur gammal"]
         if factualStarters.contains(where: { lower.hasPrefix($0) }) { return .factualQuery }
 
-        // Creative
-        if lower.contains("hitta på") || lower.contains("dikt") || lower.contains("berättelse") ||
-           lower.contains("fantisera") || lower.contains("skriv en") || lower.contains("skapa en") { return .creative }
+        // Creative — broader patterns
+        let creativePatterns = ["hitta på", "dikt", "berättelse", "fantisera", "skriv en", "skapa en",
+                                "dikta", "saga", "novell", "poem", "limerick", "historia om",
+                                "föreställ dig", "tänk dig att", "låtsas att"]
+        if creativePatterns.contains(where: { lower.contains($0) }) { return .creative }
 
-        // Emotional/personal
-        if lower.contains("ledsen") || lower.contains("glad") || lower.contains("orolig") ||
-           lower.contains("arg") || lower.contains("trött") || lower.contains("mår") { return .emotional }
+        // Emotional/personal — expanded with NLTagger adjective detection
+        let emotionalWords = ["ledsen", "glad", "orolig", "arg", "trött", "mår", "ensam",
+                              "rädd", "stressad", "lycklig", "nedstämd", "frustrerad",
+                              "ångest", "deprimerad", "tacksam", "bekymrad", "nöjd", "upprörd"]
+        if emotionalWords.contains(where: { lower.contains($0) }) { return .emotional }
+
+        // --- Phase 3: NLTagger-based structural inference ---
+        // Noun-heavy + question mark → factual query
+        if lower.contains("?") && nounCount >= 2 && verbCount <= 1 { return .factualQuery }
+
+        // Adjective-heavy + personal pronouns → emotional
+        if adjCount >= 2 && (lower.contains("jag") || lower.contains("mig") || lower.contains("mitt")) { return .emotional }
 
         // Default: question mark → factual, otherwise chitchat
         return lower.contains("?") ? .factualQuery : .chitchat
@@ -1020,7 +1076,7 @@ actor GenerationValidator {
 // MARK: - GraphEnricher (Loop 2)
 
 actor GraphEnricher {
-    /// Enriched fact extraction patterns for Swedish text
+    /// v7: Enriched fact extraction patterns for Swedish text — 15 patterns
     private static let factPatterns: [(pattern: String, predicate: String, confidence: Double)] = [
         // "X är Y" — basic identity/classification
         ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+är\\s+((?:en|ett|den|det)?\\s*[\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "är", 0.65),
@@ -1036,6 +1092,22 @@ actor GraphEnricher {
         ("([\\wåäöÅÄÖ]+)\\s+tillhör\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "tillhör", 0.60),
         // "X påverkar Y" — influence
         ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+påverkar\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "påverkar", 0.55),
+        // v7: "X grundades Y" — founding/creation
+        ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+grundades\\s+(\\d{4}|av\\s+[\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "grundades", 0.70),
+        // v7: "X innehåller Y" — containment
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+innehåller\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "innehåller", 0.60),
+        // v7: "X kräver Y" — requirement
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+kräver\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "kräver", 0.55),
+        // v7: "X möjliggör Y" — enablement
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+möjliggör\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "möjliggör", 0.55),
+        // v7: "X liknar Y" — similarity
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+liknar\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "liknar", 0.50),
+        // v7: "X skiljer sig från Y" — difference
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+skiljer\\s+sig\\s+från\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "skiljer_sig_från", 0.55),
+        // v7: "X uppfanns av Y" / "X utvecklades av Y" — invention/development
+        ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+(?:uppfanns|utvecklades|skapades)\\s+av\\s+([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "skapades_av", 0.65),
+        // v7: "X ligger i Y" / "X finns i Y" — location
+        ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+(?:ligger|finns|befinner sig)\\s+i\\s+([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "finns_i", 0.60),
     ]
 
     func enrich(text: String, entities: [ExtractedEntity], memory: PersistentMemoryStore) async {

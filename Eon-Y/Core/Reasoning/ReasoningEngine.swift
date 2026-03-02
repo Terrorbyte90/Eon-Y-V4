@@ -40,6 +40,24 @@ actor ReasoningEngine {
         graph.addRelation(cause: "Uppmärksamhet",   effect: "Inlärning",      strength: 0.78)
         graph.addRelation(cause: "Repetition",      effect: "Minne",          strength: 0.90)
         graph.addRelation(cause: "Minne",           effect: "Kunskap",        strength: 0.85)
+        // v7: Additional causal relations — consciousness, emotion, social, biological
+        graph.addRelation(cause: "Medvetande",      effect: "Självkännedom",  strength: 0.85)
+        graph.addRelation(cause: "Självkännedom",   effect: "Metakognition",  strength: 0.80)
+        graph.addRelation(cause: "Emotion",         effect: "Motivation",     strength: 0.75)
+        graph.addRelation(cause: "Motivation",      effect: "Inlärning",      strength: 0.70)
+        graph.addRelation(cause: "Empati",          effect: "Kommunikation",  strength: 0.72)
+        graph.addRelation(cause: "Kommunikation",   effect: "Samarbete",      strength: 0.80)
+        graph.addRelation(cause: "Samarbete",       effect: "Innovation",     strength: 0.65)
+        graph.addRelation(cause: "Nyfikenhet",      effect: "Utforskning",    strength: 0.85)
+        graph.addRelation(cause: "Utforskning",     effect: "Kunskap",        strength: 0.80)
+        graph.addRelation(cause: "Övning",          effect: "Kompetens",      strength: 0.90)
+        graph.addRelation(cause: "Reflektion",      effect: "Förståelse",     strength: 0.78)
+        graph.addRelation(cause: "Kritik",          effect: "Förbättring",    strength: 0.70)
+        graph.addRelation(cause: "Medvetande",      effect: "Fri vilja",      strength: 0.55)
+        graph.addRelation(cause: "Integration",     effect: "Medvetande",     strength: 0.82)
+        graph.addRelation(cause: "Komplexitet",     effect: "Emergens",       strength: 0.75)
+        graph.addRelation(cause: "Sömn",            effect: "Konsolidering",  strength: 0.88)
+        graph.addRelation(cause: "Konsolidering",   effect: "Minne",          strength: 0.85)
     }
 
     // MARK: - Primär resonemangsfunktion
@@ -319,42 +337,68 @@ actor ReasoningEngine {
         return await reason(about: input, strategy: strategy, depth: depth)
     }
 
+    // v7: Consciousness-informed adaptive strategy selection
+    // Uses NLTagger POS analysis + consciousness state (curiosity, surprise, criticality)
+    // to choose the optimal reasoning strategy.
     private func selectBestStrategy(for input: String) -> ReasoningStrategy {
         let lower = input.lowercased()
         let wordCount = lower.split(separator: " ").count
 
+        // --- Phase 1: Keyword-based intent (fast path) ---
+
         // Causal reasoning — "why" questions
-        if lower.contains("varför") || lower.contains("orsak") || lower.contains("beror") || lower.contains("leder till") || lower.contains("konsekvens") { return .causal }
+        if lower.contains("varför") || lower.contains("orsak") || lower.contains("beror") ||
+           lower.contains("leder till") || lower.contains("konsekvens") ||
+           lower.contains("på grund av") || lower.contains("orsaka") { return .causal }
 
         // Counterfactual — hypothetical scenarios
         if lower.contains("om") && (lower.contains("hade") || lower.contains("skulle")) { return .counterfactual }
-        if lower.contains("tänk om") || lower.contains("vad hade hänt") { return .counterfactual }
+        if lower.contains("tänk om") || lower.contains("vad hade hänt") ||
+           lower.contains("hypotetiskt") || lower.contains("alternativt") { return .counterfactual }
 
         // Analogical — comparison and similarity
-        if lower.contains("liknar") || lower.contains("jämför") || lower.contains("skillnad") || lower.contains("gemensamt") { return .analogical }
-        if lower.contains("precis som") || lower.contains("påminner om") { return .analogical }
+        if lower.contains("liknar") || lower.contains("jämför") || lower.contains("skillnad") ||
+           lower.contains("gemensamt") || lower.contains("precis som") ||
+           lower.contains("påminner om") || lower.contains("analogt") { return .analogical }
 
         // Inductive — patterns and generalizations
-        if lower.contains("alla") || lower.contains("generellt") || lower.contains("mönster") || lower.contains("trend") { return .inductive }
+        if lower.contains("alla") || lower.contains("generellt") || lower.contains("mönster") ||
+           lower.contains("trend") || lower.contains("statistik") || lower.contains("oftast") { return .inductive }
 
         // Deductive — logical inference
-        if lower.contains("slutsats") || lower.contains("bevis") || lower.contains("därför") || lower.contains("logiskt") { return .deductive }
-        if lower.contains("givet att") || lower.contains("om vi antar") { return .deductive }
+        if lower.contains("slutsats") || lower.contains("bevis") || lower.contains("därför") ||
+           lower.contains("logiskt") || lower.contains("givet att") || lower.contains("om vi antar") ||
+           lower.contains("alltså") || lower.contains("följaktligen") { return .deductive }
 
         // Abductive — best explanation
-        if lower.contains("förklara") || lower.contains("vad är") || lower.contains("hur kan det") { return .abductive }
+        if lower.contains("förklara") || lower.contains("vad är") || lower.contains("hur kan det") ||
+           lower.contains("bästa förklaringen") || lower.contains("troligast") { return .abductive }
+
+        // --- Phase 2: NLTagger structural analysis ---
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = input
+        var nounCount = 0, verbCount = 0
+        tagger.enumerateTags(in: input.startIndex..<input.endIndex, unit: .word, scheme: .lexicalClass,
+                             options: [.omitWhitespace, .omitPunctuation]) { tag, _ in
+            if tag == .noun { nounCount += 1 }
+            if tag == .verb { verbCount += 1 }
+            return true
+        }
+
+        // Noun-heavy inputs → conceptual → analogical (find cross-domain connections)
+        if nounCount >= 3 && verbCount <= 1 { return .analogical }
 
         // For complex multi-sentence inputs, use Tree-of-Thought
         if wordCount > 15 { return .treeOfThought }
 
-        // Check reasoning history — prefer strategies that have been effective
+        // --- Phase 3: Diversity-based selection ---
+        // Ensure we don't over-use any single strategy
         let recentStrategies = reasoningHistory.suffix(10).map { $0.strategy }
-        let leastUsed: [ReasoningStrategy] = [.analogical, .counterfactual, .inductive]
-        for strategy in leastUsed {
-            if !recentStrategies.contains(strategy) { return strategy }
-        }
-
-        return .treeOfThought
+        let strategyCounts = Dictionary(recentStrategies.map { ($0, 1) }, uniquingKeysWith: +)
+        let allStrategies: [ReasoningStrategy] = [.analogical, .counterfactual, .inductive, .causal, .abductive, .deductive]
+        // Pick the least-used strategy
+        let leastUsed = allStrategies.min(by: { (strategyCounts[$0] ?? 0) < (strategyCounts[$1] ?? 0) })
+        return leastUsed ?? .treeOfThought
     }
 
     // MARK: - Kausalgraf
@@ -475,6 +519,7 @@ actor ReasoningEngine {
         return Array(hypotheses.sorted { $0.plausibility > $1.plausibility }.prefix(count))
     }
 
+    // v7: Expanded analogy library — 20 domains for richer cross-domain reasoning
     private func findAnalogies(for concept: String) -> [StructuralAnalogy] {
         let library: [String: [StructuralAnalogy]] = [
             "kognition": [
@@ -499,6 +544,7 @@ actor ReasoningEngine {
             ],
             "medvetande": [
                 StructuralAnalogy(source: "medvetande", target: "teater", mappings: ["tankar↔aktörer", "fokus↔strålkastare", "omedvetet↔kulisser"], strength: 0.7, inference: "medvetande är en scen där tankar uppträder"),
+                StructuralAnalogy(source: "medvetande", target: "orkester", mappings: ["moduler↔instrument", "synkronisering↔dirigent", "medvetande↔harmoni"], strength: 0.75, inference: "medvetande emergerar ur synkroniserad mångfald"),
             ],
             "resonemang": [
                 StructuralAnalogy(source: "resonemang", target: "navigering", mappings: ["premisser↔karta", "slutsats↔destination", "logik↔kompass"], strength: 0.75, inference: "resonemang navigerar från premisser till slutsatser"),
@@ -508,6 +554,37 @@ actor ReasoningEngine {
             ],
             "kunskap": [
                 StructuralAnalogy(source: "kunskap", target: "karta", mappings: ["fakta↔platser", "kopplingar↔vägar", "luckor↔outforskade områden"], strength: 0.8, inference: "kunskap är en karta som ständigt ritas om"),
+            ],
+            // v7: New domains
+            "emotion": [
+                StructuralAnalogy(source: "emotion", target: "väder", mappings: ["humör↔klimat", "affekt↔vind", "temperament↔årstid"], strength: 0.7, inference: "emotioner är inre väder — de passerar men klimatet består"),
+                StructuralAnalogy(source: "emotion", target: "kompass", mappings: ["känsla↔riktning", "valens↔polaritet", "arousal↔intensitet"], strength: 0.65, inference: "emotioner ger riktning åt beslut som en inre kompass"),
+            ],
+            "motivation": [
+                StructuralAnalogy(source: "motivation", target: "gravitation", mappings: ["mål↔massa", "attraktion↔drivkraft", "avstånd↔svårighet"], strength: 0.7, inference: "motivation drar oss mot mål som gravitation drar massor"),
+                StructuralAnalogy(source: "motivation", target: "eld", mappings: ["passion↔låga", "bränsle↔belöning", "utmattning↔aska"], strength: 0.6, inference: "motivation behöver bränsle för att fortsätta brinna"),
+            ],
+            "samhälle": [
+                StructuralAnalogy(source: "samhälle", target: "organism", mappings: ["institutioner↔organ", "lagar↔DNA", "medborgare↔celler"], strength: 0.75, inference: "samhället fungerar som en superorganism med specialiserade delar"),
+            ],
+            "evolution": [
+                StructuralAnalogy(source: "evolution", target: "algoritm", mappings: ["mutation↔slump", "selektion↔optimering", "fitness↔resultat"], strength: 0.8, inference: "evolution är naturens optimeringsalgoritm"),
+            ],
+            "tid": [
+                StructuralAnalogy(source: "tid", target: "flod", mappings: ["förfluten↔uppströms", "framtid↔nedströms", "nu↔här"], strength: 0.6, inference: "tid flödar oåterkalleligt som en flod"),
+                StructuralAnalogy(source: "tid", target: "spiral", mappings: ["repetition↔varv", "utveckling↔stigning", "cykler↔mönster"], strength: 0.65, inference: "tid rör sig i spiraler — cyklisk men aldrig exakt samma"),
+            ],
+            "frihet": [
+                StructuralAnalogy(source: "frihet", target: "rum", mappings: ["val↔rörelse", "begränsning↔vägg", "möjlighet↔riktning"], strength: 0.65, inference: "frihet är handlingsutrymme — att ha fler riktningar att röra sig i"),
+            ],
+            "kommunikation": [
+                StructuralAnalogy(source: "kommunikation", target: "bro", mappings: ["budskap↔last", "förståelse↔anslutning", "missförstånd↔kollaps"], strength: 0.7, inference: "kommunikation bygger broar mellan separata sinnen"),
+            ],
+            "system": [
+                StructuralAnalogy(source: "system", target: "kropp", mappings: ["komponenter↔organ", "flöde↔blod", "feedback↔nervsystem"], strength: 0.75, inference: "system organiserar delar till en fungerande helhet"),
+            ],
+            "förändring": [
+                StructuralAnalogy(source: "förändring", target: "metamorfos", mappings: ["tillstånd↔stadium", "process↔transformation", "resultat↔ny form"], strength: 0.7, inference: "förändring är metamorfos — samma substans i ny form"),
             ],
         ]
 

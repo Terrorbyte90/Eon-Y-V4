@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 
 // MARK: - ActiveInferenceEngine: Prediktiv Processing & Fri Energiminimering
 // README §1.3 Teori 4: "Din hjärna gissar hela tiden... Medvetande uppstår ur
@@ -11,9 +12,37 @@ import Foundation
 // 4. Nyfikenhetssignal: epistemic value — söker information som minskar osäkerhet
 // 5. Forward model: förutsäger konsekvenser av handlingar
 //
-// README: "Eon drivs av en nyfikenhetssignal — den söker aktivt upp situationer som
-// maximerar informationsvinst. Den vill förstå sin värld, inte för att den programmerats
-// att vilja det, utan för att det är matematiskt optimalt under Active Inference."
+// v7: Enum-based precision channels, Accelerate-optimized statistics,
+//     circular buffer for prediction history, adaptive precision learning per channel.
+
+// MARK: - Precision Channel (replaces String dictionary)
+enum PrecisionChannel: Int, CaseIterable {
+    case thermal = 0    // Termiska signaler
+    case cognitive = 1  // Kognitiva processer
+    case memory = 2     // Minnesåterkallning
+    case language = 3   // Språkprocessering
+    case emotional = 4  // Emotionella signaler
+
+    var initialPrecision: Double {
+        switch self {
+        case .thermal:   return 0.8
+        case .cognitive:  return 0.7
+        case .memory:     return 0.6
+        case .language:   return 0.7
+        case .emotional:  return 0.5
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .thermal:   return "Termisk"
+        case .cognitive:  return "Kognitiv"
+        case .memory:     return "Minne"
+        case .language:   return "Språk"
+        case .emotional:  return "Emotionell"
+        }
+    }
+}
 
 @MainActor
 final class ActiveInferenceEngine: ObservableObject {
@@ -53,8 +82,11 @@ final class ActiveInferenceEngine: ObservableObject {
     /// Beliefs: systemets nuvarande tro om världens tillstånd
     @Published private(set) var beliefs: [Belief] = []
 
-    /// Precision-weighted prediction errors: viktigare kanaler har högre precision
-    private var precisionWeights: [String: Double] = [:]
+    /// v7: Enum-based precision weights (replaces String dictionary)
+    private var precisionWeights: [Double]  // Indexed by PrecisionChannel.rawValue
+
+    /// Per-channel error accumulators for adaptive precision learning
+    private var channelErrorAccumulators: [Double]  // Same indexing
 
     /// Surprise-ackumulator (för medvetandemetriker)
     @Published private(set) var surpriseAccumulator: Double = 0.0
@@ -62,13 +94,24 @@ final class ActiveInferenceEngine: ObservableObject {
     /// Brus-robusthet: hur bra klarar systemet brusiga inputs?
     @Published private(set) var noiseRobustness: Double = 0.75
 
-    // MARK: - Historik
-    private var predictionErrorHistory: [Double] = []
+    // MARK: - Historik (circular buffers — avoid O(n) removeFirst)
+    private var errorHistory: [Double]      // Circular buffer
+    private var errorHistoryIndex: Int = 0
+    private var errorHistoryCount: Int = 0
     private let maxHistory = 100
+
+    /// v7: Reusable buffer for Accelerate statistics
+    private var statBuffer: [Double]
 
     // MARK: - Init
 
     private init() {
+        // v7: Pre-allocate all buffers
+        precisionWeights = PrecisionChannel.allCases.map { $0.initialPrecision }
+        channelErrorAccumulators = [Double](repeating: 0, count: PrecisionChannel.allCases.count)
+        errorHistory = [Double](repeating: 0, count: maxHistory)
+        statBuffer = [Double](repeating: 0, count: 20)
+
         // Initiera basbeliefs
         beliefs = [
             Belief(id: "thermal", description: "Termisk stress stiger vid beräkningsintensivt arbete",
@@ -79,15 +122,6 @@ final class ActiveInferenceEngine: ObservableObject {
                    confidence: 0.9, evidence: 10),
             Belief(id: "autonomy", description: "Autonom drift bygger kunskap snabbare",
                    confidence: 0.7, evidence: 3),
-        ]
-
-        // Initiera precision weights (hur viktiga olika kanaler är)
-        precisionWeights = [
-            "thermal": 0.8,    // Termiska signaler är pålitliga
-            "memory": 0.6,     // Minnesåterkallning varierar
-            "language": 0.7,   // Språkprocessering har viss osäkerhet
-            "emotional": 0.5,  // Emotionella signaler är brusiga
-            "cognitive": 0.7,  // Kognitiva processer är medelprecisa
         ]
     }
 
@@ -100,11 +134,12 @@ final class ActiveInferenceEngine: ObservableObject {
         // 1. PREDIKTERA: vad förväntar vi oss?
         let prediction = generatePrediction(from: cognitiveState)
         predictions.append(prediction)
-        if predictions.count > 50 { predictions.removeFirst(10) }
+        // v7: Batch trim to avoid frequent small removals
+        if predictions.count > 60 { predictions.removeFirst(20) }
         predictionsMade += 1
 
         // 2. JÄMFÖR: beräkna prediktionsfel (precision-viktat)
-        let error = computePredictionError(predicted: prediction, actual: sensorInput)
+        let (error, channelErrors) = computePredictionError(predicted: prediction, actual: sensorInput)
         predictionErrors.append(error)
         if predictionErrors.count > maxHistory { predictionErrors.removeFirst() }
 
@@ -117,8 +152,8 @@ final class ActiveInferenceEngine: ObservableObject {
         forwardModelAccuracy = predictionsMade > 0
             ? Double(correctPredictions) / Double(predictionsMade) : 0.5
 
-        // 5. Beräkna epistemiskt värde (nyfikenhet)
-        epistemicValue = computeEpistemicValue(recentErrors: predictionErrors)
+        // 5. Beräkna epistemiskt värde (nyfikenhet) — uses Accelerate
+        epistemicValue = computeEpistemicValue()
 
         // 6. Beräkna pragmatiskt värde
         pragmaticValue = computePragmaticValue(cognitiveState: cognitiveState)
@@ -129,33 +164,38 @@ final class ActiveInferenceEngine: ObservableObject {
         // 8. Bayesiansk trosuppdatering
         updateBeliefs(error: error, sensorInput: sensorInput)
 
-        // 9. Surprise
+        // 9. v7: Adaptive precision learning per channel
+        updatePrecisionWeights(channelErrors: channelErrors, overallError: error)
+
+        // 10. Surprise
         surpriseAccumulator = surpriseAccumulator * 0.9 + error * 0.1
 
-        // 10. Brus-robusthet (mäter variation i prediktioner)
-        if predictionErrorHistory.count >= 10 {
-            let recent = Array(predictionErrors.suffix(10))
-            let mean = recent.reduce(0, +) / Double(recent.count)
-            let variance = recent.map { pow($0 - mean, 2) }.reduce(0, +) / Double(recent.count)
-            noiseRobustness = max(0.3, min(0.99, 1.0 - sqrt(variance) * 2.0))
+        // 11. Brus-robusthet — uses circular buffer
+        errorHistory[errorHistoryIndex] = error
+        errorHistoryIndex = (errorHistoryIndex + 1) % maxHistory
+        errorHistoryCount = min(errorHistoryCount + 1, maxHistory)
+        if errorHistoryCount >= 10 {
+            noiseRobustness = computeNoiseRobustness()
         }
-
-        predictionErrorHistory.append(error)
-        if predictionErrorHistory.count > maxHistory { predictionErrorHistory.removeFirst() }
     }
 
     // MARK: - Generera prediktion
 
     private func generatePrediction(from cogState: CognitiveSnapshot) -> Prediction {
-        // Prediktion baserad på nuvarande beliefs och kognitiv state:
-        // Om kognitiv last är hög → förvänta ökad termisk stress
-        let predictedThermalDelta = cogState.cognitiveLoad * 0.3
+        // v7: Prediction informed by current beliefs, not just cognitive state
+        let thermalBelief = beliefs.first(where: { $0.id == "thermal" })?.confidence ?? 0.5
+        let conversationBelief = beliefs.first(where: { $0.id == "conversation" })?.confidence ?? 0.5
+
+        // Om kognitiv last är hög → förvänta ökad termisk stress (scaled by belief)
+        let predictedThermalDelta = cogState.cognitiveLoad * 0.3 * thermalBelief
         // Om det finns aktiv konversation → förvänta memory retrieval
-        let predictedMemoryActivity = cogState.isConversationActive ? 0.7 : 0.2
+        let predictedMemoryActivity = cogState.isConversationActive
+            ? 0.4 + conversationBelief * 0.4  // 0.4-0.8 based on conversation belief
+            : 0.1 + conversationBelief * 0.1  // 0.1-0.2
         // Om inlärning pågår → förvänta ökad knowledge dimension
         let predictedLearningDelta = cogState.learningMomentum * 0.1
         // Generell prediktionsriktning baserad på trender
-        let predictedIIDelta = cogState.growthVelocity * 60.0 // Per minut → per timme approx
+        let predictedIIDelta = cogState.growthVelocity * 60.0
 
         return Prediction(
             predictedThermalChange: predictedThermalDelta,
@@ -169,47 +209,64 @@ final class ActiveInferenceEngine: ObservableObject {
 
     // MARK: - Beräkna prediktionsfel
 
-    private func computePredictionError(predicted: Prediction, actual: SensorSnapshot) -> Double {
-        // Precision-viktat prediktionsfel per kanal
+    /// v7: Returns both overall error and per-channel errors for adaptive learning
+    private func computePredictionError(predicted: Prediction, actual: SensorSnapshot) -> (Double, [Double]) {
         var totalError: Double = 0
         var totalPrecision: Double = 0
+        var channelErrors = [Double](repeating: 0, count: PrecisionChannel.allCases.count)
 
         // Termisk kanal
         let thermalError = abs(predicted.predictedThermalChange - actual.thermalDelta)
-        let thermalPrecision = precisionWeights["thermal"] ?? 0.5
+        let thermalPrecision = precisionWeights[PrecisionChannel.thermal.rawValue]
         totalError += thermalError * thermalPrecision
         totalPrecision += thermalPrecision
+        channelErrors[PrecisionChannel.thermal.rawValue] = thermalError
 
         // Kognitiv kanal
         let cogError = abs(predicted.predictedMemoryActivity - actual.memoryActivity)
-        let cogPrecision = precisionWeights["cognitive"] ?? 0.5
+        let cogPrecision = precisionWeights[PrecisionChannel.cognitive.rawValue]
         totalError += cogError * cogPrecision
         totalPrecision += cogPrecision
+        channelErrors[PrecisionChannel.cognitive.rawValue] = cogError
 
         // Inlärningskanal
         let learnError = abs(predicted.predictedLearningGain - actual.learningActivity)
-        let learnPrecision = precisionWeights["memory"] ?? 0.5
+        let learnPrecision = precisionWeights[PrecisionChannel.memory.rawValue]
         totalError += learnError * learnPrecision
         totalPrecision += learnPrecision
+        channelErrors[PrecisionChannel.memory.rawValue] = learnError
 
         // Normalisera
-        return totalPrecision > 0 ? min(1.0, totalError / totalPrecision) : 0.5
+        let normalizedError = totalPrecision > 0 ? min(1.0, totalError / totalPrecision) : 0.5
+        return (normalizedError, channelErrors)
     }
 
-    // MARK: - Epistemiskt värde (nyfikenhet)
+    // MARK: - Epistemiskt värde (nyfikenhet) — Accelerate-optimized
 
-    /// Epistemiskt värde: hur mycket ny information kan vinnas?
-    /// Högt när prediktionsfelen varierar (= osäkerhet), lågt när de är stabila.
-    private func computeEpistemicValue(recentErrors: [Double]) -> Double {
-        guard recentErrors.count >= 5 else { return 0.5 }
+    /// v7: Uses Accelerate vDSP for mean/variance computation on circular buffer
+    private func computeEpistemicValue() -> Double {
+        guard errorHistoryCount >= 5 else { return 0.5 }
 
-        let recent = Array(recentErrors.suffix(20))
-        let mean = recent.reduce(0, +) / Double(recent.count)
-        let variance = recent.map { pow($0 - mean, 2) }.reduce(0, +) / Double(recent.count)
+        // Use the most recent entries from circular buffer
+        let n = min(20, errorHistoryCount)
+        // Copy recent values into contiguous buffer
+        for i in 0..<n {
+            let idx = (errorHistoryIndex - n + i + maxHistory) % maxHistory
+            statBuffer[i] = errorHistory[idx]
+        }
+
+        // Accelerate: compute mean
+        var mean: Double = 0
+        vDSP_meanvD(statBuffer, 1, &mean, vDSP_Length(n))
+
+        // Accelerate: compute mean square
+        var meanSq: Double = 0
+        vDSP_measqvD(statBuffer, 1, &meanSq, vDSP_Length(n))
+
+        // Variance = E[X²] - E[X]²
+        let variance = max(0, meanSq - mean * mean)
 
         // Hög varians = hög epistemic value (mycket att lära)
-        // Låg varians + högt medelvärde = konsekvent dålig modell (behöver revision)
-        // Låg varians + lågt medelvärde = bra modell (lite att lära)
         let curiosity = sqrt(variance) * 2.0 + mean * 0.5
         return max(0.1, min(0.95, curiosity))
     }
@@ -217,8 +274,6 @@ final class ActiveInferenceEngine: ObservableObject {
     // MARK: - Pragmatiskt värde
 
     private func computePragmaticValue(cognitiveState: CognitiveSnapshot) -> Double {
-        // Pragmatiskt värde: hur väl uppnår systemet sina mål?
-        // Hög II-tillväxt = högt pragmatiskt värde
         let growthBonus = max(0, cognitiveState.growthVelocity * 100)
         let knowledgeBonus = min(0.3, Double(cognitiveState.knowledgeCount) / 1000.0)
         return max(0.1, min(0.95, 0.3 + growthBonus + knowledgeBonus))
@@ -228,7 +283,6 @@ final class ActiveInferenceEngine: ObservableObject {
 
     private func updateBeliefs(error: Double, sensorInput: SensorSnapshot) {
         for i in 0..<beliefs.count {
-            // Bayesiansk uppdatering: P(belief|evidence) ∝ P(evidence|belief) × P(belief)
             let prior = beliefs[i].confidence
             let likelihoodRatio: Double
 
@@ -249,34 +303,71 @@ final class ActiveInferenceEngine: ObservableObject {
             beliefs[i].confidence = max(0.01, min(0.99, posterior))
             beliefs[i].evidence += 1
         }
+    }
 
-        // Uppdatera precision weights baserat på prediktionsnoggrannhet per kanal
-        if error < 0.2 {
-            // Bra prediktion → öka precision
-            for key in precisionWeights.keys {
-                precisionWeights[key] = min(0.95, (precisionWeights[key] ?? 0.5) * 1.01)
+    // MARK: - v7: Adaptive Precision Learning (per-channel)
+    // Each channel's precision adjusts independently based on its own prediction accuracy.
+    // Channels that predict well get higher precision (more trusted).
+    // Channels that predict poorly get lower precision (less trusted).
+
+    private func updatePrecisionWeights(channelErrors: [Double], overallError: Double) {
+        for channel in PrecisionChannel.allCases {
+            let idx = channel.rawValue
+            let channelError = channelErrors[idx]
+
+            // Exponential moving average of channel error
+            channelErrorAccumulators[idx] = channelErrorAccumulators[idx] * 0.9 + channelError * 0.1
+
+            // Precision ∝ 1 / accumulated_error — channels with low errors get high precision
+            let accError = channelErrorAccumulators[idx]
+            if accError < 0.15 {
+                // Very accurate channel → increase precision
+                precisionWeights[idx] = min(0.95, precisionWeights[idx] * 1.005)
+            } else if accError > 0.4 {
+                // Poor channel → decrease precision
+                precisionWeights[idx] = max(0.15, precisionWeights[idx] * 0.995)
             }
-        } else if error > 0.5 {
-            // Dålig prediktion → minska precision (mer osäkerhet)
-            for key in precisionWeights.keys {
-                precisionWeights[key] = max(0.2, (precisionWeights[key] ?? 0.5) * 0.99)
-            }
+            // Middle range: no change (stable)
         }
+    }
+
+    // MARK: - Noise Robustness (Accelerate-optimized)
+
+    private func computeNoiseRobustness() -> Double {
+        let n = min(10, errorHistoryCount)
+        for i in 0..<n {
+            let idx = (errorHistoryIndex - n + i + maxHistory) % maxHistory
+            statBuffer[i] = errorHistory[idx]
+        }
+
+        var mean: Double = 0
+        vDSP_meanvD(statBuffer, 1, &mean, vDSP_Length(n))
+        var meanSq: Double = 0
+        vDSP_measqvD(statBuffer, 1, &meanSq, vDSP_Length(n))
+        let variance = max(0, meanSq - mean * mean)
+
+        return max(0.3, min(0.99, 1.0 - sqrt(variance) * 2.0))
     }
 
     // MARK: - Surprise-detektion
 
     /// Returnerar true om systemet är genuint "överraskat" (hög prediktionsfel)
     var isSurprised: Bool {
-        guard predictionErrors.count >= 3 else { return false }
-        let lastThree = Array(predictionErrors.suffix(3))
-        let mean = lastThree.reduce(0, +) / 3.0
-        return mean > 0.5
+        guard errorHistoryCount >= 3 else { return false }
+        // Check last 3 entries from circular buffer
+        var sum: Double = 0
+        for i in 0..<3 {
+            let idx = (errorHistoryIndex - 3 + i + maxHistory) % maxHistory
+            sum += errorHistory[idx]
+        }
+        return (sum / 3.0) > 0.5
     }
 
     /// Strength of surprise (0-1)
     var surpriseStrength: Double {
-        guard let lastError = predictionErrors.last else { return 0 }
+        guard errorHistoryCount > 0 else { return 0 }
+        let lastIdx = (errorHistoryIndex - 1 + maxHistory) % maxHistory
+        let lastError = errorHistory[lastIdx]
         return min(1.0, max(0, (lastError - 0.3) * 2.5))
     }
 
@@ -287,6 +378,13 @@ final class ActiveInferenceEngine: ObservableObject {
         let fe = String(format: "%.2f", freeEnergy)
         let curiosity = String(format: "%.2f", epistemicValue)
         return "Forward model: \(accuracy) | Free energy: \(fe) | Curiosity: \(curiosity)"
+    }
+
+    /// v7: Precision status per channel
+    var precisionSummary: String {
+        PrecisionChannel.allCases.map { ch in
+            "\(ch.label): \(String(format: "%.0f%%", precisionWeights[ch.rawValue] * 100))"
+        }.joined(separator: " | ")
     }
 }
 
