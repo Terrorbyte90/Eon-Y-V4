@@ -74,16 +74,17 @@ actor LearningEngine {
             }
 
             // Logarithmic scaling: many facts = high competency, diminishing returns
-            // This naturally grows as more facts are added to the database
-            let factScore = totalFacts > 0 ? min(0.70, 0.10 * log2(Double(totalFacts) + 1)) : 0.0
+            // Increased cap from 0.70 → 0.80 and steeper base for faster initial growth
+            let factScore = totalFacts > 0 ? min(0.80, 0.12 * log2(Double(totalFacts) + 1)) : 0.0
 
             // Diversity bonus: knowing many different subjects in a domain matters
-            let diversityBonus = uniqueSubjects.count > 0 ? min(0.15, 0.03 * log2(Double(uniqueSubjects.count) + 1)) : 0.0
+            // Increased cap from 0.15 → 0.20 for more impact from breadth of knowledge
+            let diversityBonus = uniqueSubjects.count > 0 ? min(0.20, 0.04 * log2(Double(uniqueSubjects.count) + 1)) : 0.0
 
             // FSRS study bonus: active study drives competency
             let domainFSRSItems = fsrsItems.filter { $0.domain == domain }
             let reviewedItems = domainFSRSItems.filter { $0.reviewCount > 0 }
-            let fsrsBonus = min(0.10, Double(reviewedItems.count) * 0.01)
+            let fsrsBonus = min(0.15, Double(reviewedItems.count) * 0.015)
 
             let newLevel = min(0.90, factScore + diversityBonus + fsrsBonus)
             if var comp = competencyBook[domain] {
@@ -485,7 +486,49 @@ actor LearningEngine {
 
     func overallCompetencyLevel() -> Double {
         let levels = competencyBook.values.map { $0.level }
-        return levels.isEmpty ? 0.3 : levels.reduce(0, +) / Double(levels.count)
+        guard !levels.isEmpty else { return 0.3 }
+
+        // Weighted average: top domains count more than unstudied ones.
+        // This prevents 8 dormant domains (5%) from dragging down 7 active domains (70%+).
+        let sorted = levels.sorted(by: >)
+        var weightedSum = 0.0
+        var totalWeight = 0.0
+        for (i, level) in sorted.enumerated() {
+            // Top domains get weight 3.0, declining to 1.0 for bottom ones
+            let weight = max(1.0, 3.0 - Double(i) * 0.15)
+            weightedSum += level * weight
+            totalWeight += weight
+        }
+        return totalWeight > 0 ? weightedSum / totalWeight : 0.3
+    }
+
+    /// Called when an article is read — boosts the competency of the article's domain
+    func boostCompetencyFromArticle(domain: String) {
+        // Map article domains to learning domains
+        let domainMapping: [String: String] = [
+            "Konflikter & Krig": "Historia",
+            "Flashback": "Diskurs",
+            "Psykologi": "Psykologi",
+            "Filosofi": "Filosofi",
+            "Språk": "Semantik",
+            "Kodning & Hacking": "AI & Maskininlärning",
+            "Hälsa": "Naturvetenskap",
+            "Uppfinningar": "Naturvetenskap",
+            "Världen": "Naturvetenskap",
+            "Geologi": "Naturvetenskap",
+            "Eon": "Metakognition",
+            "Brott & Straff": "Psykologi",
+            "AI & Teknik": "AI & Maskininlärning",
+        ]
+        let learningDomain = domainMapping[domain] ?? domain
+        if var comp = competencyBook[learningDomain] {
+            let roomToGrow = max(0.05, 1.0 - comp.level)
+            let boost = 0.003 * roomToGrow  // Small but cumulative boost per article read
+            comp.level = min(0.95, comp.level + boost)
+            comp.lastStudied = Date()
+            competencyBook[learningDomain] = comp
+            UserDefaults.standard.set(comp.level, forKey: "competency_\(learningDomain)")
+        }
     }
 
     func topStrengths(limit: Int = 3) -> [DomainCompetency] {

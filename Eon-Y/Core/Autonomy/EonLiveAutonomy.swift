@@ -1197,6 +1197,9 @@ final class EonLiveAutonomy: ObservableObject {
         if savedFactCount > 3 || connections > 0 {
             CreativeEngine.shared.updateEmotionalState(based: .curious, confidence: 0.6 + Double(connections) * 0.05)
         }
+
+        // Boost domain competency in LearningEngine — article reading drives knowledge growth
+        await LearningEngine.shared.boostCompetencyFromArticle(domain: article.domain)
     }
 
     // MARK: - Consolidation (called from rest phase)
@@ -1210,18 +1213,27 @@ final class EonLiveAutonomy: ObservableObject {
         var consolidatedCount = 0
 
         // Find facts with overlapping subjects — consolidate knowledge
+        // Use normalized stems for better grouping: strip common suffixes (-en, -et, -erna, -ar, -er, -or, -s)
         var subjectGroups: [String: [(subject: String, predicate: String, object: String, confidence: Double)]] = [:]
         for fact in recentFacts {
-            let key = fact.subject.lowercased()
+            var key = fact.subject.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            // Normalize Swedish suffixes for better grouping
+            for suffix in ["erna", "arna", "orna", "ande", "ning", "tion", "ighet", "elsen", "en", "et", "ar", "er", "or", "ns", "ts", "s"] {
+                if key.count > suffix.count + 3 && key.hasSuffix(suffix) {
+                    key = String(key.dropLast(suffix.count))
+                    break
+                }
+            }
             subjectGroups[key, default: []].append(fact)
         }
 
-        for (_, facts) in subjectGroups where facts.count >= 3 {
+        for (_, facts) in subjectGroups where facts.count >= 2 {
             // Group has enough facts — synthesize a summary fact
-            let predicates = Set(facts.map { $0.predicate })
-            let objects = facts.prefix(4).map { $0.object }
-            if predicates.count >= 2 {
-                let avgConfidence = facts.map { $0.confidence }.reduce(0, +) / Double(facts.count)
+            let objects = facts.prefix(5).map { $0.object }
+            let avgConfidence = facts.map { $0.confidence }.reduce(0, +) / Double(facts.count)
+            // Consolidate if we have multiple distinct pieces of knowledge
+            let uniqueObjects = Set(objects.map { $0.prefix(30).lowercased() })
+            if uniqueObjects.count >= 2 {
                 await mem.saveFact(
                     subject: facts[0].subject,
                     predicate: "sammanfattning",
@@ -1324,9 +1336,9 @@ final class EonLiveAutonomy: ObservableObject {
             Formulera EN insiktsfull självreflektion på svenska.
             """
             let generated = await neo.generate(prompt: prompt, maxTokens: 35, temperature: 0.8)
-            let cleaned = generated.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleaned = deStutter(generated.trimmingCharacters(in: .whitespacesAndNewlines))
             // Filtrera bort chattliknande fallback-svar som inte hör hemma i revisionsloggning
-            if cleaned.count > 10 && !isChatFallback(cleaned) {
+            if cleaned.count > 10 && cleaned.count < 300 && !isChatFallback(cleaned) {
                 brain.innerMonologue.append(MonologueLine(text: cleaned, type: .revision))
                 try? await Task.sleep(nanoseconds: 800_000_000)
             }
@@ -1389,6 +1401,69 @@ final class EonLiveAutonomy: ObservableObject {
         // Svar som slutar med "?" och är korta (<60 tecken) — troligen chattfråga
         if lower.hasSuffix("?") && text.count < 60 { return true }
         return false
+    }
+
+    /// Removes GPT-SW3 stuttering artifacts where text is repeated incrementally.
+    /// E.g. "Med ett index på 0Med ett index på 0.93" → "Med ett index på 0.93"
+    /// Static version for use in static contexts
+    static func deStutterStatic(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 20 else { return trimmed }
+        let chars = Array(trimmed)
+        for prefixLen in stride(from: min(trimmed.count / 2, 60), through: 8, by: -1) {
+            let prefix = String(chars[0..<prefixLen])
+            var searchRange = trimmed.startIndex..<trimmed.endIndex
+            var occurrences: [String.Index] = []
+            while let range = trimmed.range(of: prefix, range: searchRange) {
+                occurrences.append(range.lowerBound)
+                searchRange = range.upperBound..<trimmed.endIndex
+            }
+            if occurrences.count >= 2, let lastStart = occurrences.last {
+                let result = String(trimmed[lastStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if result.count > 10 { return result }
+            }
+        }
+        return trimmed
+    }
+
+    private func deStutter(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 20 else { return trimmed }
+
+        // Strategy 1: Find the longest non-overlapping repeated prefix.
+        // If the text contains itself repeated, take only the last complete occurrence.
+        let len = trimmed.count
+        let chars = Array(trimmed)
+
+        // Try progressively longer prefix lengths to find repeated segments
+        for prefixLen in stride(from: min(len / 2, 60), through: 8, by: -1) {
+            let prefix = String(chars[0..<prefixLen])
+            // Count how many times this prefix appears
+            var searchRange = trimmed.startIndex..<trimmed.endIndex
+            var occurrences: [String.Index] = []
+            while let range = trimmed.range(of: prefix, range: searchRange) {
+                occurrences.append(range.lowerBound)
+                searchRange = range.upperBound..<trimmed.endIndex
+            }
+            if occurrences.count >= 2 {
+                // Take text from the last occurrence onward — it's the most complete version
+                let lastStart = occurrences.last!
+                let result = String(trimmed[lastStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                // Sanity: result should be meaningful (> 10 chars)
+                if result.count > 10 { return result }
+            }
+        }
+
+        // Strategy 2: If text is unusually long (> 200 chars) and contains repetition,
+        // just take the last sentence.
+        if trimmed.count > 200 {
+            let sentences = trimmed.components(separatedBy: ".")
+            if let lastMeaningful = sentences.last(where: { $0.trimmingCharacters(in: .whitespaces).count > 10 }) {
+                return lastMeaningful.trimmingCharacters(in: .whitespacesAndNewlines) + "."
+            }
+        }
+
+        return trimmed
     }
 
     // MARK: - Language Experiment (called from language phase, with dedup)
@@ -1880,7 +1955,8 @@ struct DeepThoughtEngine {
     ) -> String {
         let art = recentArticles.randomElement() ?? "okänt ämne"
         let conv = recentConversations.randomElement().map { String($0.prefix(40)) } ?? ""
-        let hyp = hypotheses.randomElement().map { String($0.statement.prefix(50)) } ?? ""
+        let rawHyp = hypotheses.randomElement().map { String($0.statement.prefix(50)) } ?? ""
+        let hyp = EonLiveAutonomy.deStutterStatic(rawHyp)
         let hypConf = hypotheses.randomElement()?.confidence ?? 0.5
 
         let cognitiveProcesses: [() -> String] = [
@@ -2383,19 +2459,61 @@ struct LanguageExperimentEngine {
 
     static func generate(stage: DevelopmentalStage, existingExperiments: [LanguageExperiment]) -> LanguageExperiment {
         let wordPairs: [(String, String, String, String)] = [
+            // Presens
             ("springa", "springer", "Presens", "Hen springer snabbt."),
+            ("simma", "simmar", "Presens", "Hon simmar varje dag."),
+            ("läsa", "läser", "Presens", "Han läser en bok."),
+            // Bestämd form
             ("kärlek", "kärleken", "Bestämd form", "Kärleken är stark."),
+            ("hund", "hunden", "Bestämd form", "Hunden skäller högt."),
+            ("bil", "bilen", "Bestämd form", "Bilen står parkerad."),
+            ("bok", "boken", "Bestämd form", "Boken handlar om historia."),
+            // Komparativ
             ("glad", "gladare", "Komparativ", "Hon är gladare idag."),
+            ("snabb", "snabbare", "Komparativ", "Tåget är snabbare."),
+            ("klok", "klokare", "Komparativ", "Han blev klokare med åren."),
+            // Agentiv
             ("arbeta", "arbetare", "Agentiv", "Arbetaren jobbar hårt."),
+            ("forska", "forskare", "Agentiv", "Forskaren publicerade studien."),
+            ("leda", "ledare", "Agentiv", "Ledaren inspirerade folket."),
+            // Abstrakt substantiv
             ("fri", "frihet", "Abstrakt substantiv", "Friheten är ovärderlig."),
+            ("vis", "vishet", "Abstrakt substantiv", "Visheten kommer med erfarenhet."),
+            ("enkel", "enkelhet", "Abstrakt substantiv", "Enkelheten föredras."),
+            // Gerundium
             ("lära", "lärande", "Gerundium", "Lärandet sker kontinuerligt."),
-            ("stor", "storlek", "Abstrakt mått", "Storleken varierar."),
-            ("vän", "vänskap", "Abstrakt relation", "Vänskapen varar länge."),
-            ("skriva", "skrivning", "Verbal substantiv", "Skrivningen tar tid."),
             ("tänka", "tänkande", "Kognitiv process", "Tänkandet är komplext."),
+            ("leva", "levande", "Participform", "Det levande systemet anpassar sig."),
+            // Abstrakt mått
+            ("stor", "storlek", "Abstrakt mått", "Storleken varierar."),
+            ("hög", "höjd", "Abstrakt mått", "Höjden mäts i meter."),
+            ("djup", "djup", "Abstrakt mått", "Djupet är imponerande."),
+            // Abstrakt relation
+            ("vän", "vänskap", "Abstrakt relation", "Vänskapen varar länge."),
+            ("kunna", "kunskap", "Abstrakt relation", "Kunskapen växer ständigt."),
+            ("vet", "vetenskap", "Abstrakt relation", "Vetenskapen söker sanning."),
+            // Verbal substantiv
+            ("skriva", "skrivning", "Verbal substantiv", "Skrivningen tar tid."),
+            ("bearbeta", "bearbetning", "Verbal substantiv", "Bearbetningen kräver energi."),
+            ("undersöka", "undersökning", "Verbal substantiv", "Undersökningen gav resultat."),
+            // Plural
+            ("häst", "hästar", "Plural obestämd", "Hästarna springer på ängen."),
+            ("tanke", "tankar", "Plural obestämd", "Tankarna flödar fritt."),
+            ("idé", "idéer", "Plural obestämd", "Idéerna inspirerar."),
+            // Superlativ
+            ("stark", "starkast", "Superlativ", "Det starkaste argumentet vann."),
+            ("vacker", "vackrast", "Superlativ", "Den vackraste melodin spelade."),
+            // Preteritum
+            ("springa", "sprang", "Preteritum", "Hen sprang genom skogen."),
+            ("äta", "åt", "Preteritum", "Vi åt middag tillsammans."),
+            ("se", "såg", "Preteritum", "Jag såg solen gå ner."),
         ]
 
-        let pair = wordPairs.randomElement()!
+        // Prefer pairs not already tested
+        let untested = wordPairs.filter { pair in
+            !existingExperiments.contains(where: { $0.baseWord == pair.0 && $0.rule == pair.2 })
+        }
+        let pair = (untested.isEmpty ? wordPairs : untested).randomElement()!
         let isNovel = existingExperiments.filter { $0.baseWord == pair.0 }.isEmpty
 
         return LanguageExperiment(

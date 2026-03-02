@@ -88,6 +88,8 @@ actor IntelligenceGapEngine {
         let influences = await state.causalInfluences
 
         for (dim, level) in dimensions {
+            // Skip cognitiveLoad — low load is desirable, not a gap
+            guard dim != .cognitiveLoad else { continue }
             guard level < 0.75 else { continue }  // Bara dimensioner under 75%
 
             // Beräkna hur många dimensioner denna blockerar

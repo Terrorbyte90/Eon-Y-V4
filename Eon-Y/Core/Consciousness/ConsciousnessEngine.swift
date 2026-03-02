@@ -889,13 +889,14 @@ final class ConsciousnessEngine: ObservableObject {
 
     private func articleReadingLoop() async {
         while !Task.isCancelled {
-            // Basintervall 3 min — sakta ner vid termisk stress men stoppa aldrig
+            // Basintervall 90s — sakta ner vid termisk stress men stoppa aldrig
             let thermalState = ProcessInfo.processInfo.thermalState
             let baseNs: UInt64
             switch thermalState {
-            case .critical: baseNs = 900_000_000_000   // 15 min vid kritisk värme
-            case .serious:  baseNs = 540_000_000_000   // 9 min vid allvarlig värme
-            default:        baseNs = 180_000_000_000   // 3 min normalt
+            case .critical: baseNs = 600_000_000_000   // 10 min vid kritisk värme
+            case .serious:  baseNs = 300_000_000_000   // 5 min vid allvarlig värme
+            case .fair:     baseNs = 120_000_000_000   // 2 min vid måttlig värme
+            default:        baseNs = 90_000_000_000    // 90s normalt (was 3 min)
             }
             try? await Task.sleep(nanoseconds: baseNs)
             await Task.yield()
@@ -934,6 +935,15 @@ final class ConsciousnessEngine: ObservableObject {
                 type: .insight
             ))
             if brain.innerMonologue.count > 200 { brain.innerMonologue.removeFirst(20) }
+
+            // 6. Uppdatera kognitiva dimensioner — läsning stärker kunskap och förståelse
+            let state = await CognitiveState.shared
+            await state.update(dimension: .knowledge, delta: 0.002, source: "article_reading")
+            await state.update(dimension: .comprehension, delta: 0.002, source: "article_reading")
+            await state.update(dimension: .worldModel, delta: 0.001, source: "article_reading")
+
+            // 7. Boost domain competency in LearningEngine
+            await LearningEngine.shared.boostCompetencyFromArticle(domain: article.domain)
 
             CognitionLogger.shared.log("CE läser artikel: '\(article.title)' — \(insight)")
         }
