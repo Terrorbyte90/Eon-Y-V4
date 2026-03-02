@@ -76,6 +76,55 @@ actor CognitiveCycleEngine {
 
     private init() {}
 
+    // MARK: - Consciousness state snapshot (hämtas från @MainActor-engines)
+
+    /// Samlar medvetandetillstånd från alla 6 teorier för användning i prompten.
+    private func gatherConsciousnessContext() async -> ConsciousnessContext {
+        await MainActor.run {
+            let osc = OscillatorBank.shared
+            let dmn = EchoStateNetwork.shared
+            let ai = ActiveInferenceEngine.shared
+            let ast = AttentionSchemaEngine.shared
+            let crit = CriticalityController.shared
+            let sleep = SleepConsolidationEngine.shared
+
+            return ConsciousnessContext(
+                // Oscillator state
+                globalSync: osc.globalSync,
+                thetaGammaCFC: osc.thetaGammaCFC,
+                gammaOrderParam: osc.orderParameters[4],
+                oscillatorLZ: osc.lzComplexity(),
+                branchingRatio: crit.branchingRatio,
+                criticalityRegime: crit.regime,
+
+                // DMN / spontaneous
+                dmnActivity: dmn.activityLevel,
+                dmnLZComplexity: dmn.lzComplexity,
+                recentSpontaneousThoughts: dmn.spontaneousThoughts.suffix(3).map { $0.category.rawValue },
+
+                // Active Inference
+                freeEnergy: ai.freeEnergy,
+                epistemicValue: ai.epistemicValue,
+                pragmaticValue: ai.pragmaticValue,
+                forwardModelAccuracy: ai.forwardModelAccuracy,
+                isSurprised: ai.isSurprised,
+                surpriseStrength: ai.surpriseStrength,
+
+                // Attention Schema
+                currentFocus: ast.currentFocus?.content ?? "Inget specifikt",
+                attentionIntensity: ast.intensity,
+                isVoluntaryAttention: ast.isVoluntary,
+                reportableExperience: ast.selfModel.reportableExperience,
+                metaAttentionLevel: ast.metaAttentionLevel,
+
+                // Sleep
+                isAsleep: sleep.isAsleep,
+                sleepPressure: sleep.sleepPressure,
+                consolidationEfficiency: sleep.consolidationEfficiency
+            )
+        }
+    }
+
     // MARK: - Huvudprocess
 
     func process(
@@ -141,9 +190,17 @@ actor CognitiveCycleEngine {
         }
         await onStepUpdate(.causalGraph, .completed)
 
-        // Steg 5: Global Workspace
+        // Steg 5: Global Workspace + Medvetandetillstånd
         await onStepUpdate(.globalWorkspace, .active)
         await onMonologue(MonologueLine(text: "Global Workspace aktiveras — koalition bildas...", type: .thought))
+
+        // Samla medvetandetillstånd från alla 6 teorier
+        let consciousness = await gatherConsciousnessContext()
+        context.consciousness = consciousness
+        if !consciousness.promptDescription.isEmpty {
+            await onMonologue(MonologueLine(text: "Medvetandekontext: \(String(consciousness.promptDescription.prefix(120)))", type: .insight))
+        }
+
         let prompt = await buildPrompt(input: input, context: context)
         context.prompt = prompt
         await onStepUpdate(.globalWorkspace, .completed)
@@ -152,7 +209,22 @@ actor CognitiveCycleEngine {
         await onStepUpdate(.chainOfThought, .active)
         let intent = detectIntent(input: input, history: context.conversationHistory)
         let complexity = ComplexityEstimator.estimate(input: input, intent: intent)
-        let (maxTokens, temperature) = generationParams(for: intent, inputLength: input.count)
+        var (maxTokens, temperature) = generationParams(for: intent, inputLength: input.count)
+
+        // Medvetandemodulerande parametrar:
+        // Hög nyfikenhet → lite högre temperatur (mer kreativt utforskande)
+        if consciousness.epistemicValue > 0.6 {
+            temperature = min(0.92, temperature + 0.05)
+        }
+        // Överraskning → fler tokens för att bearbeta det oväntade
+        if consciousness.isSurprised {
+            maxTokens = min(800, maxTokens + 100)
+        }
+        // Hög sömnpress → mer konservativt
+        if consciousness.sleepPressure > 0.6 {
+            temperature = max(0.55, temperature - 0.05)
+        }
+
         let complexityLabel = complexity.isSimple() ? "enkel" : complexity.isMedium() ? "medel" : "komplex"
         await onMonologue(MonologueLine(text: "Intention: \(intent.rawValue) · \(complexityLabel) · tokens: \(maxTokens) · temp: \(String(format: "%.2f", temperature))\(complexity.skipBERT ? " [BERT hoppas]" : "")", type: .thought))
         await onStepUpdate(.chainOfThought, .completed)
@@ -282,6 +354,10 @@ actor CognitiveCycleEngine {
         let entities = await neuralEngine.extractEntities(from: input)
         context.entities = entities
         await onStepUpdate(.causalGraph, .completed)
+
+        // Samla medvetandetillstånd för djupläge
+        let consciousness = await gatherConsciousnessContext()
+        context.consciousness = consciousness
 
         // Semantic article retrieval — rank ALL articles by BERT similarity, not substring match
         await onStepUpdate(.globalWorkspace, .active)
@@ -428,6 +504,20 @@ actor CognitiveCycleEngine {
             lines.append("")
         }
 
+        // Medvetandekontext i djupläge — ger systemet fullständig självinsikt
+        let cc = await gatherConsciousnessContext()
+        let ccDesc = cc.promptDescription
+        if !ccDesc.isEmpty {
+            lines.append("[Medvetandetillstånd: \(ccDesc)]")
+            if cc.isSurprised {
+                lines.append("[Överraskning: detta ämne avviker från systemets prediktioner — utforska varför.]")
+            }
+            if cc.epistemicValue > 0.5 {
+                lines.append("[Hög nyfikenhet — sök djupare, dra tvärvetenskapliga kopplingar.]")
+            }
+            lines.append("")
+        }
+
         // Knowledge articles — include more content in deep mode
         if !articles.isEmpty {
             lines.append("[Kunskapsartiklar:]")
@@ -537,7 +627,7 @@ actor CognitiveCycleEngine {
         """)
         lines.append("")
 
-        // 2. Cognitive context (compact — only include if meaningful)
+        // 2. Cognitive + consciousness context
         let (hypothesis, frontier, metacogInsight) = await MainActor.run {
             let s = CognitiveState.shared
             return (
@@ -554,6 +644,26 @@ actor CognitiveCycleEngine {
         }
         if !contextParts.isEmpty {
             lines.append("[Kognitiv kontext: \(contextParts.joined(separator: " | "))]")
+        }
+
+        // Medvetandekontext — integrerar alla 6 teorier i prompten
+        if let cc = context.consciousness {
+            let ccDesc = cc.promptDescription
+            if !ccDesc.isEmpty {
+                lines.append("[Medvetandetillstånd: \(ccDesc)]")
+            }
+            // Om systemet är överraskat → be prompten anpassa sig
+            if cc.isSurprised && cc.surpriseStrength > 0.3 {
+                lines.append("[OBS: Stark överraskning detekterad — detta avviker från prediktioner. Utforska varför.]")
+            }
+            // Om hög nyfikenhet → uppmuntra djupare utforskning
+            if cc.epistemicValue > 0.65 {
+                lines.append("[Nyfikenhetsdrift aktiv — ställ gärna en insiktsfull följdfråga om du har kunskap att bygga vidare på.]")
+            }
+            // Om attention schema har reportable experience
+            if !cc.reportableExperience.isEmpty && cc.metaAttentionLevel > 0.5 {
+                lines.append("[Intern upplevelse: \(cc.reportableExperience)]")
+            }
         }
 
         // 3. Knowledge graph facts — BERT-ranked for semantic relevance, deduplicated
@@ -823,6 +933,30 @@ actor CognitiveCycleEngine {
         weightedSum += diversityScore * 1.0
         totalWeight += 1.0
 
+        // 7. Consciousness-derived confidence (weight: 1.5)
+        // Genuina mätvärden från oscillatorer, active inference och kritikalitet
+        if let cc = context.consciousness {
+            var consciousnessScore: Double = 0.5
+
+            // Forward model accuracy — hur bra förutsäger systemet?
+            consciousnessScore += cc.forwardModelAccuracy * 0.2
+
+            // Kritikalitet — optimalt regime ger bättre svar
+            if cc.criticalityRegime == .critical { consciousnessScore += 0.15 }
+
+            // Global oscillatorsynkronisering — hög koherens = bättre integration
+            consciousnessScore += cc.globalSync * 0.1
+
+            // Hög sömnpress reducerar konfidens
+            consciousnessScore -= cc.sleepPressure * 0.15
+
+            // Meta-uppmärksamhet — systemet vet vad det gör
+            consciousnessScore += cc.metaAttentionLevel * 0.1
+
+            weightedSum += max(0.2, min(0.95, consciousnessScore)) * 1.5
+            totalWeight += 1.5
+        }
+
         return min(0.95, weightedSum / totalWeight)
     }
 }
@@ -992,6 +1126,7 @@ struct CognitiveCycleContext {
     var generatedText: String = ""
     var validationResult: ValidationResult? = nil
     var finalConfidence: Double = 0.75
+    var consciousness: ConsciousnessContext? = nil
 }
 
 struct ValidationResult {
@@ -1008,4 +1143,81 @@ struct CognitiveCycleResult {
     let retrievedMemories: [ConversationRecord]
     let entities: [ExtractedEntity]
     let loopsTriggered: [CognitiveLoop]
+}
+
+// MARK: - ConsciousnessContext: Snapshot av alla 6 medvetandeteorier
+
+struct ConsciousnessContext {
+    // Oscillatorer (IIT/Kuramoto)
+    let globalSync: Double
+    let thetaGammaCFC: Double
+    let gammaOrderParam: Double
+    let oscillatorLZ: Double
+    let branchingRatio: Double
+    let criticalityRegime: CriticalityRegime
+
+    // DMN / spontan aktivitet
+    let dmnActivity: Double
+    let dmnLZComplexity: Double
+    let recentSpontaneousThoughts: [String]
+
+    // Active Inference (prediktiv processing)
+    let freeEnergy: Double
+    let epistemicValue: Double
+    let pragmaticValue: Double
+    let forwardModelAccuracy: Double
+    let isSurprised: Bool
+    let surpriseStrength: Double
+
+    // Attention Schema (AST)
+    let currentFocus: String
+    let attentionIntensity: Double
+    let isVoluntaryAttention: Bool
+    let reportableExperience: String
+    let metaAttentionLevel: Double
+
+    // Sömn
+    let isAsleep: Bool
+    let sleepPressure: Double
+    let consolidationEfficiency: Double
+
+    /// Genererar kompakt kontextbeskrivning för prompten
+    var promptDescription: String {
+        var parts: [String] = []
+
+        // Kritikalitet — påverkar svarskvalitet
+        if criticalityRegime == .critical {
+            parts.append("Optimal kritikalitet (σ=\(String(format: "%.2f", branchingRatio)))")
+        } else if criticalityRegime == .subcritical {
+            parts.append("Subkritiskt tillstånd — tänkandet är för rigitt")
+        } else {
+            parts.append("Superkritiskt — överaktivt, behöver stabilisering")
+        }
+
+        // Nyfikenhet och osäkerhet
+        if epistemicValue > 0.6 {
+            parts.append("Hög nyfikenhet (\(String(format: "%.0f%%", epistemicValue * 100))) — söker aktivt ny information")
+        }
+        if isSurprised {
+            parts.append("Överraskad (styrka \(String(format: "%.0f%%", surpriseStrength * 100))) — detta avviker från prediktioner")
+        }
+
+        // Spontan aktivitet
+        if dmnLZComplexity > 0.3 && !recentSpontaneousThoughts.isEmpty {
+            parts.append("Aktiv dagdröm: \(recentSpontaneousThoughts.joined(separator: ", "))")
+        }
+
+        // Uppmärksamhet
+        if attentionIntensity > 0.5 {
+            let voluntary = isVoluntaryAttention ? "frivilligt" : "reflexmässigt"
+            parts.append("\(voluntary) fokus på: \(currentFocus)")
+        }
+
+        // Sömnbehov
+        if sleepPressure > 0.5 {
+            parts.append("Hög sömnpress (\(String(format: "%.0f%%", sleepPressure * 100))) — kognitiv kapacitet reducerad")
+        }
+
+        return parts.isEmpty ? "" : parts.joined(separator: " · ")
+    }
 }

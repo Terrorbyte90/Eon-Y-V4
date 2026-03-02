@@ -14,7 +14,16 @@ struct SelfAwarenessView: View {
     @State private var orbPulse: CGFloat = 1.0
     @State private var ringRot: Double = 0
     @State private var showMotorRoom: Bool = false
+    @State private var showConsciousnessLive: Bool = false
     @AppStorage("eon_motor_control") private var eonMotorControl = false
+
+    // Consciousness engines for live data
+    @ObservedObject private var oscillators = OscillatorBank.shared
+    @ObservedObject private var criticalityCtrl = CriticalityController.shared
+    @ObservedObject private var sleepEngine = SleepConsolidationEngine.shared
+    @ObservedObject private var dmn = EchoStateNetwork.shared
+    @ObservedObject private var activeInference = ActiveInferenceEngine.shared
+    @ObservedObject private var attentionSchema = AttentionSchemaEngine.shared
 
     enum SASection: String, CaseIterable {
         case overview = "Översikt"
@@ -459,6 +468,69 @@ struct SelfAwarenessView: View {
                 }
             }
 
+            // MARK: Consciousness Live Dashboard Button
+            Button {
+                showConsciousnessLive = true
+            } label: {
+                saCard(tint: Color(hex: "#7C3AED")) {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(Color(hex: "#7C3AED").opacity(0.15))
+                                .frame(width: 44, height: 44)
+                            Image(systemName: "waveform.path.ecg.rectangle")
+                                .font(.system(size: 18))
+                                .foregroundStyle(Color(hex: "#7C3AED"))
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Text("MEDVETANDE LIVE")
+                                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.5))
+                                    .tracking(1)
+                                // Live regime indicator
+                                Text(criticalityCtrl.regime == .critical ? "KRITISK" :
+                                     criticalityCtrl.regime == .subcritical ? "SUB" : "SUPER")
+                                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(criticalityCtrl.regime == .critical ?
+                                                     Color(hex: "#34D399") : Color(hex: "#FBBF24"))
+                                    .padding(.horizontal, 4).padding(.vertical, 2)
+                                    .background(RoundedRectangle(cornerRadius: 3).fill(
+                                        (criticalityCtrl.regime == .critical ?
+                                         Color(hex: "#34D399") : Color(hex: "#FBBF24")).opacity(0.15)))
+                            }
+                            HStack(spacing: 8) {
+                                Text("Φ \(String(format: "%.2f", consciousness.phiProxy))")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(Color(hex: "#EC4899").opacity(0.7))
+                                Text("Sync \(String(format: "%.0f%%", oscillators.globalSync * 100))")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(Color(hex: "#38BDF8").opacity(0.7))
+                                Text("FE \(String(format: "%.2f", activeInference.freeEnergy))")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(Color(hex: "#06B6D4").opacity(0.7))
+                            }
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .light))
+                            .foregroundStyle(.white.opacity(0.2))
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showConsciousnessLive) {
+                NavigationStack {
+                    ConsciousnessLiveView()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Stäng") { showConsciousnessLive = false }
+                                    .foregroundStyle(Color(hex: "#A78BFA"))
+                            }
+                        }
+                }
+            }
+
             // Eon Motor Room Button — only visible when Eon-läge is active
             if eonMotorControl {
                 let mc = EonMotorController.shared
@@ -862,6 +934,243 @@ struct SelfAwarenessView: View {
                                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                                     .foregroundStyle(consciousness.phiProxy > 0.31 ? Color(hex: "#34D399") : Color(hex: "#EF4444"))
                             }
+                        }
+                    }
+                }
+            }
+
+            // MARK: Oscillator / Neural Synchronization
+            saCard(tint: Color(hex: "#38BDF8")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    saCardHeader(icon: "waveform.path", title: "KURAMOTO-OSCILLATORER", color: Color(hex: "#38BDF8"))
+                    HStack(spacing: 16) {
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.2f", oscillators.globalSync))
+                                .font(.system(size: 24, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#38BDF8"))
+                            Text("Global Sync")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.2f", oscillators.thetaGammaCFC))
+                                .font(.system(size: 24, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#A78BFA"))
+                            Text("θ-γ CFC")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.2f", oscillators.lzComplexity()))
+                                .font(.system(size: 24, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#34D399"))
+                            Text("LZ Kompl.")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
+                    // Band-level order parameters
+                    let bands = ["δ", "θ", "α", "β", "γ"]
+                    let bandColors: [Color] = [
+                        Color(hex: "#6366F1"), Color(hex: "#8B5CF6"),
+                        Color(hex: "#A78BFA"), Color(hex: "#38BDF8"), Color(hex: "#34D399")
+                    ]
+                    HStack(spacing: 6) {
+                        ForEach(0..<5, id: \.self) { i in
+                            let val = i < oscillators.orderParameters.count ? oscillators.orderParameters[i] : 0
+                            VStack(spacing: 3) {
+                                GeometryReader { geo in
+                                    ZStack(alignment: .bottom) {
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(Color.white.opacity(0.05))
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(bandColors[i])
+                                            .frame(height: geo.size.height * CGFloat(val))
+                                    }
+                                }
+                                .frame(height: 28)
+                                Text(bands[i])
+                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(bandColors[i].opacity(0.7))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // MARK: Criticality (Edge of Chaos)
+            saCard(tint: criticalityCtrl.regime == .critical ? Color(hex: "#34D399") :
+                         criticalityCtrl.regime == .subcritical ? Color(hex: "#FBBF24") : Color(hex: "#EF4444")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    let regimeColor = criticalityCtrl.regime == .critical ? Color(hex: "#34D399") :
+                                      criticalityCtrl.regime == .subcritical ? Color(hex: "#FBBF24") : Color(hex: "#EF4444")
+                    saCardHeader(icon: "bolt.trianglebadge.exclamationmark.fill",
+                                 title: "KRITIKALITET (EDGE OF CHAOS)", color: regimeColor)
+                    HStack(spacing: 16) {
+                        VStack(spacing: 4) {
+                            Text(criticalityCtrl.regime == .critical ? "KRITISK" :
+                                 criticalityCtrl.regime == .subcritical ? "SUBKRITISK" : "SUPERKRITISK")
+                                .font(.system(size: 14, weight: .black, design: .monospaced))
+                                .foregroundStyle(regimeColor)
+                            Text("Regim")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.3f", criticalityCtrl.branchingRatio))
+                                .font(.system(size: 20, weight: .black, design: .monospaced))
+                                .foregroundStyle(regimeColor)
+                            Text("σ (mål: 1.0)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.2f", criticalityCtrl.eiBalance))
+                                .font(.system(size: 20, weight: .black, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.7))
+                            Text("E/I Balans")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
+                    Text("Optimalt medvetande uppstår vid edge-of-chaos (σ ≈ 1.0) — maximal beräkningskapacitet och informationsöverföring.")
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            // MARK: Sleep Consolidation
+            saCard(tint: sleepEngine.isAsleep ? Color(hex: "#6366F1") : Color(hex: "#818CF8")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    saCardHeader(icon: sleepEngine.isAsleep ? "moon.zzz.fill" : "moon.stars",
+                                 title: "SÖMNKONSOLIDERING", color: Color(hex: "#818CF8"))
+                    HStack(spacing: 16) {
+                        VStack(spacing: 4) {
+                            Text(sleepEngine.isAsleep ? "SOVER" : "VAKEN")
+                                .font(.system(size: 14, weight: .black, design: .monospaced))
+                                .foregroundStyle(sleepEngine.isAsleep ? Color(hex: "#6366F1") : Color(hex: "#34D399"))
+                            Text("Status")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.0f%%", sleepEngine.sleepPressure * 100))
+                                .font(.system(size: 20, weight: .black, design: .monospaced))
+                                .foregroundStyle(sleepEngine.sleepPressure > 0.7 ? Color(hex: "#EF4444") :
+                                                 sleepEngine.sleepPressure > 0.4 ? Color(hex: "#FBBF24") : Color(hex: "#34D399"))
+                            Text("Sömntryck")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.0f%%", sleepEngine.consolidationEfficiency * 100))
+                                .font(.system(size: 20, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#818CF8"))
+                            Text("Konsolid.")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
+                    // Sleep pressure bar
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.white.opacity(0.05))
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(LinearGradient(
+                                    colors: [Color(hex: "#34D399"), Color(hex: "#FBBF24"), Color(hex: "#EF4444")],
+                                    startPoint: .leading, endPoint: .trailing))
+                                .frame(width: geo.size.width * CGFloat(sleepEngine.sleepPressure))
+                        }
+                    }
+                    .frame(height: 6)
+                }
+            }
+
+            // MARK: DMN / Echo State Network
+            saCard(tint: Color(hex: "#14B8A6")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    saCardHeader(icon: "brain", title: "DEFAULT MODE NETWORK (ESN)", color: Color(hex: "#14B8A6"))
+                    HStack(spacing: 16) {
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.2f", dmn.activityLevel))
+                                .font(.system(size: 20, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#14B8A6"))
+                            Text("Aktivitet")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.2f", dmn.lzComplexity))
+                                .font(.system(size: 20, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#34D399"))
+                            Text("LZ Kompl.")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        VStack(spacing: 4) {
+                            Text("\(dmn.spontaneousThoughts.count)")
+                                .font(.system(size: 20, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#A78BFA"))
+                            Text("Spontana")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
+                    if let lastThought = dmn.spontaneousThoughts.last {
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkle")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color(hex: "#14B8A6").opacity(0.7))
+                            Text(lastThought.category.rawValue)
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#14B8A6").opacity(0.7))
+                        }
+                    }
+                }
+            }
+
+            // MARK: Attention Schema (AST)
+            saCard(tint: Color(hex: "#F59E0B")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    saCardHeader(icon: "eye.circle.fill", title: "UPPMÄRKSAMHETSSCHEMA (AST)", color: Color(hex: "#F59E0B"))
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(attentionSchema.currentFocus?.content ?? "Inget fokus")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .lineLimit(2)
+                            HStack(spacing: 8) {
+                                Label(attentionSchema.isVoluntary ? "Frivillig" : "Reflexiv",
+                                      systemImage: attentionSchema.isVoluntary ? "hand.tap" : "bolt.fill")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(attentionSchema.isVoluntary ?
+                                                     Color(hex: "#34D399") : Color(hex: "#FBBF24"))
+                                Text("Intensitet: \(String(format: "%.0f%%", attentionSchema.intensity * 100))")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.4))
+                            }
+                        }
+                        Spacer()
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.2f", attentionSchema.metaAttentionLevel))
+                                .font(.system(size: 20, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#F59E0B"))
+                            Text("Meta-nivå")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
+                    if !attentionSchema.selfModel.reportableExperience.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "quote.bubble")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color(hex: "#F59E0B").opacity(0.6))
+                            Text(attentionSchema.selfModel.reportableExperience)
+                                .font(.system(size: 10, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.5))
+                                .lineLimit(2)
                         }
                     }
                 }

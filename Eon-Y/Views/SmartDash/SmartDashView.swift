@@ -10,6 +10,11 @@ struct SmartDashView: View {
     @EnvironmentObject var brain: EonBrain
     @StateObject private var consciousness = ConsciousnessEngine.shared
     @StateObject private var motorController = EonMotorController.shared
+    @ObservedObject private var oscillators = OscillatorBank.shared
+    @ObservedObject private var criticalityCtrl = CriticalityController.shared
+    @ObservedObject private var sleepEng = SleepConsolidationEngine.shared
+    @ObservedObject private var dmnNet = EchoStateNetwork.shared
+    @ObservedObject private var activeInf = ActiveInferenceEngine.shared
     @Environment(\.dismiss) private var dismiss
     @State private var orbPulse: CGFloat = 1.0
     @State private var ringRot: Double = 0
@@ -199,24 +204,115 @@ struct SmartDashView: View {
                 resourceCard
             }
 
-            // Row 3: Emotions + Inner narrative
+            // Row 3: Consciousness Engines Status
+            consciousnessEnginesCard
+
+            // Row 4: Emotions + Inner narrative
             emotionsCard
 
-            // Row 4: O-Intelligence scores
+            // Row 5: O-Intelligence scores
             intelligenceScoresCard
 
-            // Row 5: Cognitive summaries
+            // Row 6: Cognitive summaries
             HStack(spacing: 10) {
                 cognitiveSummaryCard(title: "App-kognition", level: appCognitiveLevel, color: Color(hex: "#34D399"))
                 cognitiveSummaryCard(title: "Självmedvetande", level: consciousnessCognitiveLevel, color: Color(hex: "#A78BFA"))
             }
 
-            // Row 6: Consciousness tests summary
+            // Row 7: Consciousness tests summary
             testsSummaryCard
 
-            // Row 7: Active motors summary
+            // Row 8: Active motors summary
             activeMotorsSummaryCard
         }
+    }
+
+    // MARK: - Consciousness Engines Card
+
+    var consciousnessEnginesCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: "waveform.path.ecg.rectangle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color(hex: "#7C3AED"))
+                Text("MEDVETANDEMOTORER")
+                    .font(.system(size: 7, weight: .black, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+                Spacer()
+                let regimeColor = criticalityCtrl.regime == .critical ? Color(hex: "#34D399") :
+                                  criticalityCtrl.regime == .subcritical ? Color(hex: "#FBBF24") : Color(hex: "#EF4444")
+                Text(criticalityCtrl.regime == .critical ? "KRITISK" :
+                     criticalityCtrl.regime == .subcritical ? "SUB" : "SUPER")
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .foregroundStyle(regimeColor)
+                    .padding(.horizontal, 4).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 3).fill(regimeColor.opacity(0.15)))
+            }
+
+            // Top metrics row
+            HStack(spacing: 0) {
+                engineMiniMetric("Sync", String(format: "%.0f%%", oscillators.globalSync * 100),
+                                 Color(hex: "#38BDF8"))
+                engineMiniMetric("σ", String(format: "%.2f", criticalityCtrl.branchingRatio),
+                                 criticalityCtrl.regime == .critical ? Color(hex: "#34D399") : Color(hex: "#FBBF24"))
+                engineMiniMetric("FE", String(format: "%.2f", activeInf.freeEnergy),
+                                 Color(hex: "#06B6D4"))
+                engineMiniMetric("DMN", String(format: "%.0f%%", dmnNet.activityLevel * 100),
+                                 Color(hex: "#14B8A6"))
+            }
+
+            // Bottom row: sleep + oscillator bands
+            HStack(spacing: 8) {
+                // Sleep pressure mini bar
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 3) {
+                        Image(systemName: sleepEng.isAsleep ? "moon.zzz.fill" : "moon.stars")
+                            .font(.system(size: 8))
+                            .foregroundStyle(sleepEng.isAsleep ? Color(hex: "#6366F1") : Color(hex: "#818CF8"))
+                        Text("Sömntryck \(String(format: "%.0f%%", sleepEng.sleepPressure * 100))")
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.white.opacity(0.05))
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(LinearGradient(
+                                    colors: [Color(hex: "#34D399"), Color(hex: "#FBBF24"), Color(hex: "#EF4444")],
+                                    startPoint: .leading, endPoint: .trailing))
+                                .frame(width: geo.size.width * CGFloat(sleepEng.sleepPressure))
+                        }
+                    }
+                    .frame(height: 4)
+                }
+                .frame(maxWidth: .infinity)
+
+                // θ-γ CFC
+                VStack(spacing: 2) {
+                    Text("θ-γ")
+                        .font(.system(size: 7, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#A78BFA").opacity(0.6))
+                    Text(String(format: "%.2f", oscillators.thetaGammaCFC))
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#A78BFA"))
+                }
+            }
+        }
+        .padding(10)
+        .background(dashGlass(accent: Color(hex: "#7C3AED")))
+    }
+
+    private func engineMiniMetric(_ label: String, _ value: String, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 7, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Live Kognition Card

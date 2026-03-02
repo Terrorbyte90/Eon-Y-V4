@@ -7,6 +7,9 @@ struct EonPulseHomeView: View {
     @EnvironmentObject var brain: EonBrain
     @Environment(\.tabBarVisible) private var tabBarVisible
     @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var oscillators = OscillatorBank.shared
+    @ObservedObject private var critCtrl = CriticalityController.shared
+    @ObservedObject private var sleepEng = SleepConsolidationEngine.shared
 
     @State private var ring1: Double = 0
     @State private var ring2: Double = 0
@@ -583,6 +586,46 @@ struct EonPulseHomeView: View {
                 .fill(accentColor.opacity(0.08))
                 .frame(height: 0.5)
                 .padding(.horizontal, 14)
+
+            // Consciousness engine status strip
+            HStack(spacing: 10) {
+                HStack(spacing: 3) {
+                    Image(systemName: "waveform.path")
+                        .font(.system(size: 7))
+                        .foregroundStyle(Color(hex: "#38BDF8").opacity(0.6))
+                    Text(String(format: "%.0f%%", oscillators.globalSync * 100))
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#38BDF8").opacity(0.6))
+                }
+                let regimeColor = critCtrl.regime == .critical ? Color(hex: "#34D399") :
+                                  critCtrl.regime == .subcritical ? Color(hex: "#FBBF24") : Color(hex: "#EF4444")
+                HStack(spacing: 3) {
+                    Circle().fill(regimeColor).frame(width: 4, height: 4)
+                    Text("σ\(String(format: "%.2f", critCtrl.branchingRatio))")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(regimeColor.opacity(0.7))
+                }
+                if sleepEng.isAsleep {
+                    HStack(spacing: 3) {
+                        Image(systemName: "moon.zzz.fill")
+                            .font(.system(size: 7))
+                        Text("Sover")
+                            .font(.system(size: 8, design: .monospaced))
+                    }
+                    .foregroundStyle(Color(hex: "#6366F1").opacity(0.7))
+                } else if sleepEng.sleepPressure > 0.5 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "moon.stars")
+                            .font(.system(size: 7))
+                        Text("Tryck \(String(format: "%.0f%%", sleepEng.sleepPressure * 100))")
+                            .font(.system(size: 8, design: .monospaced))
+                    }
+                    .foregroundStyle(Color(hex: "#FBBF24").opacity(0.6))
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.vertical, 5)
+            .background(accentColor.opacity(0.03))
 
             // Självreflektion
             if !reflection.isEmpty {
