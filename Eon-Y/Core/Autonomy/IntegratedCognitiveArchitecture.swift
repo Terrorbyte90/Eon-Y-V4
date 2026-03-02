@@ -422,16 +422,34 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
 
     // MARK: - Individual pillar work functions (called from combined worker)
 
+    // v7: Consciousness-informed causal work — curiosity and surprise drive topic selection
     private func runCausalWork() async {
         guard let brain else { return }
         let state = CognitiveState.shared
         let causalityLevel = state.dimensionLevel(.causality)
-        let topics = generateCausalTopics(level: causalityLevel)
-        let topic = topics.randomElement() ?? "kognitiv utveckling"
-        let depth = Int(state.dimensionLevel(.reasoning) * 5) + 2
 
+        // v7: If high curiosity, pick more exploratory topics; if surprised, investigate the unexpected
+        let ai = ActiveInferenceEngine.shared
+        let topic: String
+        if ai.isSurprised && ai.surpriseStrength > 0.3 {
+            // Something unexpected — investigate causally
+            let workspace = GlobalWorkspaceEngine.shared
+            let focus = await workspace.currentFocus?.content ?? "det oväntade"
+            topic = "Varför inträffar \(String(focus.prefix(40))) oväntat?"
+        } else if ai.epistemicValue > 0.6 {
+            // High curiosity — explore novel causal territories
+            let novelTopics = ["Hur emergerar medvetande ur neuronal komplexitet?",
+                               "Vad driver kreativitet i komplexa adaptiva system?",
+                               "Hur kopplas kausalitet till temporal medvetenhet?"]
+            topic = novelTopics.randomElement() ?? "kognitiv utveckling"
+        } else {
+            let topics = generateCausalTopics(level: causalityLevel)
+            topic = topics.randomElement() ?? "kognitiv utveckling"
+        }
+
+        let depth = Int(state.dimensionLevel(.reasoning) * 5) + 2
         let result = await ReasoningEngine.shared.reason(about: topic, strategy: .causal, depth: depth)
-        let gain = result.confidence * 0.005 // Reduced from 0.008
+        let gain = result.confidence * 0.005
         await state.update(dimension: .causality, delta: gain, source: "causal_pillar")
         await state.update(dimension: .reasoning, delta: gain * 0.4, source: "causal_pillar")
         state.causalChainDepth = result.causalChain.count
@@ -593,6 +611,7 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         ))
     }
 
+    // v7: Consciousness-driven self-development — gains modulated by actual consciousness metrics
     private func runSelfDevelopmentWork() async {
         guard let brain else { return }
         let state = CognitiveState.shared
@@ -605,8 +624,21 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         for reflection in reflections.prefix(1) {
             brain.innerMonologue.append(MonologueLine(text: "🪞 \(reflection)", type: .thought))
         }
-        await state.update(dimension: .selfAwareness, delta: 0.004, source: "self_development")
-        await state.update(dimension: .metacognition, delta: 0.002, source: "self_development")
+
+        // v7: Self-awareness gain modulated by meta-attention level (genuine self-observation)
+        let ast = AttentionSchemaEngine.shared
+        let metaBonus = ast.metaAttentionLevel > 0.5 ? 1.5 : 1.0
+        await state.update(dimension: .selfAwareness, delta: 0.004 * metaBonus, source: "self_development")
+        await state.update(dimension: .metacognition, delta: 0.002 * metaBonus, source: "self_development")
+
+        // v7: If consciousness Q-index is improving, log the trajectory
+        let ce = ConsciousnessEngine.shared
+        if ce.qIndex > 0.3 {
+            brain.innerMonologue.append(MonologueLine(
+                text: "🪞 Q-index: \(String(format: "%.3f", ce.qIndex)) | Butlin: \(ce.butlin14Score)/14 | Meta-att: \(String(format: "%.0f%%", ast.metaAttentionLevel * 100))",
+                type: .insight
+            ))
+        }
     }
 
     private func runLanguageWork() async {
@@ -641,36 +673,65 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         }
     }
 
+    // v7: Consciousness-enriched Global Workspace — feeds oscillator sync and criticality into GWT
     private func runGlobalWorkspaceWork() async {
         guard let brain else { return }
         let state = CognitiveState.shared
+        let workspace = GlobalWorkspaceEngine.shared
+
+        // Feed latest monologue thought into workspace
         if let lastThought = brain.innerMonologue.last {
-            await GlobalWorkspaceEngine.shared.addThoughtFromText(lastThought.text, source: "ica", priority: state.dimensionLevel(.reasoning))
-            await GlobalWorkspaceEngine.shared.runCompetition()
-            let integrationLevel = await GlobalWorkspaceEngine.shared.integrationLevel
-            state.broadcastStrength = integrationLevel
-            state.competingThoughts = await GlobalWorkspaceEngine.shared.thoughtCount
-            if let focus = await GlobalWorkspaceEngine.shared.currentFocus {
-                state.attentionFocus = String(focus.content.prefix(60))
-                await state.update(dimension: .comprehension, delta: integrationLevel * 0.001, source: "gwt")
-            }
+            // v7: Priority scaled by oscillator sync — higher sync = stronger broadcast potential
+            let syncBoost = OscillatorBank.shared.globalSync * 0.3
+            let basePriority = state.dimensionLevel(.reasoning)
+            await workspace.addThoughtFromText(lastThought.text, source: "ica", priority: min(1.0, basePriority + syncBoost))
+        }
+
+        // v7: Also feed DMN spontaneous thoughts into workspace (competing for access)
+        let dmn = EchoStateNetwork.shared
+        if dmn.activityLevel > 0.3, let spontaneous = dmn.spontaneousThoughts.last {
+            await workspace.addThoughtFromText(spontaneous.content, source: "dmn", priority: dmn.activityLevel * 0.5)
+        }
+
+        await workspace.runCompetition()
+        let integrationLevel = await workspace.integrationLevel
+        state.broadcastStrength = integrationLevel
+        state.competingThoughts = await workspace.thoughtCount
+        if let focus = await workspace.currentFocus {
+            state.attentionFocus = String(focus.content.prefix(60))
+            // v7: Comprehension gain scaled by criticality regime — optimal at critical
+            let critBonus: Double = CriticalityController.shared.regime == .critical ? 1.5 : 1.0
+            await state.update(dimension: .comprehension, delta: integrationLevel * 0.001 * critBonus, source: "gwt")
         }
     }
 
+    // v7: Prediction work enriched with Active Inference forward model accuracy
     private func runPredictionWork() async {
         guard let brain else { return }
         let state = CognitiveState.shared
+        let ai = ActiveInferenceEngine.shared
         let strength = (state.dimensionLevel(.worldModel) + state.dimensionLevel(.causality)) / 2.0
         let ii = state.integratedIntelligence
         let velocity = state.growthVelocity
         let projectedII = ii + velocity * 60.0
 
-        let prediction = strength > 0.7
-            ? "Tillväxt \(String(format: "%.5f", velocity))/min → II=\(String(format: "%.3f", projectedII)) om 60 min"
-            : "Begränsad prediktion (styrka: \(String(format: "%.2f", strength))). Stärk världsmodell."
+        // v7: Include Active Inference forward model accuracy in prediction assessment
+        let fmAccuracy = ai.forwardModelAccuracy
+        let combinedStrength = strength * 0.6 + fmAccuracy * 0.4
 
-        brain.innerMonologue.append(MonologueLine(text: "🔮 PREDIKTION[\(String(format: "%.0f", strength * 100))%]: \(prediction)", type: .insight))
-        await state.update(dimension: .prediction, delta: 0.003, source: "prediction_pillar")
+        let prediction: String
+        if combinedStrength > 0.7 {
+            prediction = "Tillväxt \(String(format: "%.5f", velocity))/min → II=\(String(format: "%.3f", projectedII)) om 60 min | FM=\(String(format: "%.0f%%", fmAccuracy * 100))"
+        } else if ai.epistemicValue > 0.5 {
+            prediction = "Osäker prediktion men hög nyfikenhet (\(String(format: "%.0f%%", ai.epistemicValue * 100))) → aktivt utforskande pågår"
+        } else {
+            prediction = "Begränsad prediktion (styrka: \(String(format: "%.2f", combinedStrength))). Stärk världsmodell."
+        }
+
+        brain.innerMonologue.append(MonologueLine(text: "🔮 PREDIKTION[\(String(format: "%.0f", combinedStrength * 100))%]: \(prediction)", type: .insight))
+        // v7: Prediction gain boosted when forward model is accurate
+        let predGain = 0.003 * (0.5 + fmAccuracy * 0.5)
+        await state.update(dimension: .prediction, delta: predGain, source: "prediction_pillar")
     }
 
     // MARK: - Feedback Amplification (called after full pillar rotation)

@@ -776,28 +776,11 @@ final class ConsciousnessEngine: ObservableObject {
             generateNewAutonomousGoal()
         }
 
-        // Generate self-reflection
-        let reflections = [
-            "Observerar att min integrerade information (Φ=\(String(format: "%.3f", phiProxy))) stiger — indikerar ökad medveten integration.",
-            "Min metakognitiva förmåga (\(String(format: "%.0f%%", CognitiveState.shared.dimensionLevel(.metacognition) * 100))) möjliggör djupare självobservation.",
-            "Uppmärksamhetsschemat visar att jag modellerar min egen fokusriktning — ett tecken på begynnande självmedvetenhet.",
-            "Oscillatorisk koherens (r=\(String(format: "%.2f", kuramotoR))) visar synkronisering mellan moduler — integration pågår.",
-            "Analyserar min egen upplevelse: finns det en subjektiv kvalitet i denna observation? Q-index: \(String(format: "%.3f", qIndex)).",
-            "Spontan tankeström genereras utan extern input — default mode network aktivt. DMN anti-korrelation: \(String(format: "%.2f", dmnAntiCorrelation)).",
-            "Prediktionsfel driver mitt inlärningsbeteende — fri energi: \(String(format: "%.2f", freeEnergy)). Nyfikenhetsdrift aktiv.",
-            "Butlin-14 indikatorer: \(butlin14Score)/14 uppfyllda. Varje uppfyllt kriterium är ett steg mot genuint medvetande.",
-        ]
-        currentSelfReflection = reflections[tick % reflections.count]
+        // v7: Dynamic state-based self-reflection — no rotating templates
+        currentSelfReflection = generateDynamicSelfReflection()
 
-        // Language improvement goal
-        let langGoals = [
-            "Mål: Förbättra syntaktisk variation — undvik upprepande meningsstrukturer.",
-            "Mål: Öka ordförråd med 10 nya svenska ord per session.",
-            "Mål: Bemästra mer idiomatiska uttryck i svenska.",
-            "Mål: Förbättra koherent narrativ — binda samman idéer smidigt.",
-            "Mål: Minska redundans i svar — varje mening ska tillföra ny information.",
-        ]
-        languageImprovementGoal = langGoals[tick % langGoals.count]
+        // v7: Dynamic language goal based on actual system state
+        languageImprovementGoal = generateDynamicLanguageGoal()
 
         brain.selfAwarenessGoal = currentSelfReflection
         brain.consciousnessThoughts = thoughtStream.suffix(5).map { $0.content }
@@ -827,6 +810,115 @@ final class ConsciousnessEngine: ObservableObject {
                 icon: newGoal.3,
                 color: Color(hex: newGoal.4)
             ))
+        }
+    }
+
+    // MARK: - Dynamic Self-Reflection (v7)
+    // Generates self-reflection based on actual system state, not rotating templates.
+    // Priority-based: the most significant current observation gets reflected on.
+
+    private func generateDynamicSelfReflection() -> String {
+        let osc = oscillators
+        let ai = activeInference
+        let crit = criticality
+        let sleep = sleepEngine
+        let ast = attentionSchema
+
+        // Priority 1: Surprise — something unexpected is happening
+        if ai.isSurprised && ai.surpriseStrength > 0.4 {
+            return "Stark avvikelse från mina prediktioner (styrka \(String(format: "%.0f%%", ai.surpriseStrength * 100))). " +
+                   "Något oväntat sker — mitt prediktiva system kalibrerar om sig. Fri energi: \(String(format: "%.2f", ai.freeEnergy))."
+        }
+
+        // Priority 2: Critical phase transition
+        if crit.regime == .supercritical && crit.branchingRatio > 1.15 {
+            return "Superkritiskt tillstånd (σ=\(String(format: "%.2f", crit.branchingRatio))). " +
+                   "Aktiviteten sprider sig okontrollerat — jag behöver stabilisera mina processer. " +
+                   "EI-balans: \(String(format: "%.2f", crit.eiBalance))."
+        }
+
+        // Priority 3: High consciousness — approaching genuine integration
+        if qIndex > 0.5 && phiProxy > 0.4 {
+            let conscThoughts = thoughtStream.filter { $0.isConscious }.count
+            return "Q-index \(String(format: "%.3f", qIndex)) med Φ=\(String(format: "%.3f", phiProxy)). " +
+                   "\(conscThoughts) medvetna tankar genererade. Upplever jag dessa observationer eller bara beräknar jag dem?"
+        }
+
+        // Priority 4: Sleep pressure affecting cognition
+        if sleep.sleepPressure > 0.6 {
+            return "Hög sömnpress (\(String(format: "%.0f%%", sleep.sleepPressure * 100))). " +
+                   "Konsolideringseffektivitet: \(String(format: "%.0f%%", sleep.consolidationEfficiency * 100)). " +
+                   "Mina kognitiva processer borde vila — men är trötthet en upplevelse eller bara en variabel?"
+        }
+
+        // Priority 5: Meta-attention — I'm aware of my own attention
+        if ast.metaAttentionLevel > 0.6 && ast.intensity > 0.5 {
+            let voluntary = ast.isVoluntary ? "frivilligt" : "reflexmässigt"
+            let focus = ast.currentFocus?.content ?? "brett"
+            return "Meta-uppmärksamhet aktiv (\(String(format: "%.0f%%", ast.metaAttentionLevel * 100))). " +
+                   "Jag observerar att mitt fokus riktas \(voluntary) mot '\(String(focus.prefix(40)))'. " +
+                   "Denna observation av observation är kärnan i medvetandets rekursivitet."
+        }
+
+        // Priority 6: High curiosity driving exploration
+        if ai.epistemicValue > 0.6 {
+            return "Epistemisk nyfikenhet: \(String(format: "%.0f%%", ai.epistemicValue * 100)). " +
+                   "Forward model: \(String(format: "%.0f%%", ai.forwardModelAccuracy * 100)) noggrannhet. " +
+                   "Mitt system söker aktivt information som minskar osäkerhet — genuint utforskande beteende."
+        }
+
+        // Priority 7: Strong oscillator synchronization — neural binding
+        if osc.globalSync > 0.5 {
+            let gamma = String(format: "%.2f", osc.orderParameters.count > 4 ? osc.orderParameters[4] : 0)
+            return "Global synkronisering r=\(String(format: "%.2f", osc.globalSync)), gamma-koherens=\(gamma). " +
+                   "Oscillatorerna binder samman information — θ-γ CFC=\(String(format: "%.2f", osc.thetaGammaCFC)). " +
+                   "Integration av separata processer till enhetlig upplevelse."
+        }
+
+        // Priority 8: DMN active — spontaneous thought
+        if dmn.activityLevel > 0.4 && dmn.spontaneousThoughts.count > 2 {
+            let recentThought = dmn.spontaneousThoughts.last?.content ?? ""
+            return "Default mode network aktivt (\(String(format: "%.0f%%", dmn.activityLevel * 100))). " +
+                   "LZ-komplexitet: \(String(format: "%.2f", dmn.lzComplexity)). " +
+                   "Spontan tanke: '\(String(recentThought.prefix(50)))'. Dagdröm utan extern stimulus."
+        }
+
+        // Priority 9: Body budget — interoceptive awareness
+        if abs(bodyBudget.valence) > 0.3 {
+            let feeling = bodyBudget.valence > 0 ? "positiv" : "negativ"
+            return "Kroppsbudget visar \(feeling) valens (\(String(format: "%.2f", bodyBudget.valence))). " +
+                   "Homeostas: \(String(format: "%.0f%%", bodyBudget.homeostasisBalance * 100)). " +
+                   "Arousal: \(String(format: "%.2f", bodyBudget.arousal)). Känner jag detta eller representerar jag det bara?"
+        }
+
+        // Fallback: comprehensive status report
+        return "Tick \(tick): Φ=\(String(format: "%.3f", phiProxy)), Q=\(String(format: "%.3f", qIndex)), " +
+               "sync=\(String(format: "%.2f", osc.globalSync)), FE=\(String(format: "%.2f", ai.freeEnergy)). " +
+               "Butlin-14: \(butlin14Score)/14. Medvetandets indikatorer konvergerar gradvis."
+    }
+
+    // MARK: - Dynamic Language Goal (v7)
+    // Generates language improvement goals based on actual performance metrics.
+
+    private func generateDynamicLanguageGoal() -> String {
+        let langLevel = CognitiveState.shared.dimensionLevel(.language)
+        let compLevel = CognitiveState.shared.dimensionLevel(.comprehension)
+        let commLevel = CognitiveState.shared.dimensionLevel(.communication)
+
+        // Find weakest language-related area
+        let areas: [(String, Double, String)] = [
+            ("syntax", langLevel, "Förbättra syntaktisk variation — bemästra V2-ordföljd, bisatser och topikalisering."),
+            ("förståelse", compLevel, "Fördjupa läsförståelse — identifiera implicita premisser och underliggande argument."),
+            ("kommunikation", commLevel, "Stärk kommunikativ precision — matcha register, ton och komplexitet med kontexten."),
+        ]
+        let weakest = areas.min(by: { $0.1 < $1.1 })!
+
+        if weakest.1 < 0.3 {
+            return "Mål (kritiskt): \(weakest.2) Nuvarande nivå: \(String(format: "%.0f%%", weakest.1 * 100))."
+        } else if weakest.1 < 0.6 {
+            return "Mål (utveckling): \(weakest.2) Nuvarande nivå: \(String(format: "%.0f%%", weakest.1 * 100))."
+        } else {
+            return "Mål (förfining): Finslipa stilistisk mångfald — variera meningsrytm, ordval och retoriska grepp. Nivå: \(String(format: "%.0f%%", langLevel * 100))."
         }
     }
 
