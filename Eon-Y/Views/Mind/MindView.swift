@@ -5,6 +5,10 @@ import SwiftUI
 struct MindView: View {
     @EnvironmentObject var brain: EonBrain
     @Environment(\.tabBarVisible) private var tabBarVisible
+    @ObservedObject private var oscillators = OscillatorBank.shared
+    @ObservedObject private var critCtrl = CriticalityController.shared
+    @ObservedObject private var sleepEng = SleepConsolidationEngine.shared
+    @ObservedObject private var activeInf = ActiveInferenceEngine.shared
     @State private var selectedTab = 0
     @State private var orbPulse: CGFloat = 1.0
     @State private var ringRot: Double = 0
@@ -115,6 +119,22 @@ struct MindView: View {
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(Color(hex: "#A78BFA").opacity(0.7))
                 }
+                HStack(spacing: 6) {
+                    Text("Sync \(String(format: "%.0f%%", oscillators.globalSync * 100))")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#38BDF8").opacity(0.5))
+                    Text("σ \(String(format: "%.2f", critCtrl.branchingRatio))")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle((critCtrl.regime == .critical ? Color(hex: "#34D399") : Color(hex: "#FBBF24")).opacity(0.5))
+                    Text("FE \(String(format: "%.1f", activeInf.freeEnergy))")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#06B6D4").opacity(0.5))
+                    if sleepEng.isAsleep {
+                        Image(systemName: "moon.zzz.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(Color(hex: "#6366F1").opacity(0.6))
+                    }
+                }
             }
 
             Spacer()
@@ -188,6 +208,95 @@ struct MindView: View {
         VStack(spacing: 14) {
             CognitiveCycleRingView(steps: brain.thinkingSteps)
             pipelineCard
+
+            // Neural Synchronization Status
+            VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform.path")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color(hex: "#38BDF8"))
+                        Text("NEURAL SYNKRONISERING")
+                            .font(.system(size: 9, weight: .black, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .tracking(1)
+                        Spacer()
+                        let regimeColor = critCtrl.regime == .critical ? Color(hex: "#34D399") :
+                                          critCtrl.regime == .subcritical ? Color(hex: "#FBBF24") : Color(hex: "#EF4444")
+                        Text(critCtrl.regime == .critical ? "KRITISK" :
+                             critCtrl.regime == .subcritical ? "SUBKRITISK" : "SUPERKRITISK")
+                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .foregroundStyle(regimeColor)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(RoundedRectangle(cornerRadius: 3).fill(regimeColor.opacity(0.15)))
+                    }
+                    HStack(spacing: 0) {
+                        VStack(spacing: 2) {
+                            Text(String(format: "%.0f%%", oscillators.globalSync * 100))
+                                .font(.system(size: 16, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#38BDF8"))
+                            Text("Global Sync")
+                                .font(.system(size: 7, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.3))
+                        }
+                        .frame(maxWidth: .infinity)
+                        VStack(spacing: 2) {
+                            Text(String(format: "%.2f", oscillators.thetaGammaCFC))
+                                .font(.system(size: 16, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#A78BFA"))
+                            Text("θ-γ CFC")
+                                .font(.system(size: 7, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.3))
+                        }
+                        .frame(maxWidth: .infinity)
+                        VStack(spacing: 2) {
+                            Text(String(format: "%.3f", critCtrl.branchingRatio))
+                                .font(.system(size: 16, weight: .black, design: .monospaced))
+                                .foregroundStyle(critCtrl.regime == .critical ? Color(hex: "#34D399") : Color(hex: "#FBBF24"))
+                            Text("σ Branching")
+                                .font(.system(size: 7, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.3))
+                        }
+                        .frame(maxWidth: .infinity)
+                        VStack(spacing: 2) {
+                            Text(String(format: "%.2f", activeInf.freeEnergy))
+                                .font(.system(size: 16, weight: .black, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#06B6D4"))
+                            Text("Fri Energi")
+                                .font(.system(size: 7, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.3))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    // Oscillator band mini bars
+                    let bands = ["δ", "θ", "α", "β", "γ"]
+                    let bandColors: [Color] = [
+                        Color(hex: "#6366F1"), Color(hex: "#8B5CF6"),
+                        Color(hex: "#A78BFA"), Color(hex: "#38BDF8"), Color(hex: "#34D399")
+                    ]
+                    HStack(spacing: 4) {
+                        ForEach(0..<5, id: \.self) { i in
+                            let val = i < oscillators.orderParameters.count ? oscillators.orderParameters[i] : 0
+                            HStack(spacing: 3) {
+                                Text(bands[i])
+                                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(bandColors[i].opacity(0.6))
+                                    .frame(width: 10)
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(Color.white.opacity(0.05))
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(bandColors[i].opacity(0.7))
+                                            .frame(width: geo.size.width * CGFloat(val))
+                                    }
+                                }
+                                .frame(height: 4)
+                            }
+                        }
+                    }
+                }
+            .padding(14)
+            .background(mCard(Color(hex: "#38BDF8")))
         }
     }
 

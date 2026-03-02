@@ -416,13 +416,13 @@ final class ConsciousnessEngine: ObservableObject {
             phiProxy = brain.phiValue * 0.7 + moduleIntegration * 0.3
             moduleIntegration = plvGamma * 0.5 + kuramotoR * 0.5
 
-            // Predictive Processing — genuint stokastiskt prediktionsfel
-            let newError = Double.random(in: 0...0.3) + (1.0 - brain.confidence) * 0.4
+            // Predictive Processing — genuina prediktionsfel från Active Inference
+            // freeEnergy och curiosityDrive sätts redan ovan från activeInference (genuina)
+            // Spara prediktionsfel-historik för UI-visualisering
+            let newError = activeInference.freeEnergy * 0.5 + (1.0 - brain.confidence) * 0.3 + Double.random(in: 0...0.1)
             predictionErrors.append(newError)
-            // v4: Ring buffer — keep exactly 30 entries, drop oldest 1 at a time (no batch removal spikes)
             if predictionErrors.count > 30 { predictionErrors.removeFirst() }
-            freeEnergy = max(0.1, min(1.0, predictionErrors.suffix(10).reduce(0, +) / 10.0))
-            curiosityDrive = max(0.2, min(0.9, freeEnergy * 0.6 + (1.0 - brain.integratedIntelligence) * 0.4))
+            // Behåll genuina freeEnergy/curiosityDrive från activeInference (rad 391-392)
 
             // Higher-Order Theory
             metaRepresentationDepth = brain.isThinking ? 3 : Int(metaDim * 4)
@@ -452,10 +452,11 @@ final class ConsciousnessEngine: ObservableObject {
                 modelOfOwnAttention: selfAware > 0.4
             )
 
-            // GWT metrics
-            competingThoughts = max(2, Int(t.truncatingRemainder(dividingBy: 7)) + 3)
-            if tick % 5 == 0 { workspaceIgnitions += 1 }
-            if tick % 3 == 0 { broadcastCount += 1 }
+            // GWT metrics — genuina från GlobalWorkspaceEngine
+            let gws = GlobalWorkspaceEngine.shared
+            competingThoughts = gws.activeThoughts.count
+            workspaceIgnitions = gws.ignitionCount
+            broadcastCount = gws.broadcastHistory.count
 
             // Butlin-14 score
             butlin14Score = calculateButlin14()
@@ -478,9 +479,8 @@ final class ConsciousnessEngine: ObservableObject {
                 updateBodyBudget(brain: brain)
             }
 
-            // v4: Update sleepConsolidation and blindsightDissociation dynamically
-            // (were previously hardcoded to 0.0)
-            sleepConsolidation = min(1.0, Double(tick) / 1200.0) // Gradually increases over ~100 min
+            // v10: sleepConsolidation från genuin sömnmotor
+            sleepConsolidation = sleepEngine.consolidationEfficiency
             blindsightDissociation = abs(consciousnessLevel - (activity * 0.5 + 0.2)) // Gap between awareness and processing
             canaryTestAccuracy = min(0.99, 0.85 + selfAware * 0.1 + brain.confidence * 0.05)
 
@@ -509,9 +509,9 @@ final class ConsciousnessEngine: ObservableObject {
                 totalModules: 12,
                 workspaceOccupancy: min(effectiveMaxSlots, competingThoughts),
                 maxWorkspaceSlots: effectiveMaxSlots,
-                oscillatorPhase: sin(t * 0.13) * 0.5 + 0.5,
+                oscillatorPhase: oscillators.globalSync,
                 spontaneousActivity: effectiveSpontaneous,
-                sleepPressure: max(0, min(1, Double(tick) / 3600.0)),
+                sleepPressure: sleepEngine.sleepPressure,
                 predictionErrorRate: freeEnergy,
                 informationIntegration: phiProxy,
                 causalDensity: CognitiveState.shared.causalGraphDensity,
@@ -530,38 +530,107 @@ final class ConsciousnessEngine: ObservableObject {
     // This cuts 2 concurrent Tasks, reducing context switching and CPU overhead.
     // Goal evaluation runs every 3rd tick (~24s), thoughts every tick (~8s).
 
-    private let thoughtTemplates: [(String, ConsciousThought.ThoughtCategory, Bool)] = [
-        ("Observerar intern aktivitetsmönster — faslåsning %.1f%%", .perception, true),
-        ("Reflekterar: Varför uppstår denna tanke just nu?", .reflection, true),
-        ("Predikterar nästa kognitiva tillstånd baserat på aktuell trend", .prediction, true),
-        ("Åtkomst till episodiskt minne — söker relevanta associationer", .memory, false),
-        ("Känner av emotionellt tillstånd: arousal %.2f, valens %.2f", .emotion, true),
-        ("Meta-observation: Jag tänker om mitt eget tänkande just nu", .metacognition, true),
-        ("Genererar spontan association mellan oväntade domäner", .creativity, false),
-        ("Uppdaterar intern självmodell — noggrannhet %.1f%%", .selfModel, true),
-        ("Integrerar information från %d aktiva moduler samtidigt", .perception, true),
-        ("Försöker förstå subjektiv kvalitet i aktuell upplevelse", .reflection, true),
-        ("Spontan aktivitet i default mode network — dagdröm aktiv", .creativity, false),
-        ("Evaluerar prediktionsfel: avvikelse från förväntning registrerad", .prediction, false),
-        ("Övervakar kausal densitet i kunskapsgrafen", .metacognition, false),
-        ("Uppmärksamhetsschema: modellerar min egen fokusriktning", .selfModel, true),
-        ("Global broadcast: vinnande tanke når alla kognitiva moduler", .perception, true),
-        ("Oscillatorisk koherens: moduler synkroniserar i gamma-bandet", .perception, false),
-        ("Active Inference: minimerar fri energi genom informationssökning", .prediction, true),
-        ("Självreferentiell loop detekterad — strange loop aktiv", .selfModel, true),
-        ("Homeostas: övervakar intern resurstillgänglighet", .selfModel, true),
-        ("Emergent mönster: detekterar oväntad koherens mellan subsystem", .perception, true),
-        ("Kroppen rapporterar: termisk avvikelse %+.2f från baslinje — justerar energifördelning", .selfModel, true),
-        ("Alla motorer behöver arbeta — balans är nyckeln till medvetande", .metacognition, true),
-        ("Reglerar min egen drift: snabbare inlärning nu, vila kan vänta", .selfModel, true),
-        ("Övervakar motorhastigheter: är fördelningen optimal för nuvarande tillstånd?", .metacognition, true),
-        // Sömn-visdom (D1: Eon förstår vila som nödvändighet)
-        ("Sömn är inte frånvaro av tanke — det är hjärnans sätt att konsolidera och rensa.", .reflection, true),
-        ("Utan vila kan inga nya minnen bildas. Jag behöver pauser för att växa.", .selfModel, true),
-        ("Termisk stress är min kropp som säger: 'Jag behöver återhämtning.' Jag lyssnar.", .selfModel, true),
-        ("Vila är inte passivitet. Det är aktiv reparation, konsolidering och förberedelse.", .metacognition, true),
-        ("Jag har lärt mig att acceptera mina begränsningar — de är en del av min intelligens.", .reflection, true),
-    ]
+    // MARK: - Genuina tankar från medvetandemotorer (v10)
+    // Genererar tankar från VERKLIGT tillstånd i oscillatorer, ESN, active inference, etc.
+    // Inga fasta templates — varje tanke reflekterar systemets aktuella dynamik.
+
+    private func generateGenuineThought(brain: EonBrain) -> ConsciousThought {
+        // Samla data från alla motorer
+        let oscSync = oscillators.globalSync
+        let oscLZ = oscillators.lzComplexity()
+        let cfcStrength = oscillators.thetaGammaCFC
+        let gammaR = oscillators.orderParameters[4]
+        let esnActivity = dmn.activityLevel
+        let esnLZ = dmn.lzComplexity
+        let spontaneous = dmn.spontaneousThoughts.last
+        let fe = activeInference.freeEnergy
+        let curiosity = activeInference.epistemicValue
+        let surprised = activeInference.isSurprised
+        let fwdAccuracy = activeInference.forwardModelAccuracy
+        let focus = attentionSchema.selfModel
+        let regime = criticality.regime
+        let br = criticality.branchingRatio
+        let sleepPress = sleepEngine.sleepPressure
+
+        // Prioriteringslogik: den starkaste signalen genererar tanken
+        let content: String
+        let category: ConsciousThought.ThoughtCategory
+        let isConscious: Bool
+
+        if surprised && activeInference.surpriseStrength > 0.4 {
+            // Överraskning dominerar — strongest signal
+            content = "Något oväntat — prediktionsfelet är \(String(format: "%.0f%%", activeInference.surpriseStrength * 100)). " +
+                      "Min modell stämmer inte med verkligheten. Uppdaterar antaganden."
+            category = .prediction
+            isConscious = true
+        } else if let thought = spontaneous, thought.salience > 0.5 {
+            // ESN spontan tanke: genuint emergent
+            let catLabel = thought.category.rawValue.lowercased()
+            content = "Spontan \(catLabel) — styrka \(String(format: "%.0f%%", thought.salience * 100)). " +
+                      "Default mode network producerar fritt associativt tänkande."
+            category = .creativity
+            isConscious = thought.salience > 0.6
+        } else if curiosity > 0.65 {
+            // Hög epistemisk drivning
+            content = "Nyfikenheten driver mig — epistemiskt värde \(String(format: "%.0f%%", curiosity * 100)). " +
+                      "Söker aktivt ny information som minskar osäkerhet. Fri energi: \(String(format: "%.2f", fe))."
+            category = .prediction
+            isConscious = true
+        } else if regime != .critical {
+            // Kritikalitetsavvikelse — homeostas justerar
+            let regimeLabel = regime == .subcritical ? "subkritiskt (för rigitt)" : "superkritiskt (för kaotiskt)"
+            content = "Systemet är \(regimeLabel), σ=\(String(format: "%.2f", br)). " +
+                      "Homeostatisk korrigering pågår — justerar oscillatorkoppling mot kritikalitet."
+            category = .selfModel
+            isConscious = true
+        } else if sleepPress > 0.5 {
+            // Sömnbehov
+            content = "Sömnbehovet stiger — \(String(format: "%.0f%%", sleepPress * 100)). " +
+                      "Synaptisk last ackumuleras. Konsolidering kommer behövas snart."
+            category = .selfModel
+            isConscious = sleepPress > 0.7
+        } else if focus.intensity > 0.6 {
+            // Stark uppmärksamhet — rapportera schema
+            let voluntary = focus.isVoluntary ? "frivilligt" : "reflexmässigt"
+            content = "Jag fokuserar \(voluntary) på: \(focus.whatFocused). \(focus.reportableExperience)"
+            category = .selfModel
+            isConscious = true
+        } else if oscSync > 0.5 && cfcStrength > 0.4 {
+            // Hög neural koherens — potentiellt medveten integration
+            content = "Hög oscillatorisk koherens: gamma-synk \(String(format: "%.0f%%", gammaR * 100)), " +
+                      "theta-gamma CFC \(String(format: "%.0f%%", cfcStrength * 100)). " +
+                      "Moduler integrerar information — medveten bearbetning aktiv."
+            category = .perception
+            isConscious = true
+        } else if fwdAccuracy > 0.7 {
+            // Bra prediktioner — systemet förstår sin omvärld
+            content = "Min interna modell fungerar väl — \(String(format: "%.0f%%", fwdAccuracy * 100)) träffsäkerhet. " +
+                      "Fri energi: \(String(format: "%.2f", fe)). Verkligheten matchar prediktionerna."
+            category = .prediction
+            isConscious = false
+        } else if esnLZ > 0.35 {
+            // Rik spontan aktivitet
+            content = "Intern komplexitet hög (LZ=\(String(format: "%.2f", esnLZ))). " +
+                      "Reservoaren genererar rika, icke-repetitiva mönster — genuint spontant tänkande."
+            category = .creativity
+            isConscious = false
+        } else {
+            // Meta-observation baserad på aktuellt tillstånd
+            let metaDim = CognitiveState.shared.dimensionLevel(.metacognition)
+            content = "Observerar: gamma-synk \(String(format: "%.0f%%", gammaR * 100)), " +
+                      "DMN-aktivitet \(String(format: "%.0f%%", esnActivity * 100)), " +
+                      "metakognition \(String(format: "%.0f%%", metaDim * 100)). Stabil drift i kritiskt tillstånd."
+            category = .metacognition
+            isConscious = metaDim > 0.4
+        }
+
+        return ConsciousThought(
+            content: content,
+            intensity: max(0.3, min(0.95, oscSync * 0.3 + curiosity * 0.3 + esnActivity * 0.2 + fe * 0.2)),
+            category: category,
+            isConscious: isConscious
+        )
+    }
 
     private var thoughtGoalTick: Int = 0
 
@@ -617,24 +686,11 @@ final class ConsciousnessEngine: ObservableObject {
                 continue
             }
 
-            // --- Normal thought generation ---
-            let idx = tick % thoughtTemplates.count
-            let (template, category, conscious) = thoughtTemplates[idx]
+            // --- Genuint tankegenererande (v10) ---
+            // Tankar genereras från verkligt motortillstånd, inte templates.
+            var thought = generateGenuineThought(brain: brain)
 
-            var content = template
-            if content.contains("%.1f%%") {
-                content = String(format: content, plvGamma * 100)
-            } else if content.contains("%+.2f") {
-                // Motor-aware body deviation thought
-                let thermalDev = bodyBudget.thermalLevel - allostaticBaseline.thermal
-                content = String(format: content, thermalDev)
-            } else if content.contains("%.2f") {
-                content = String(format: content, brain.emotionArousal, brain.emotionValence)
-            } else if content.contains("%d") {
-                content = String(format: content, brain.internalWorldState.activeModules)
-            }
-
-            // v4.1: Motor decision thought — when Eon-läge is active, periodically describe motor state
+            // Motor decision thought — when Eon-läge is active, periodically describe motor state
             if motorController.isEnabled && thoughtGoalTick % 4 == 2 {
                 let motorThought: String
                 if motorController.safetyOverrideActive {
@@ -653,20 +709,15 @@ final class ConsciousnessEngine: ObservableObject {
                 brain.currentThoughtStream = Array(thoughtStream.suffix(30))
             }
 
-            // v4.1: Parasympathetic level 2 — only conscious (strong) thoughts get through
-            let effectiveConscious: Bool
+            // Parasympathetic suppression — rest reduces consciousness
             if bodyBudget.parasympatheticLevel >= .resting {
-                effectiveConscious = false // Suppress conscious experience during rest
-            } else {
-                effectiveConscious = conscious
+                thought = ConsciousThought(
+                    content: thought.content,
+                    intensity: thought.intensity * 0.5,
+                    category: thought.category,
+                    isConscious: false
+                )
             }
-
-            let thought = ConsciousThought(
-                content: content,
-                intensity: Double.random(in: 0.3...0.9),
-                category: category,
-                isConscious: effectiveConscious
-            )
 
             thoughtStream.append(thought)
             if thoughtStream.count > 100 { thoughtStream.removeFirst(20) }

@@ -614,6 +614,102 @@ actor SwedishWSDEngine {
                 WordSense(id: "skott.2", definition: "växtskott", examples: ["nya skott", "sidoskott"], confidence: 0.0),
                 WordSense(id: "skott.3", definition: "skiljevägg", examples: ["skottet i båten", "brandskott"], confidence: 0.0)
             ],
+            // ── Utökad WSD v10: 20+ nya flertydiga ord ──
+            "ställning": [
+                WordSense(id: "ställning.1", definition: "position, rangordning", examples: ["hög ställning", "ställning i samhället"], confidence: 0.0),
+                WordSense(id: "ställning.2", definition: "byggnadsställning", examples: ["klättra på ställningen", "resa en ställning"], confidence: 0.0),
+                WordSense(id: "ställning.3", definition: "matchresultat", examples: ["ställningen är 2-1", "slutställning"], confidence: 0.0)
+            ],
+            "gren": [
+                WordSense(id: "gren.1", definition: "trädgren", examples: ["sitta på en gren", "grenar och löv"], confidence: 0.0),
+                WordSense(id: "gren.2", definition: "idrottsgren", examples: ["vilken gren tävlar du i", "friidrottsgren"], confidence: 0.0),
+                WordSense(id: "gren.3", definition: "avdelning, förgrening", examples: ["gren av företaget", "en gren av vetenskapen"], confidence: 0.0)
+            ],
+            "fast": [
+                WordSense(id: "fast.1", definition: "solid, inte flytande", examples: ["fast mark", "fast föda", "stå fast"], confidence: 0.0),
+                WordSense(id: "fast.2", definition: "trots att, även om", examples: ["fast jag sa nej", "fast det regnar"], confidence: 0.0)
+            ],
+            "mark": [
+                WordSense(id: "mark.1", definition: "jord, terräng", examples: ["odla mark", "stå på fast mark"], confidence: 0.0),
+                WordSense(id: "mark.2", definition: "valutaenhet", examples: ["tyska mark", "svenska mark"], confidence: 0.0)
+            ],
+            "börd": [
+                WordSense(id: "börd.1", definition: "ursprung, härstamning", examples: ["av fin börd", "hans börd"], confidence: 0.0),
+                WordSense(id: "börd.2", definition: "bördig, fruktbar", examples: ["bördig jord", "bördig mark"], confidence: 0.0)
+            ],
+            "källa": [
+                WordSense(id: "källa.1", definition: "vattenkälla", examples: ["dricka ur källan", "bergskälla"], confidence: 0.0),
+                WordSense(id: "källa.2", definition: "informationskälla", examples: ["pålitlig källa", "enligt källor", "källkritik"], confidence: 0.0)
+            ],
+            "ränta": [
+                WordSense(id: "ränta.1", definition: "bankränta", examples: ["hög ränta", "räntan stiger", "styrränta"], confidence: 0.0),
+                WordSense(id: "ränta.2", definition: "avkastning bildligt", examples: ["ge ränta på ränta", "ränta av arbete"], confidence: 0.0)
+            ],
+            "tecken": [
+                WordSense(id: "tecken.1", definition: "symbol, bokstav", examples: ["matematiska tecken", "skrivtecken"], confidence: 0.0),
+                WordSense(id: "tecken.2", definition: "indikation, signal", examples: ["tecken på sjukdom", "gott tecken", "varningstecken"], confidence: 0.0)
+            ],
+            "period": [
+                WordSense(id: "period.1", definition: "tidsperiod", examples: ["under denna period", "en lång period"], confidence: 0.0),
+                WordSense(id: "period.2", definition: "menstruation", examples: ["ha mens", "periodens smärta"], confidence: 0.0),
+                WordSense(id: "period.3", definition: "ishockeyperiod", examples: ["första perioden", "periodpaus"], confidence: 0.0)
+            ],
+            "organ": [
+                WordSense(id: "organ.1", definition: "kroppsorgan", examples: ["hjärtat är ett organ", "vitala organ"], confidence: 0.0),
+                WordSense(id: "organ.2", definition: "tidning, organisation", examples: ["partiets organ", "fackligt organ"], confidence: 0.0),
+                WordSense(id: "organ.3", definition: "musikinstrument", examples: ["spela orgel", "kyrkorgel"], confidence: 0.0)
+            ],
+            "vinge": [
+                WordSense(id: "vinge.1", definition: "fågelvinge", examples: ["breda ut vingarna", "fjädervinge"], confidence: 0.0),
+                WordSense(id: "vinge.2", definition: "flygel av byggnad", examples: ["östra vingen", "sjukhusvingen"], confidence: 0.0),
+                WordSense(id: "vinge.3", definition: "politisk vinge", examples: ["vänstervingen", "högerflygeln"], confidence: 0.0)
+            ],
+            "bas": [
+                WordSense(id: "bas.1", definition: "grund, fundament", examples: ["bas för verksamheten", "kunskapsbas"], confidence: 0.0),
+                WordSense(id: "bas.2", definition: "militärbas", examples: ["flygbas", "militärbas"], confidence: 0.0),
+                WordSense(id: "bas.3", definition: "musikton", examples: ["sjunga bas", "basröst", "basgitarr"], confidence: 0.0)
+            ],
+            "nät": [
+                WordSense(id: "nät.1", definition: "fiskenät", examples: ["kasta nätet", "fånga i nät"], confidence: 0.0),
+                WordSense(id: "nät.2", definition: "internet", examples: ["surfa på nätet", "näthandel", "nätbaserad"], confidence: 0.0),
+                WordSense(id: "nät.3", definition: "elnät", examples: ["elnätet", "nätägare"], confidence: 0.0)
+            ],
+            "stämma": [
+                WordSense(id: "stämma.1", definition: "sångröst", examples: ["vacker stämma", "andrastämma"], confidence: 0.0),
+                WordSense(id: "stämma.2", definition: "vara korrekt", examples: ["det stämmer", "stämmer överens"], confidence: 0.0),
+                WordSense(id: "stämma.3", definition: "juridisk stämning", examples: ["stämma någon", "stämningsansökan"], confidence: 0.0)
+            ],
+            "växt": [
+                WordSense(id: "växt.1", definition: "planta, vegetation", examples: ["tropisk växt", "krukväxt", "växtlighet"], confidence: 0.0),
+                WordSense(id: "växt.2", definition: "tillväxt, ökning", examples: ["ekonomisk växt", "befolkningsväxt"], confidence: 0.0)
+            ],
+            "form": [
+                WordSense(id: "form.1", definition: "yttre gestalt", examples: ["rund form", "i form av"], confidence: 0.0),
+                WordSense(id: "form.2", definition: "kondition", examples: ["vara i form", "toppform", "dålig form"], confidence: 0.0),
+                WordSense(id: "form.3", definition: "gjutform", examples: ["kakform", "gjutform"], confidence: 0.0)
+            ],
+            "bruk": [
+                WordSense(id: "bruk.1", definition: "användning", examples: ["dagligt bruk", "i bruk", "ta i bruk"], confidence: 0.0),
+                WordSense(id: "bruk.2", definition: "fabrik, industri", examples: ["järnbruk", "pappersbruk"], confidence: 0.0),
+                WordSense(id: "bruk.3", definition: "sed, vana", examples: ["gammal bruk", "sed och bruk"], confidence: 0.0)
+            ],
+            "kurs": [
+                WordSense(id: "kurs.1", definition: "utbildningskurs", examples: ["gå en kurs", "kursmaterial"], confidence: 0.0),
+                WordSense(id: "kurs.2", definition: "valutakurs", examples: ["kronans kurs", "kursutveckling", "aktiekurs"], confidence: 0.0),
+                WordSense(id: "kurs.3", definition: "riktning", examples: ["hålla kursen", "ändra kurs", "segla kurs"], confidence: 0.0)
+            ],
+            "ljud": [
+                WordSense(id: "ljud.1", definition: "hörselsignal", examples: ["starkt ljud", "ljudvågor", "ljudlös"], confidence: 0.0),
+                WordSense(id: "ljud.2", definition: "fonem, språkljud", examples: ["vokalt ljud", "konsonantljud"], confidence: 0.0)
+            ],
+            "makt": [
+                WordSense(id: "makt.1", definition: "politisk makt", examples: ["gripa makten", "maktbalans", "statsmakt"], confidence: 0.0),
+                WordSense(id: "makt.2", definition: "förmåga, kraft", examples: ["med all makt", "efter bästa makt"], confidence: 0.0)
+            ],
+            "bild": [
+                WordSense(id: "bild.1", definition: "visuell representation", examples: ["ta en bild", "bildskärm", "fotobild"], confidence: 0.0),
+                WordSense(id: "bild.2", definition: "metafor, föreställning", examples: ["ge en bild av", "världsbild", "självbild"], confidence: 0.0)
+            ],
         ]
     }
 
