@@ -29,17 +29,12 @@ actor PersistentMemoryStore {
 
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        dbPath = docs.appendingPathComponent("eon_v3.sqlite").path
-        setupDatabase()
-    }
-
-    // MARK: - Schema setup
-
-    private func setupDatabase() {
-        // Försök öppna — om det misslyckas, försök med en in-memory databas som fallback
-        var openResult = sqlite3_open(dbPath, &db)
+        let path = docs.appendingPathComponent("eon_v3.sqlite").path
+        dbPath = path
+        // Öppna databas direkt i init (actor init kan mutera egna stored properties)
+        var openResult = sqlite3_open(path, &db)
         if openResult != SQLITE_OK {
-            print("[Memory] Kunde inte öppna databas på disk (\(dbPath)): \(openResult) — försöker in-memory")
+            print("[Memory] Kunde inte öppna databas på disk (\(path)): \(openResult) — försöker in-memory")
             openResult = sqlite3_open(":memory:", &db)
         }
         guard openResult == SQLITE_OK, db != nil else {
@@ -51,8 +46,10 @@ actor PersistentMemoryStore {
         execute("PRAGMA cache_size=-32000")
         execute("PRAGMA foreign_keys=ON")
         createTables()
-        print("[Memory] Databas initierad: \(dbPath)")
+        print("[Memory] Databas initierad: \(path)")
     }
+
+    // MARK: - Schema setup
 
     // Returnerar true om databasen är redo att användas
     private var isReady: Bool { db != nil }
@@ -184,6 +181,8 @@ actor PersistentMemoryStore {
                 created_at REAL NOT NULL
             )
         """)
+        // Migration: lägg till eon_state_snapshot om kolumnen saknas
+        execute("ALTER TABLE articles ADD COLUMN eon_state_snapshot TEXT NOT NULL DEFAULT ''")
         // Creative features — letters and awareness tests
         execute("""
             CREATE TABLE IF NOT EXISTS eon_letters (
@@ -503,8 +502,8 @@ actor PersistentMemoryStore {
         guard isReady else { return false }
         let sql = """
             INSERT OR REPLACE INTO articles
-                (id, title, content, summary, domain, source, is_autonomous, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, title, content, summary, domain, source, is_autonomous, created_at, eon_state_snapshot)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         var success = false
@@ -517,6 +516,7 @@ actor PersistentMemoryStore {
             bindText(stmt, 6, article.source)
             sqlite3_bind_int(stmt, 7, article.isAutonomous ? 1 : 0)
             sqlite3_bind_double(stmt, 8, article.date.timeIntervalSince1970)
+            bindText(stmt, 9, article.eonStateSnapshot)
             success = sqlite3_step(stmt) == SQLITE_DONE
             if !success { print("[Memory] saveArticle fel '\(article.title)': \(String(cString: sqlite3_errmsg(db)))") }
         } else {
@@ -529,7 +529,7 @@ actor PersistentMemoryStore {
     func loadAllArticles(limit: Int = 500) -> [KnowledgeArticle] {
         guard isReady else { return [] }
         var results: [KnowledgeArticle] = []
-        let sql = "SELECT id, title, content, summary, domain, source, is_autonomous, created_at FROM articles ORDER BY created_at DESC LIMIT ?"
+        let sql = "SELECT id, title, content, summary, domain, source, is_autonomous, created_at, eon_state_snapshot FROM articles ORDER BY created_at DESC LIMIT ?"
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_int(stmt, 1, Int32(limit))
@@ -543,7 +543,8 @@ actor PersistentMemoryStore {
                     domain: sqlText(stmt, 4),
                     source: sqlText(stmt, 5),
                     date: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 7)),
-                    isAutonomous: sqlite3_column_int(stmt, 6) == 1
+                    isAutonomous: sqlite3_column_int(stmt, 6) == 1,
+                    eonStateSnapshot: sqlText(stmt, 8)
                 ))
             }
         }
@@ -616,7 +617,7 @@ actor PersistentMemoryStore {
     func randomArticles(limit: Int = 3) -> [KnowledgeArticle] {
         guard isReady else { return [] }
         var results: [KnowledgeArticle] = []
-        let sql = "SELECT id, title, content, summary, domain, source, is_autonomous, created_at FROM articles ORDER BY RANDOM() LIMIT ?"
+        let sql = "SELECT id, title, content, summary, domain, source, is_autonomous, created_at, eon_state_snapshot FROM articles ORDER BY RANDOM() LIMIT ?"
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_int(stmt, 1, Int32(limit))
@@ -630,7 +631,8 @@ actor PersistentMemoryStore {
                     domain: sqlText(stmt, 4),
                     source: sqlText(stmt, 5),
                     date: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 7)),
-                    isAutonomous: sqlite3_column_int(stmt, 6) == 1
+                    isAutonomous: sqlite3_column_int(stmt, 6) == 1,
+                    eonStateSnapshot: sqlText(stmt, 8)
                 ))
             }
         }

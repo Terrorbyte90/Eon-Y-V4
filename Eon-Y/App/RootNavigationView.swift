@@ -160,7 +160,7 @@ struct TabContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: selectedTab) { newTab in
+        .onChange(of: selectedTab) { _, newTab in
             // Register tab visit for lazy mounting
             visitedTabs.insert(newTab)
             // Tab-byte: visa alltid tab bar igen

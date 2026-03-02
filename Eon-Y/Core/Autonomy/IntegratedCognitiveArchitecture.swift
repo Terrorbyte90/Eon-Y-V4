@@ -118,15 +118,16 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
                 await checkAndFireEvents(state: state, brain: brain)
             }
 
-            // v4: Thermal-aware interval: 8s nominal → up to 50s critical (was 6s nominal)
+            // v5: Thermal-aware interval: 15s nominal → up to 60s critical
+            // UI-synk sköts av EonBrain master tick (10s), orchestrator behöver bara hantera events.
             let thermalState = ProcessInfo.processInfo.thermalState
             let baseInterval: UInt64
             switch thermalState {
-            case .nominal:  baseInterval = 8_000_000_000   // v4: 6s → 8s
-            case .fair:     baseInterval = 12_000_000_000  // v4: 10s → 12s
-            case .serious:  baseInterval = 30_000_000_000
-            case .critical: baseInterval = 50_000_000_000
-            @unknown default: baseInterval = 8_000_000_000
+            case .nominal:  baseInterval = 15_000_000_000
+            case .fair:     baseInterval = 20_000_000_000
+            case .serious:  baseInterval = 40_000_000_000
+            case .critical: baseInterval = 60_000_000_000
+            @unknown default: baseInterval = 15_000_000_000
             }
             // v4.1: Motor speed multiplier — Eon can speed up or slow down orchestration
             let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "orchestrator")
@@ -335,9 +336,10 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
     // MARK: - Combined Pillar Worker
     // v3: Instead of 9 separate pillar loops (each with its own Task),
     // we use ONE loop that rotates through pillars, one at a time.
-    // This dramatically reduces concurrent work and CPU usage.
+    // v5: Language-pelaren throttlad till max 1 gång per 60s (NLTagger → ANE-last).
 
     private var pillarRotationIndex: Int = 0
+    private var lastLanguagePillarDate: Date = .distantPast
 
     private func combinedPillarWorker() async {
         try? await Task.sleep(nanoseconds: 8_000_000_000)
@@ -357,6 +359,13 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         while !Task.isCancelled {
             guard let brain else { try? await Task.sleep(nanoseconds: 10_000_000_000); continue }
 
+            // D1: Global termisk broms
+            if ThermalSleepManager.shared.shouldPauseWork() {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                await Task.yield()
+                continue
+            }
+
             // Priority-based pillar selection: weaker dimensions get more attention
             // Score = (1 - dimensionLevel) * baseWeight + recencyPenalty
             let state = CognitiveState.shared
@@ -366,14 +375,20 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
                 // Recency penalty: pillars that ran recently get lower priority
                 let lastRun = pillarActivity[pillar] ?? 0
                 let recencyBonus = lastRun < 0.3 ? 0.15 : 0 // Boost if hasn't run recently
-                let priority = need * 1.5 + recencyBonus + Double.random(in: 0...0.1) // Small random to prevent lockout
+                // C1: Language-pelaren throttlad — nollprioriteras om < 60s sedan senast
+                let languageThrottle: Double = (pillar == .language && Date().timeIntervalSince(lastLanguagePillarDate) < 60) ? -999 : 0
+                let priority = need * 1.5 + recencyBonus + Double.random(in: 0...0.1) + languageThrottle
                 return (pillar, dim, work, priority)
             }
             let sorted = scored.sorted { $0.3 > $1.3 }
             let (pillar, _, work, _) = sorted.first!
 
+            // Uppdatera Language-timestamp om vi kör Language-pelaren
+            if pillar == .language { lastLanguagePillarDate = Date() }
+
             pillarRotationIndex += 1
             activePillars.insert(pillar)
+            await Task.yield() // D3: ge systemet andrum
             await work()
             activePillars.remove(pillar)
 

@@ -1,22 +1,28 @@
 import SwiftUI
 import Combine
 
-// MARK: - ChatView v4 — Minimalistisk, levande, immersiv
+// MARK: - ChatView v5 — Ingen TimelineView, debounced animations
 
 struct ChatView: View {
     @EnvironmentObject var brain: EonBrain
     @StateObject private var viewModel = ChatViewModel()
     @State private var inputText = ""
     @FocusState private var inputFocused: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var orbPulse: CGFloat = 1.0
     @State private var orbGlow: Double = 0.4
     @State private var fieldGlow: Double = 0
-    @State private var bgBreath: Double = 0.12
+    // bgBreath är nu statisk baserad på activityLevel — uppdateras bara vid faktisk dataändring
+    @State private var bgBreath: Double = 0.14
+
+    // Debounce: förhindrar animation-spam vid varje kognitiv tick
+    @State private var lastActivityUpdate: Date = .distantPast
 
     // Sidebar & lägesväljare
     @State private var showSidebar = false
     @State private var showModeSheet = false
+    @State private var sessionCopied = false
 
     var emotionColor: Color { EonColor.forEmotion(brain.currentEmotion) }
     var activityLevel: Double {
@@ -25,39 +31,46 @@ struct ChatView: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 2.0)) { timeline in
-            let _ = timeline.date
-            ZStack {
-                chatBackground
-                VStack(spacing: 0) {
-                    topBar
-                    messageList
-                }
-                // Sidebar overlay
-                if showSidebar {
-                    Color.black.opacity(0.45)
-                        .ignoresSafeArea()
-                        .onTapGesture { withAnimation(.spring(response: 0.35)) { showSidebar = false } }
-                        .transition(.opacity)
-                    ConversationHistorySidebar(
-                        isShowing: $showSidebar,
-                        viewModel: viewModel,
-                        brain: brain
-                    )
-                    .transition(.move(edge: .leading))
-                }
+        ZStack {
+            chatBackground
+            VStack(spacing: 0) {
+                topBar
+                // messageList tar upp allt utrymme och ignorerar tangentbordets safe area
+                // — inputBar lyfts med tangentbordet via safeAreaInset nedan
+                messageList
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                inputBar
+            // Sidebar overlay
+            if showSidebar {
+                Color.black.opacity(0.45)
+                    .ignoresSafeArea()
+                    .onTapGesture { withAnimation(.spring(response: 0.35)) { showSidebar = false } }
+                    .transition(.opacity)
+                ConversationHistorySidebar(
+                    isShowing: $showSidebar,
+                    viewModel: viewModel,
+                    brain: brain
+                )
+                .transition(.move(edge: .leading))
             }
+        }
+        // inputBar placeras precis ovanför tangentbordet — tab-bar stannar kvar under
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            inputBar
         }
         .task { await brain.neuralEngine.loadModels() }
         .onAppear { startAnimations() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { startAnimations() }
+        }
+        // Debounce: uppdatera animation max var 3:e sekund
         .onReceive(brain.$engineActivity) { _ in
-            withAnimation(.easeInOut(duration: 2.0)) {
-                bgBreath = 0.08 + activityLevel * 0.18
-            }
-            withAnimation(.spring(response: 0.7, dampingFraction: 0.55)) {
+            let now = Date()
+            guard now.timeIntervalSince(lastActivityUpdate) >= 3.0 else { return }
+            lastActivityUpdate = now
+            let newBreath = 0.08 + activityLevel * 0.16
+            withAnimation(.easeInOut(duration: 2.5)) { bgBreath = newBreath }
+            withAnimation(.spring(response: 0.8, dampingFraction: 0.65)) {
                 orbPulse = brain.isThinking ? 1.28 : 1.0 + CGFloat(activityLevel) * 0.12
             }
         }
@@ -73,7 +86,6 @@ struct ChatView: View {
 
     private func startAnimations() {
         withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) { orbGlow = 1.0 }
-        withAnimation(.easeInOut(duration: 4.5).repeatForever(autoreverses: true)) { bgBreath = 0.22 }
     }
 
     // MARK: - Bakgrund
@@ -135,17 +147,28 @@ struct ChatView: View {
 
                 Spacer()
 
-                // Höger: version från Bundle
-                Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.25))
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.white.opacity(0.04))
-                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
-                    )
-                    .frame(width: 44, alignment: .trailing)
+                // Höger: kopiera session + version
+                HStack(spacing: 6) {
+                    Button {
+                        copySession()
+                    } label: {
+                        Image(systemName: sessionCopied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(sessionCopied ? Color(hex: "#34D399") : .white.opacity(0.5))
+                            .frame(width: 32, height: 32)
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.25))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.white.opacity(0.04))
+                                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                        )
+                }
+                .frame(width: 80, alignment: .trailing)
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)
@@ -405,6 +428,29 @@ struct ChatView: View {
         inputFocused = false
         viewModel.addUserMessage(text)
         Task { await viewModel.sendToBrain(text, brain: brain) }
+    }
+
+    private func copySession() {
+        let lines = viewModel.messages.map { msg -> String in
+            let role = msg.role == .user ? "Du" : "Eon"
+            return "\(role): \(msg.content)"
+        }
+        let header = "=== Eon-session \(formattedNow()) ===\n"
+        let full = header + lines.joined(separator: "\n\n")
+        UIPasteboard.general.string = full
+        withAnimation(.spring(response: 0.3)) { sessionCopied = true }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await MainActor.run {
+                withAnimation(.spring(response: 0.3)) { sessionCopied = false }
+            }
+        }
+    }
+
+    private func formattedNow() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.string(from: Date())
     }
 
     private func cleanMonologue(_ text: String) -> String {
@@ -832,9 +878,11 @@ struct EmotionalMiniOrb: View {
     }
 }
 
-// MARK: - ConversationHistorySidebar
+// ConversationHistorySidebar, ConversationRow → ConversationHistorySidebar.swift
+// ChatModeSheet, ModeOption → ChatModeSheet.swift
 
-struct ConversationHistorySidebar: View {
+#if false
+private struct _RemovedTypes {
     @Binding var isShowing: Bool
     @ObservedObject var viewModel: ChatViewModel
     let brain: EonBrain
@@ -1092,6 +1140,8 @@ struct ModeOption: View {
         }
     }
 }
+
+#endif
 
 #Preview("Chatt") {
     EonPreviewContainer { ChatView() }

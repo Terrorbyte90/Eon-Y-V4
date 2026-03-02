@@ -99,8 +99,8 @@ actor IntelligenceGapEngine {
             let blockingPower = blockedBy.map { $0.strength }.reduce(0, +)
             let urgency = gapSize * (1.0 + blockingPower) * Double(blockedDims.count + 1)
 
-            // Beräkna trend
-            let trend = await state.dimensionTrend(dim)
+            // Beräkna trend (används för framtida analys)
+            _ = await state.dimensionTrend(dim)
 
             // Bara inkludera om det är en verklig lucka (inte bara låg)
             if urgency > 0.1 {

@@ -177,7 +177,7 @@ struct FullLogView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
-            .onChange(of: monitor.entries.count) { _ in
+            .onChange(of: monitor.entries.count) { _, _ in
                 if autoScroll, let last = monitor.entries.last {
                     withAnimation(.easeOut(duration: 0.25)) {
                         proxy.scrollTo(last.id, anchor: .bottom)

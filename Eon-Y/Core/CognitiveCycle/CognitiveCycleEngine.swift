@@ -3,6 +3,64 @@ import NaturalLanguage
 
 // MARK: - CognitiveCycleEngine: Orkestrator för de 3 feedback-looparna
 
+// MARK: - ComplexityEstimator
+// Klassificerar en fråga som simple/medium/complex för att anpassa pipeline.
+// Enkla frågor hoppar över BERT-embedding (steg 4) och grafberikning (steg 9) — sparar ANE-resurser.
+
+struct ComplexityEstimate: Sendable {
+    enum Level: Equatable, Sendable { case simple, medium, complex }
+    let level: Level
+    let skipBERT: Bool
+    let skipEnrichment: Bool
+
+    nonisolated func isSimple() -> Bool { level == .simple }
+    nonisolated func isMedium() -> Bool { level == .medium }
+}
+
+// MARK: - ConversationIntent (top-level för att vara synlig för ComplexityEstimator)
+enum ConversationIntent: String {
+    case greeting      = "hälsning"
+    case factualQuery  = "faktafråga"
+    case explanation   = "förklaring"
+    case opinion       = "åsiktsfråga"
+    case creative      = "kreativ"
+    case followUp      = "uppföljning"
+    case command       = "kommando"
+    case chitchat      = "småprat"
+    case selfReference = "självreflektion"
+    case emotional     = "emotionell"
+    case complex       = "komplex"
+}
+
+struct ComplexityEstimator {
+    nonisolated static func estimate(input: String, intent: ConversationIntent) -> ComplexityEstimate {
+        let wordCount = input.split(separator: " ").count
+        let hasQuestion = input.contains("?")
+        let isShort = wordCount <= 5
+
+        switch intent {
+        case .greeting, .followUp:
+            return ComplexityEstimate(level: .simple, skipBERT: true, skipEnrichment: true)
+        case .chitchat, .emotional:
+            if isShort {
+                return ComplexityEstimate(level: .simple, skipBERT: true, skipEnrichment: false)
+            }
+        case .factualQuery where isShort && !hasQuestion:
+            return ComplexityEstimate(level: .simple, skipBERT: true, skipEnrichment: false)
+        case .complex, .explanation, .opinion:
+            return ComplexityEstimate(level: .complex, skipBERT: false, skipEnrichment: false)
+        default: break
+        }
+
+        let isComplex = wordCount > 20 || intent == .complex || intent == .explanation
+        return ComplexityEstimate(
+            level: isComplex ? .complex : .medium,
+            skipBERT: false,
+            skipEnrichment: !isComplex
+        )
+    }
+}
+
 actor CognitiveCycleEngine {
     static let shared = CognitiveCycleEngine()
 
@@ -60,18 +118,26 @@ actor CognitiveCycleEngine {
         await onStepUpdate(.memoryRetrieval, .completed)
 
         // Steg 4: Kausalitetsgraf (Pelare B) + BERT-embedding
+        // ComplexityEstimator avgör om BERT ska hoppas (enkla frågor sparar ANE-resurser)
         await onStepUpdate(.causalGraph, .active)
-        // Beräkna BERT-embedding för semantisk sökning
-        let inputEmbedding = await neuralEngine.embed(input)
-        context.inputEmbedding = inputEmbedding
-        let isModelLoaded = await neuralEngine.isLoaded
-        if isModelLoaded {
-            await onMonologue(MonologueLine(text: "KB-BERT: 768-dim embedding beräknad för semantisk sökning", type: .thought))
-        }
-        let entities = await neuralEngine.extractEntities(from: input)
-        context.entities = entities
-        if !entities.isEmpty {
-            await onMonologue(MonologueLine(text: "Entiteter extraherade: \(entities.map { $0.text }.joined(separator: ", "))", type: .thought))
+        let earlyIntent = detectIntent(input: input, history: context.conversationHistory)
+        let earlyComplexity = ComplexityEstimator.estimate(input: input, intent: earlyIntent)
+        if earlyComplexity.skipBERT {
+            await onMonologue(MonologueLine(text: "Enkel fråga — BERT-embedding hoppas för att spara ANE", type: .thought))
+            context.inputEmbedding = []
+            context.entities = []
+        } else {
+            let inputEmbedding = await neuralEngine.embed(input)
+            context.inputEmbedding = inputEmbedding
+            let isModelLoaded = await neuralEngine.isLoaded
+            if isModelLoaded {
+                await onMonologue(MonologueLine(text: "KB-BERT: 768-dim embedding beräknad för semantisk sökning", type: .thought))
+            }
+            let entities = await neuralEngine.extractEntities(from: input)
+            context.entities = entities
+            if !entities.isEmpty {
+                await onMonologue(MonologueLine(text: "Entiteter extraherade: \(entities.map { $0.text }.joined(separator: ", "))", type: .thought))
+            }
         }
         await onStepUpdate(.causalGraph, .completed)
 
@@ -82,16 +148,18 @@ actor CognitiveCycleEngine {
         context.prompt = prompt
         await onStepUpdate(.globalWorkspace, .completed)
 
-        // Steg 6: Intent detection + Chain-of-Thought
+        // Steg 6: Intent detection + ComplexityEstimator + Chain-of-Thought
         await onStepUpdate(.chainOfThought, .active)
         let intent = detectIntent(input: input, history: context.conversationHistory)
+        let complexity = ComplexityEstimator.estimate(input: input, intent: intent)
         let (maxTokens, temperature) = generationParams(for: intent, inputLength: input.count)
-        await onMonologue(MonologueLine(text: "Intention: \(intent.rawValue) · tokens: \(maxTokens) · temp: \(String(format: "%.2f", temperature))", type: .thought))
+        let complexityLabel = complexity.isSimple() ? "enkel" : complexity.isMedium() ? "medel" : "komplex"
+        await onMonologue(MonologueLine(text: "Intention: \(intent.rawValue) · \(complexityLabel) · tokens: \(maxTokens) · temp: \(String(format: "%.2f", temperature))\(complexity.skipBERT ? " [BERT hoppas]" : "")", type: .thought))
         await onStepUpdate(.chainOfThought, .completed)
 
         // Steg 7: Generering (GPT-SW3) med adaptiva parametrar
         await onStepUpdate(.generation, .active)
-        await onMonologue(MonologueLine(text: "GPT-SW3 genererar svar (\(intent.rawValue))...", type: .thought))
+        await onMonologue(MonologueLine(text: "GPT-SW3 genererar svar (\(intent.rawValue), \(complexityLabel))...", type: .thought))
 
         var generatedText = ""
         let stream = await neuralEngine.generateStream(prompt: prompt, maxTokens: maxTokens, temperature: Float(temperature))
@@ -112,12 +180,21 @@ actor CognitiveCycleEngine {
         context.validationResult = validationResult
 
         if validationResult.needsRegeneration {
-            await onMonologue(MonologueLine(text: "Loop 1 triggas — WSD-mismatch detekterat, korrigerar...", type: .loopTrigger))
+            await onMonologue(MonologueLine(text: "Loop 1 triggas — mismatch detekterat, partial regeneration...", type: .loopTrigger))
             await onStepUpdate(.validation, .triggered)
-            // Regenerera med korrigerad prompt
-            let correctedPrompt = prompt + "\n[Korrigering: \(validationResult.correctionHint)]"
-            var correctedText = ""
-            let correctedStream = await neuralEngine.generateStream(prompt: correctedPrompt, maxTokens: 200, temperature: 0.65)
+            // Partial regeneration: behåll det som är bra, regenerera bara den problematiska delen
+            let sentences = context.generatedText.components(separatedBy: ". ")
+            let keepPart: String
+            if sentences.count > 2 {
+                // Behåll första 2/3, regenerera sista 1/3
+                let keepCount = max(1, sentences.count * 2 / 3)
+                keepPart = sentences.prefix(keepCount).joined(separator: ". ") + ". "
+            } else {
+                keepPart = ""
+            }
+            let correctedPrompt = prompt + "\n[Partial korrigering behövs: \(validationResult.correctionHint)]\n[Befintlig text att behålla: \(keepPart.prefix(200))]"
+            var correctedText = keepPart
+            let correctedStream = await neuralEngine.generateStream(prompt: correctedPrompt, maxTokens: 150, temperature: 0.62)
             for await token in correctedStream {
                 correctedText += token
                 await onToken(token)
@@ -126,10 +203,12 @@ actor CognitiveCycleEngine {
         }
         await onStepUpdate(.validation, .completed)
 
-        // Steg 9: Loop 2 — Grafberikning
+        // Steg 9: Loop 2 — Grafberikning (hoppas vid enkla frågor)
         await onStepUpdate(.enrichment, .active)
-        await enricher.enrich(text: context.generatedText, entities: context.entities, memory: memory)
-        await onMonologue(MonologueLine(text: "Kunskapsgrafen berikas med nya fakta från svaret", type: .thought))
+        if !complexity.skipEnrichment && !context.generatedText.isEmpty {
+            await enricher.enrich(text: context.generatedText, entities: context.entities, memory: memory)
+            await onMonologue(MonologueLine(text: "Kunskapsgrafen berikas med nya fakta från svaret", type: .thought))
+        }
         await onStepUpdate(.enrichment, .completed)
 
         // Steg 10: Loop 3 — Metakognitiv revision (Pelare C)
@@ -308,11 +387,15 @@ actor CognitiveCycleEngine {
     private func buildDeepPrompt(input: String, context: CognitiveCycleContext, articles: [KnowledgeArticle]) async -> String {
         var lines: [String] = []
 
-        let icaState = CognitiveState.shared
-        let ii = await icaState.integratedIntelligence
-        let topDims = await icaState.topDimensions(limit: 3).map { $0.0.rawValue }.joined(separator: ", ")
-        let causalChain = await icaState.activeReasoningChain
-        let hypothesis = await icaState.currentHypothesis
+        let (ii, topDims, causalChain, hypothesis) = await MainActor.run {
+            let s = CognitiveState.shared
+            return (
+                s.integratedIntelligence,
+                s.topDimensions(limit: 3).map { $0.0.rawValue }.joined(separator: ", "),
+                s.activeReasoningChain,
+                s.currentHypothesis
+            )
+        }
 
         lines.append("""
         Du är Eon i RESONERANDE LÄGE — djupanalys med obegränsad tid. Ditt mål är att utveckla dig bortom alla gränser inom svenska språket, kunskap och intelligens.
@@ -409,9 +492,13 @@ actor CognitiveCycleEngine {
         var lines: [String] = []
 
         // 1. System instruction — clear, structured persona with register awareness
-        let icaState = CognitiveState.shared
-        let ii = await icaState.integratedIntelligence
-        let topDims = await icaState.topDimensions(limit: 2).map { $0.0.rawValue }.joined(separator: ", ")
+        let (ii, topDims) = await MainActor.run {
+            let s = CognitiveState.shared
+            return (
+                s.integratedIntelligence,
+                s.topDimensions(limit: 2).map { $0.0.rawValue }.joined(separator: ", ")
+            )
+        }
 
         // Adapt tone based on detected register
         let registerHint: String
@@ -451,12 +538,17 @@ actor CognitiveCycleEngine {
         lines.append("")
 
         // 2. Cognitive context (compact — only include if meaningful)
+        let (hypothesis, frontier, metacogInsight) = await MainActor.run {
+            let s = CognitiveState.shared
+            return (
+                s.currentHypothesis,
+                s.knowledgeFrontier.prefix(2).joined(separator: ", "),
+                s.metacognitiveInsight
+            )
+        }
         var contextParts: [String] = []
-        let hypothesis = await icaState.currentHypothesis
         if !hypothesis.isEmpty { contextParts.append("Hypotes: \(hypothesis)") }
-        let frontier = await icaState.knowledgeFrontier.prefix(2).joined(separator: ", ")
         if !frontier.isEmpty { contextParts.append("Utforskar: \(frontier)") }
-        let metacogInsight = await icaState.metacognitiveInsight
         if !metacogInsight.isEmpty && metacogInsight.count > 10 {
             contextParts.append("Insikt: \(String(metacogInsight.prefix(100)))")
         }
@@ -594,25 +686,11 @@ actor CognitiveCycleEngine {
 
     // MARK: - Intent Detection
 
-    enum ConversationIntent: String {
-        case greeting      = "hälsning"
-        case factualQuery  = "faktafråga"
-        case explanation   = "förklaring"
-        case opinion       = "åsiktsfråga"
-        case creative      = "kreativ"
-        case followUp      = "uppföljning"
-        case command       = "kommando"
-        case chitchat      = "småprat"
-        case selfReference = "självreflektion"
-        case emotional     = "emotionell"
-        case complex       = "komplex"
-    }
-
     private func detectIntent(input: String, history: [ConversationRecord]) -> ConversationIntent {
         let lower = input.lowercased().trimmingCharacters(in: .whitespaces)
         let wordCount = lower.split(separator: " ").count
 
-        // Greeting detection
+        // Greeting detection — only very short inputs
         let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "tjena", "hejhej", "yo", "tjo"]
         if greetings.contains(where: { lower.hasPrefix($0) }) && wordCount <= 4 { return .greeting }
 
@@ -620,31 +698,39 @@ actor CognitiveCycleEngine {
         let followUps = ["ja", "nej", "ok", "okej", "mm", "japp", "precis", "exakt", "visst", "aha", "oh", "absolut", "korrekt", "stämmer", "just det"]
         if wordCount <= 3 && followUps.contains(where: { lower.hasPrefix($0) }) && !history.isEmpty { return .followUp }
 
+        // Multi-part or long input → complex (check early to give generous token budget)
+        if wordCount > 15 || (lower.contains("?") && wordCount > 8) { return .complex }
+
         // Self-reference questions about Eon
-        let selfPatterns = ["vem är du", "vad är du", "berätta om dig", "hur fungerar du", "vad kan du", "hur smart", "hur intelligent"]
+        let selfPatterns = ["vem är du", "vad är du", "berätta om dig", "hur fungerar du", "vad kan du", "hur smart", "hur intelligent", "vad vet du", "vad tänker du om dig"]
         if selfPatterns.contains(where: { lower.contains($0) }) { return .selfReference }
 
-        // Imperative / Command — Swedish imperative verb first word
-        let imperative = ["gör", "visa", "beräkna", "sök", "skriv", "skapa", "lista", "sammanfatta", "analysera", "jämför", "definiera"]
-        if imperative.contains(where: { lower.hasPrefix($0) }) { return .command }
-
-        // Explanation request
-        if lower.contains("förklara") || lower.contains("hur fungerar") || lower.contains("vad innebär") || lower.contains("vad betyder") || lower.contains("kan du beskriva") { return .explanation }
+        // Explanation request — broad matching
+        let explainPatterns = ["förklara", "hur fungerar", "vad innebär", "vad betyder", "kan du beskriva",
+                               "berätta om", "beskriv", "vad är skillnaden", "hur skiljer", "vad menas"]
+        if explainPatterns.contains(where: { lower.contains($0) }) { return .explanation }
 
         // Why/opinion/reasoning — deep thought questions
-        if lower.hasPrefix("varför") || lower.contains("tycker du") || lower.contains("vad anser") || lower.contains("vad tror du") || lower.contains("vad tänker du") { return .opinion }
+        let opinionPatterns = ["varför", "tycker du", "vad anser", "vad tror du", "vad tänker du",
+                               "vad är din syn", "hur ser du på", "vad är ditt", "resonera", "reflektera"]
+        if opinionPatterns.contains(where: { lower.contains($0) }) { return .opinion }
+
+        // Imperative / Command — Swedish imperative verb first word
+        let imperative = ["gör", "visa", "beräkna", "sök", "skriv", "skapa", "lista", "sammanfatta",
+                          "analysera", "jämför", "definiera", "exemplifiera", "argumentera", "diskutera"]
+        if imperative.contains(where: { lower.hasPrefix($0) }) { return .command }
 
         // Factual query
-        if lower.hasPrefix("vad") || lower.hasPrefix("vem") || lower.hasPrefix("var") || lower.hasPrefix("när") || lower.hasPrefix("hur många") || lower.hasPrefix("hur mycket") { return .factualQuery }
+        let factualStarters = ["vad", "vem", "var", "när", "hur många", "hur mycket", "vilket", "vilken", "vilka"]
+        if factualStarters.contains(where: { lower.hasPrefix($0) }) { return .factualQuery }
 
         // Creative
-        if lower.contains("hitta på") || lower.contains("dikt") || lower.contains("berättelse") || lower.contains("fantisera") || lower.contains("skriv en") || lower.contains("skapa en") { return .creative }
+        if lower.contains("hitta på") || lower.contains("dikt") || lower.contains("berättelse") ||
+           lower.contains("fantisera") || lower.contains("skriv en") || lower.contains("skapa en") { return .creative }
 
         // Emotional/personal
-        if lower.contains("ledsen") || lower.contains("glad") || lower.contains("orolig") || lower.contains("arg") || lower.contains("trött") || lower.contains("mår") { return .emotional }
-
-        // Multi-part or long input → likely needs thorough response
-        if wordCount > 20 || (lower.contains("?") && wordCount > 10) { return .complex }
+        if lower.contains("ledsen") || lower.contains("glad") || lower.contains("orolig") ||
+           lower.contains("arg") || lower.contains("trött") || lower.contains("mår") { return .emotional }
 
         // Default: question mark → factual, otherwise chitchat
         return lower.contains("?") ? .factualQuery : .chitchat
@@ -652,19 +738,22 @@ actor CognitiveCycleEngine {
 
     private func generationParams(for intent: ConversationIntent, inputLength: Int) -> (maxTokens: Int, temperature: Double) {
         switch intent {
-        case .greeting:      return (80, 0.80)
-        case .followUp:      return (150, 0.70)
-        case .factualQuery:  return (300, 0.65)
-        case .explanation:   return (450, 0.68)
-        case .opinion:       return (350, 0.72)
-        case .creative:      return (400, 0.85)
-        case .command:       return (250, 0.60)
-        case .selfReference: return (300, 0.70)
-        case .emotional:     return (200, 0.75)
-        case .complex:       return (500, 0.68)
+        case .greeting:      return (100, 0.80)
+        case .followUp:
+            // Scale follow-up with conversation depth
+            let tokens = max(200, min(400, inputLength * 4))
+            return (tokens, 0.72)
+        case .factualQuery:  return (450, 0.65)
+        case .explanation:   return (600, 0.68)
+        case .opinion:       return (500, 0.72)
+        case .creative:      return (500, 0.85)
+        case .command:       return (400, 0.62)
+        case .selfReference: return (400, 0.70)
+        case .emotional:     return (300, 0.75)
+        case .complex:       return (700, 0.68)
         case .chitchat:
             // Scale with input length: longer inputs deserve longer responses
-            let tokens = max(120, min(350, inputLength * 3))
+            let tokens = max(200, min(500, inputLength * 4))
             return (tokens, 0.72)
         }
     }

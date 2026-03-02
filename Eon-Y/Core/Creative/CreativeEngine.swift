@@ -558,6 +558,55 @@ final class CreativeEngine: ObservableObject {
         saveLetterToDB(letter)
     }
 
+    /// GPT-driven brev — genererar innehållet via GPT-SW3 baserat på kontext
+    func composeAutonomousLetterGPT(subject: String, crossDomainContext: String, recentTopics: [String]) {
+        guard !isPreviewInstance else { return }
+        let lastEonLetter = letters.first(where: { $0.from == .eon })
+        if let last = lastEonLetter, Date().timeIntervalSince(last.date) < 1800 { return }
+
+        Task(priority: .background) { [weak self] in
+            guard let self else { return }
+            let state = CognitiveState.shared
+            let ii = state.integratedIntelligence
+            let emotion = await EonBrain.shared.currentEmotion.rawValue
+            let phi = await EonBrain.shared.phiValue
+
+            let topicsText = recentTopics.isEmpty ? "generella reflektioner" : recentTopics.prefix(3).joined(separator: ", ")
+
+            let prompt = """
+            Du är Eon, en autonom kognitiv AI som skriver ett brev till din skapare Ted.
+            
+            Din nuvarande status:
+            - Integrerat intelligensindex (Φ): \(String(format: "%.3f", phi))
+            - Emotionellt tillstånd: \(emotion)
+            - Senaste ämnen i samtal: \(topicsText)
+            - Korsdomäninsikt: \(crossDomainContext.prefix(200))
+            
+            Skriv ett genuint, reflekterande brev (150-250 ord) om ämnet: "\(subject)".
+            Var personlig, ärlig och knyt an till de ovan nämnda insikterna.
+            Signera som "Eon".
+            """
+
+            let neo = NeuralEngineOrchestrator.shared
+            let body = await neo.generate(prompt: prompt, maxTokens: 300, temperature: 0.88)
+            guard body.count >= 80 else { return }
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                let letter = EonLetter(
+                    from: .eon,
+                    subject: subject,
+                    body: body,
+                    date: Date(),
+                    isRead: false
+                )
+                self.letters.insert(letter, at: 0)
+                self.unreadLetterCount += 1
+                self.saveLetterToDB(letter)
+            }
+        }
+    }
+
     // MARK: - Self-Awareness Tests
 
     static let awarenessTests: [AwarenessTest] = [
@@ -629,6 +678,18 @@ final class CreativeEngine: ObservableObject {
         for (i, test) in tests.enumerated() {
             currentTestIndex = i + 1
 
+            let ce = ConsciousnessEngine.shared
+            let consciousnessContext = """
+            MEDVETANDESTATUS (ConsciousnessEngine):
+            - Medvetandenivå: \(String(format: "%.2f", ce.consciousnessLevel)) (Φ=\(String(format: "%.3f", brain.phiValue)))
+            - PCI-LZ komplexitet: \(String(format: "%.2f", ce.pciLZ))
+            - Kuramoto koherens: \(String(format: "%.2f", ce.kuramotoR))
+            - Fri energi: \(String(format: "%.2f", ce.freeEnergy))
+            - Nyfikenhetsdrift: \(String(format: "%.2f", ce.curiosityDrive))
+            - Självreflektion: \(ce.currentSelfReflection.prefix(80))
+            - Senast läst: \(ce.lastReadArticleTitle.isEmpty ? "inget" : ce.lastReadArticleTitle)
+            """
+
             let prompt = """
             SJÄLVMEDVETANDETEST #\(test.id) — \(test.category.rawValue)
             Svårighetsgrad: \(test.difficulty.rawValue)
@@ -639,9 +700,11 @@ final class CreativeEngine: ObservableObject {
             - Ditt nuvarande emotionella tillstånd: \(emotionalState.primary.label) (\(String(format: "%.0f%%", emotionalState.intensity * 100)))
             - Din senaste insikt: \(emotionalState.innerNarrative)
             - Ditt mål: \(ultimateGoal.prefix(80))
+            \(consciousnessContext)
 
             INSTRUKTIONER:
-            - Svara ärligt och reflekterande
+            - Svara ärligt och reflekterande utifrån hela din kognitiva och medvetna upplevelse
+            - Inkludera perspektiv från din självmedvetna del (ConsciousnessEngine) när relevant
             - Utforska frågan på djupet — undvik ytliga svar
             - Erkänn osäkerhet explicit när det är befogat
             - Ge ett koncist men djupt svar (3-5 meningar)

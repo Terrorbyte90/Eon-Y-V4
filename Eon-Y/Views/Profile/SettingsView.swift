@@ -28,11 +28,14 @@ struct SettingsView: View {
     @AppStorage("eon_dev_mode")            private var devMode = false
     @AppStorage("eon_motor_control")       private var eonMotorControl = false
 
+    @AppStorage("eon_bert_auto_unload")  private var bertAutoUnload = true
+    @AppStorage("eon_gpt_auto_unload")   private var gptAutoUnload = true
+    @AppStorage("eon_rest_extra_pct")    private var restExtraPct = 50
+
     @State private var showResetAlert = false
-    @State private var showCognitionLog = false
-    @State private var showDiagnosticsLog = false
     @State private var showAutomationSettings = false
-    @State private var showAboutEon = false
+    @State private var bertStatus = ""
+    @State private var gptStatus = ""
 
     let personalities = ["Standard", "Torr", "Varm", "Formell", "Lekfull"]
     let cognitiveModes = ["Djup", "Balanserat", "Snabbt"]
@@ -197,6 +200,57 @@ struct SettingsView: View {
                 settingToggle("Utvecklarläge", icon: "terminal", binding: $devMode, color: Color(hex: "#EC4899"))
             }
 
+            // BERT & GPT — lazy unload-inställningar
+            settingsGroup(title: "BERT & GPT", icon: "cpu.fill", color: Color(hex: "#38BDF8")) {
+                settingToggle("Auto-avlasta BERT efter 5 min", icon: "memorychip", binding: $bertAutoUnload, color: Color(hex: "#38BDF8"))
+                Divider().background(Color.white.opacity(0.06))
+                settingToggle("Auto-avlasta GPT efter 10 min", icon: "cpu", binding: $gptAutoUnload, color: Color(hex: "#38BDF8"))
+                Divider().background(Color.white.opacity(0.06))
+                settingRow {
+                    HStack(spacing: 6) {
+                        Label("BERT", systemImage: "square.fill")
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.6))
+                        Spacer()
+                        Text(brain.bertLoaded ? "Laddad" : "Avlastad")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(brain.bertLoaded ? Color(hex: "#34D399") : Color.white.opacity(0.3))
+                        Divider().frame(height: 12).background(Color.white.opacity(0.1))
+                        Label("GPT", systemImage: "square.fill")
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.6))
+                        Text(brain.gptLoaded ? "Laddad" : "Avlastad")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(brain.gptLoaded ? Color(hex: "#34D399") : Color.white.opacity(0.3))
+                    }
+                }
+            }
+
+            // Vila-inställningar
+            settingsGroup(title: "MOTORVILA", icon: "moon.fill", color: Color(hex: "#818CF8")) {
+                settingRow {
+                    Label("Extra vilatid", systemImage: "timer")
+                        .font(.system(size: 14, design: .rounded))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Picker("", selection: $restExtraPct) {
+                        Text("Normal").tag(0)
+                        Text("+25%").tag(25)
+                        Text("+50%").tag(50)
+                        Text("+100%").tag(100)
+                    }
+                    .pickerStyle(.menu)
+                    .tint(Color(hex: "#818CF8"))
+                }
+                Divider().background(Color.white.opacity(0.06))
+                settingRow {
+                    Text("Förlänger vila-fasen med \(restExtraPct)%. Hjälper hålla ner värme och ger Eon mer konsolideringstid.")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             // Automation-inställningar
             Button {
                 showAutomationSettings = true
@@ -239,136 +293,6 @@ struct SettingsView: View {
                     .environmentObject(brain)
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
-            }
-
-            // Kognitionslogg
-            Button {
-                showCognitionLog = true
-            } label: {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(Color(hex: "#A78BFA").opacity(0.15))
-                            .frame(width: 30, height: 30)
-                        Image(systemName: "doc.text.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color(hex: "#A78BFA"))
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Kognitionslogg")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("Alla Eons tankar sparade lokalt")
-                            .font(.system(size: 11, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.25))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color(hex: "#A78BFA").opacity(0.04)))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color(hex: "#A78BFA").opacity(0.2), lineWidth: 0.6))
-                )
-            }
-            .sheet(isPresented: $showCognitionLog) {
-                CognitionLogView()
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
-
-            // Resursdiagnostik
-            Button {
-                showDiagnosticsLog = true
-            } label: {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(Color(hex: "#EF4444").opacity(0.15))
-                            .frame(width: 30, height: 30)
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color(hex: "#EF4444"))
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Resursdiagnostik")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("CPU/värme/ANE/GPU — orsaker & rapport")
-                            .font(.system(size: 11, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                    Spacer()
-                    Text(ResourceDiagnosticsLogger.shared.fileSizeString)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.25))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.25))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color(hex: "#EF4444").opacity(0.04)))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color(hex: "#EF4444").opacity(0.2), lineWidth: 0.6))
-                )
-            }
-            .sheet(isPresented: $showDiagnosticsLog) {
-                DiagnosticsLogView()
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
-
-            // Om Eon
-            Button {
-                showAboutEon = true
-            } label: {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(Color(hex: "#A78BFA").opacity(0.15))
-                            .frame(width: 30, height: 30)
-                        Image(systemName: "brain.head.profile")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color(hex: "#A78BFA"))
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Om Eon")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("Arkitektur, motorer & vetenskapliga teorier")
-                            .font(.system(size: 11, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.25))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color(hex: "#A78BFA").opacity(0.04)))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color(hex: "#A78BFA").opacity(0.2), lineWidth: 0.6))
-                )
-            }
-            .sheet(isPresented: $showAboutEon) {
-                AboutEonView()
             }
 
             // Reset

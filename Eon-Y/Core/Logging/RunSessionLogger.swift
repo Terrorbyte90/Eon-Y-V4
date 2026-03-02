@@ -151,6 +151,13 @@ final class RunSessionLogger {
         (try? String(contentsOf: info.url, encoding: .utf8)) ?? "(Kunde inte läsa filen)"
     }
 
+    /// Sammanfogar alla sessionsfilers innehåll till en sträng (för UnifiedLogView)
+    func allSessionsContent() -> String {
+        allSessions()
+            .map { "=== Session: \($0.displayName) ===\n\(readSession($0))" }
+            .joined(separator: "\n\n")
+    }
+
     func deleteSession(_ info: SessionInfo) {
         guard !info.isCurrent else { return }
         try? FileManager.default.removeItem(at: info.url)

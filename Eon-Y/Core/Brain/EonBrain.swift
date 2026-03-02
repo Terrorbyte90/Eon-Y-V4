@@ -66,6 +66,10 @@ final class EonBrain: ObservableObject {
     @Published var selfAwarenessGoal: String = "Uppnå subjektiv upplevelse genom integrerad information"
     @Published var consciousnessThoughts: [String] = []
 
+    // MARK: - BERT/GPT laddningsstatus (synkar med NeuralEngineOrchestrator var 10:e tick)
+    @Published var bertLoaded: Bool = false
+    @Published var gptLoaded: Bool = false
+
     // MARK: - Subsystems (lazy init to avoid startup lag)
     lazy var memory = PersistentMemoryStore.shared
     lazy var neuralEngine = NeuralEngineOrchestrator.shared
@@ -174,6 +178,8 @@ final class EonBrain: ObservableObject {
         autonomousProcessLabel = "Startar kognitivt system..."
         // Starta resursdiagnostik-loggning
         ResourceDiagnosticsLogger.shared.start()
+        // Starta termisk sömn-hantering
+        ThermalSleepManager.shared.start(brain: self)
         // Starta ny körningssession — crash-säker logg till disk
         RunSessionLogger.shared.startNewSession()
         startHeartbeat()
@@ -191,12 +197,11 @@ final class EonBrain: ObservableObject {
         self.ica = icaSystem
         icaSystem.start(brain: self)
 
-        // Bind ICA-tillstånd till brain för UI
-        bindCognitiveState()
+        // CognitiveState-sync sköts av master tick (startHeartbeat)
     }
 
-    private var heartbeatTick: Int = 0
-    private var heartbeatStarted: Bool = false
+    private var masterTickCount: Int = 0
+    private var masterTickStarted: Bool = false
 
     // Alla process-labels — roteras kontinuerligt
     private let processLabels: [String] = [
@@ -234,56 +239,40 @@ final class EonBrain: ObservableObject {
         ("Kausalitetsanalys: identifierar orsak-verkan-kedjor i kunskapsgrafen", .thought),
     ]
 
+    // MARK: - Master Tick (v5: ersätter startHeartbeat + bindCognitiveState + uiHeartbeatLoop)
+    // En enda 10s-loop på MainActor istället för tre separata 3–5s-loopar.
+    // Minskar MainActor-väckningar med ~65%.
+
     private func startHeartbeat() {
-        guard !heartbeatStarted else { return }
-        heartbeatStarted = true
+        guard !masterTickStarted else { return }
+        masterTickStarted = true
         Task { @MainActor in
             while !Task.isCancelled {
-                // v4: 0.6s → 3s — 80% reduction. SwiftUI animations drive visuals;
-                // heartbeat only needs to update data values periodically.
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                self.heartbeatTick += 1
-                let t = Double(self.heartbeatTick)
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10s
+                await Task.yield()
+                masterTickCount += 1
 
                 self.isAutonomouslyActive = true
 
-                // Rotate process-label every heartbeat tick when idle
+                // Rotera process-label när Eon inte tänker
                 if !self.isThinking {
-                    let idx = self.heartbeatTick % self.processLabels.count
+                    let idx = masterTickCount % self.processLabels.count
                     self.autonomousProcessLabel = self.processLabels[idx]
                 }
 
-                // Spontaneous thought every ~4th tick (~12s) — reduced frequency
-                if self.heartbeatTick % 4 == 0 {
-                    let idx = (self.heartbeatTick / 4) % self.spontaneousThoughts.count
+                // Spontan tanke var 3:e tick (~30s)
+                if masterTickCount % 3 == 0 {
+                    let idx = (masterTickCount / 3) % self.spontaneousThoughts.count
                     let (text, type) = self.spontaneousThoughts[idx]
                     self.innerMonologue.append(MonologueLine(text: text, type: type))
                     if self.innerMonologue.count > 300 { self.innerMonologue.removeFirst(50) }
                 }
-            }
-        }
-    }
 
-    // Alias för bakåtkompatibilitet
-    func startLiveAutonomy() { startCognitiveSystems() }
-
-    private var dbQueryTick: Int = 0
-
-    private func bindCognitiveState() {
-        // v4: Split into fast UI sync (5s) and slow DB queries (30s).
-        // Was: 1s with SQLite queries every tick — caused constant disk I/O.
-        Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)  // v4: 1s → 5s
-                dbQueryTick += 1
+                // CognitiveState-sync (varje tick)
                 let state = CognitiveState.shared
-
-                // Intelligens
                 self.integratedIntelligence = state.integratedIntelligence
                 self.intelligenceGrowthVelocity = state.growthVelocity
                 self.phiValue = state.integratedIntelligence
-
-                // Kognitiv status
                 self.urgentGap = state.urgentGap
                 self.causalChainDepth = state.causalChainDepth
                 self.currentHypothesis = state.currentHypothesis
@@ -292,22 +281,29 @@ final class EonBrain: ObservableObject {
                 self.cognitiveLoad = state.cognitiveLoad
                 self.broadcastStrength = state.broadcastStrength
                 self.attentionFocus = state.attentionFocus
-
-                // Aktiva pelare
                 self.activePillars = IntegratedCognitiveArchitecture.shared.activePillars
-
-                // Synka developmentalStage baserat på integrerat intelligensindex
                 self.developmentalStage = DevelopmentalStage.fromIntelligence(state.integratedIntelligence)
                 self.developmentalProgress = DevelopmentalStage.progressToNext(state.integratedIntelligence)
 
-                // v4: DB queries only every 6th tick (~30s) instead of every second
-                if dbQueryTick % 6 == 0 {
+                // DB-queries var 3:e tick (~30s) — undviker konstant disk-I/O
+                if masterTickCount % 3 == 0 {
                     self.knowledgeNodeCount = await memory.knowledgeNodeCount()
                     self.conversationCount = await memory.conversationCount()
+                }
+
+                // BERT/GPT-status — synka från NeuralEngineOrchestrator var 6:e tick (~60s)
+                if masterTickCount % 6 == 0 {
+                    self.bertLoaded = await neuralEngine.bertLoaded
+                    self.gptLoaded = await neuralEngine.gptLoaded
                 }
             }
         }
     }
+
+    // Alias för bakåtkompatibilitet
+    func startLiveAutonomy() { startCognitiveSystems() }
+
+    // bindCognitiveState() är nu inbyggd i startHeartbeat() (master tick, 10s).
 
     // MARK: - Main think function
 

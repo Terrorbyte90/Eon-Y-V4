@@ -230,8 +230,8 @@ struct DiagnosticsLogView: View {
 
     private func loadData() {
         Task.detached(priority: .userInitiated) {
-            let log = ResourceDiagnosticsLogger.shared.readAll()
-            let report = ResourceDiagnosticsLogger.shared.generateReport()
+            let log = await ResourceDiagnosticsLogger.shared.readAll()
+            let report = await ResourceDiagnosticsLogger.shared.generateReport()
             await MainActor.run {
                 logText = log
                 reportText = report

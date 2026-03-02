@@ -16,7 +16,30 @@ actor ReasoningEngine {
     private var activeHypotheses: [ActiveHypothesis] = []
 
     private init() {
-        buildInitialCausalGraph()
+        // Kausalgraf byggs upp i reason()-anrop och via enrichCausalGraphFromFacts()
+        // Seed-relationer läggs till vid första anrop via lazy init
+        let graph = causalGraph
+        graph.addRelation(cause: "Inlärning",       effect: "Kompetens",      strength: 0.90)
+        graph.addRelation(cause: "Kompetens",       effect: "Prestation",     strength: 0.85)
+        graph.addRelation(cause: "Nyfikenhet",      effect: "Inlärning",      strength: 0.80)
+        graph.addRelation(cause: "Motivation",      effect: "Nyfikenhet",     strength: 0.75)
+        graph.addRelation(cause: "Feedback",        effect: "Inlärning",      strength: 0.70)
+        graph.addRelation(cause: "Stress",          effect: "Prestation",     strength: -0.60)
+        graph.addRelation(cause: "Sömn",            effect: "Kognition",      strength: 0.85)
+        graph.addRelation(cause: "Kognition",       effect: "Resonemang",     strength: 0.90)
+        graph.addRelation(cause: "Resonemang",      effect: "Förståelse",     strength: 0.88)
+        graph.addRelation(cause: "Förståelse",      effect: "Kunskap",        strength: 0.92)
+        graph.addRelation(cause: "Kunskap",         effect: "Kreativitet",    strength: 0.65)
+        graph.addRelation(cause: "Kreativitet",     effect: "Innovation",     strength: 0.78)
+        graph.addRelation(cause: "Metakognition",   effect: "Inlärning",      strength: 0.82)
+        graph.addRelation(cause: "Metakognition",   effect: "Resonemang",     strength: 0.75)
+        graph.addRelation(cause: "Kausalitet",      effect: "Förståelse",     strength: 0.80)
+        graph.addRelation(cause: "Analogier",       effect: "Kreativitet",    strength: 0.70)
+        graph.addRelation(cause: "Språk",           effect: "Tänkande",       strength: 0.85)
+        graph.addRelation(cause: "Tänkande",        effect: "Problemlösning", strength: 0.88)
+        graph.addRelation(cause: "Uppmärksamhet",   effect: "Inlärning",      strength: 0.78)
+        graph.addRelation(cause: "Repetition",      effect: "Minne",          strength: 0.90)
+        graph.addRelation(cause: "Minne",           effect: "Kunskap",        strength: 0.85)
     }
 
     // MARK: - Primär resonemangsfunktion
@@ -336,31 +359,6 @@ actor ReasoningEngine {
 
     // MARK: - Kausalgraf
 
-    private func buildInitialCausalGraph() {
-        // Grundläggande kausala relationer — utökad med fler kognitiva noder
-        causalGraph.addRelation(cause: "Inlärning",       effect: "Kompetens",      strength: 0.90)
-        causalGraph.addRelation(cause: "Kompetens",       effect: "Prestation",     strength: 0.85)
-        causalGraph.addRelation(cause: "Nyfikenhet",      effect: "Inlärning",      strength: 0.80)
-        causalGraph.addRelation(cause: "Motivation",      effect: "Nyfikenhet",     strength: 0.75)
-        causalGraph.addRelation(cause: "Feedback",        effect: "Inlärning",      strength: 0.70)
-        causalGraph.addRelation(cause: "Stress",          effect: "Prestation",     strength: -0.60)
-        causalGraph.addRelation(cause: "Sömn",            effect: "Kognition",      strength: 0.85)
-        causalGraph.addRelation(cause: "Kognition",       effect: "Resonemang",     strength: 0.90)
-        causalGraph.addRelation(cause: "Resonemang",      effect: "Förståelse",     strength: 0.88)
-        causalGraph.addRelation(cause: "Förståelse",      effect: "Kunskap",        strength: 0.92)
-        causalGraph.addRelation(cause: "Kunskap",         effect: "Kreativitet",    strength: 0.65)
-        causalGraph.addRelation(cause: "Kreativitet",     effect: "Innovation",     strength: 0.78)
-        causalGraph.addRelation(cause: "Metakognition",   effect: "Inlärning",      strength: 0.82)
-        causalGraph.addRelation(cause: "Metakognition",   effect: "Resonemang",     strength: 0.75)
-        causalGraph.addRelation(cause: "Kausalitet",      effect: "Förståelse",     strength: 0.80)
-        causalGraph.addRelation(cause: "Analogier",       effect: "Kreativitet",    strength: 0.70)
-        causalGraph.addRelation(cause: "Språk",           effect: "Tänkande",       strength: 0.85)
-        causalGraph.addRelation(cause: "Tänkande",        effect: "Problemlösning", strength: 0.88)
-        causalGraph.addRelation(cause: "Uppmärksamhet",   effect: "Inlärning",      strength: 0.78)
-        causalGraph.addRelation(cause: "Repetition",      effect: "Minne",          strength: 0.90)
-        causalGraph.addRelation(cause: "Minne",           effect: "Kunskap",        strength: 0.85)
-    }
-
     // Uppdatera kausalgraf från faktiska SPO-fakta i databasen
     func enrichCausalGraphFromFacts() async {
         // Hämta fakta utanför actor-kontexten (await-anrop)
@@ -599,27 +597,29 @@ actor ReasoningEngine {
 // MARK: - Kausalgraf
 
 // CausalGraph är en class (referenstyp) så att addRelation inte kräver mutating/inout.
-// Det gör att actor-isolerade properties kan anropas utan problem i async-kontext.
-final class CausalGraph {
+// Markerad @unchecked Sendable + nonisolated metoder för att fungera i Swift 6 actor-kontext.
+final class CausalGraph: @unchecked Sendable {
     private var relations: [CausalRelation] = []
 
-    var nodeCount: Int {
+    nonisolated init() {}
+
+    nonisolated var nodeCount: Int {
         Set(relations.flatMap { [$0.cause, $0.effect] }).count
     }
 
-    func addRelation(cause: String, effect: String, strength: Double) {
+    nonisolated func addRelation(cause: String, effect: String, strength: Double) {
         relations.append(CausalRelation(cause: cause, effect: effect, strength: strength))
     }
 
-    func findCauses(of concept: String) -> [String] {
+    nonisolated func findCauses(of concept: String) -> [String] {
         relations.filter { $0.effect.lowercased() == concept.lowercased() && $0.strength > 0 }.map { $0.cause }
     }
 
-    func findEffects(of concept: String) -> [String] {
+    nonisolated func findEffects(of concept: String) -> [String] {
         relations.filter { $0.cause.lowercased() == concept.lowercased() && $0.strength > 0 }.map { $0.effect }
     }
 
-    func findChain(from concept: String, maxDepth: Int = 4) -> [String] {
+    nonisolated func findChain(from concept: String, maxDepth: Int = 4) -> [String] {
         var chain = [concept]
         var current = concept
         for _ in 0..<maxDepth {

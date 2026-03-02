@@ -746,7 +746,8 @@ class ResourceMonitor: ObservableObject {
 
     func startMonitoring() {
         updateMetrics()
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        // Del 7: Byt 2s → 5s — halverar UI-renderingsfrekvensen utan märkbar eftersläpning
+        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.updateMetrics() }
         }
     }

@@ -330,7 +330,7 @@ struct PrincipleCheck {
     let detail: String
     var suggestion: String? = nil
 
-    var severityMultiplier: Double {
+    nonisolated var severityMultiplier: Double {
         switch severity {
         case .low: return 0.3
         case .medium: return 0.6
@@ -340,7 +340,7 @@ struct PrincipleCheck {
     }
 }
 
-enum ViolationSeverity {
+enum ViolationSeverity: Equatable, Sendable {
     case low, medium, high, critical
 }
 

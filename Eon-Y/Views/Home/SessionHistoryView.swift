@@ -379,7 +379,7 @@ struct SessionHistoryView: View {
         isLoading = true
         selectedSession = session
         Task.detached(priority: .userInitiated) {
-            let content = RunSessionLogger.shared.readSession(session)
+            let content = await RunSessionLogger.shared.readSession(session)
             await MainActor.run {
                 sessionContent = content
                 isLoading = false

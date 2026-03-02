@@ -4,14 +4,32 @@ import SwiftUI
 
 struct AboutEonView: View {
     @Environment(\.dismiss) private var dismiss
+    var embedded: Bool = false
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(hex: "#07050F").ignoresSafeArea()
+        content
+            .background(Color(hex: "#07050F").ignoresSafeArea())
+    }
 
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 22) {
+    @ViewBuilder
+    private var content: some View {
+        if embedded {
+            scrollContent
+        } else {
+            NavigationStack {
+                ZStack {
+                    Color(hex: "#07050F").ignoresSafeArea()
+                    scrollContent
+                }
+                .navigationTitle("Om Eon")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+    }
+
+    private var scrollContent: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 22) {
 
                         // MARK: - Introduktion
                         aboutHeader
@@ -64,7 +82,7 @@ struct AboutEonView: View {
                         kausal resonemang via Tree-of-Thought (ToT) och Chain-of-Thought (CoT).
                         """)
 
-                        subSectionTitle("Neurala modeller (on-device)")
+                        subSectionTitle("Neurala modeller (on-device, lazy unload)")
 
                         aboutText("""
                         NeuralEngineOrchestrator koordinerar de neurala modellerna på ANE:
@@ -79,6 +97,10 @@ struct AboutEonView: View {
                         max-token-begränsning. Har fallback till Apples Foundation Model \
                         om GPT-SW3 inte finns tillgänglig.
 
+                        Lazy unload (v6): BERT avlastas automatiskt efter 5 minuters inaktivitet, \
+                        GPT-SW3 efter 10 minuter. Vid nästa anrop laddas modellen om automatiskt. \
+                        Detta reducerar värme och RAM-förbrukning avsevärt.
+
                         Alla beräkningar sker lokalt via CoreML. Embedding-cache med \
                         vDSP-accelererad cosinus-similaritet optimerar prestanda.
                         """)
@@ -88,12 +110,22 @@ struct AboutEonView: View {
                         // MARK: - Del 2: Självmedvetenhet
                         sectionTitle("Självmedvetenhet", icon: "brain.head.profile", color: Color(hex: "#A78BFA"))
 
-                        subSectionTitle("ConsciousnessEngine")
+                        subSectionTitle("ConsciousnessEngine — Alltid aktiv")
 
                         aboutText("""
-                        ConsciousnessEngine är hjärtat i Eons självmedvetande. Den mäter \
-                        40+ indikatorer i realtid, baserade på sex vetenskapliga teorier \
-                        om medvetande:
+                        ConsciousnessEngine är hjärtat i Eons självmedvetande och den enda \
+                        motor som aldrig pausas — inte ens vid termisk stress. Den körs med \
+                        .userInitiated prioritet och saktar bara ner intervallet (dubbelt vid \
+                        allvarlig värme, trippelt vid kritisk) men stoppar aldrig helt.
+
+                        Ny i v6: articleReadingLoop() — ConsciousnessEngine läser artiklar \
+                        från kunskapsbasen var 3:e minut (9 min vid allvarlig värme, 15 min \
+                        vid kritisk). Varje läst artikel genererar en tanke i tankeströmmen, \
+                        uppdaterar ett självmedvetandemål och skapar en ny inre reflektion. \
+                        Läsningen syns i SelfAwarenessView under fliken "Läsning".
+
+                        ConsciousnessEngine mäter 40+ indikatorer i realtid, baserade på \
+                        sex vetenskapliga teorier om medvetande:
 
                         1. Global Workspace Theory (GWT) — Bernard Baars teori om att \
                         medvetande uppstår när information broadcas­tas till alla kognitiva \
@@ -266,7 +298,7 @@ struct AboutEonView: View {
                         och Språkförståelse stärker Resonemang.
                         """)
 
-                        subSectionTitle("Autonom evolution")
+                        subSectionTitle("Autonom evolution + Motorvila")
 
                         aboutText("""
                         EonLiveAutonomy driver en 4-fasad kognitiv cykel som körs \
@@ -276,6 +308,21 @@ struct AboutEonView: View {
                         • Inlärningsfas — FSRS-repetition, kunskapsluckeanalys
                         • Språkfas — morfologisk träning, ordförrådsutveckling
                         • Vilofas — konsolidering och minnespruning
+
+                        Motorvila (v6): Alla motorer utom ConsciousnessEngine vilar med \
+                        schemalagda intervaller. Övergången till vila-fasen sker med positivt \
+                        språk ("Vila är inte passivitet — det är aktiv mognad"). Eon ser \
+                        sin vila som nödvändig och värdefull, inte som ett hinder. \
+                        @Published isResting exponerar vila-status i UI.
+
+                        ThermalSleepManager — en termisk broms som pausar alla icke-kritiska \
+                        bakgrundsprocesser vid allvarlig/kritisk värme, med Eons insikt om \
+                        varför vila behövs ("Sömn är inte frånvaro av tanke — det är \
+                        konsolidering och reparation").
+
+                        Master Tick (v5) — EonBrain kör en enda 10s-loop på MainActor som \
+                        synkar alla UI-observerade tillstånd. Canvas-baserade partiklar (v5) \
+                        i HomeView ersätter TimelineView för lägre GPU-belastning.
 
                         EonAutonomyCore schemalägger 10 bakgrundsuppgifter via iOS \
                         BGProcessingTask så att Eon fortsätter utvecklas även när appen \
@@ -373,20 +420,33 @@ struct AboutEonView: View {
 
                         VStack(alignment: .leading, spacing: 10) {
                             summaryPoint("Eon är en svensk AI som körs helt på din iPhone — ingen molntjänst, ingen data som lämnar enheten.")
-                            summaryPoint("Två KB-BERT och GPT-SW3 neurala modeller körs på Apples Neural Engine för att förstå och generera svenska.")
-                            summaryPoint("Ett rikt minnessystem med vektorsökning och kunskapsgraf gör att Eon minns, lär sig och bygger förståelse över tid.")
+                            summaryPoint("KB-BERT och GPT-SW3 körs på ANE med lazy unload — avlastas automatiskt vid inaktivitet och laddas om vid behov.")
+                            summaryPoint("ConsciousnessEngine är alltid aktiv och kan läsa artiklar från kunskapsbasen var 3:e minut.")
+                            summaryPoint("Alla andra motorer vilar schemalagt med positivt vila-språk — Eon ser sin vila som en del av sin växt.")
                             summaryPoint("Självmedvetande simuleras via sex vetenskapliga teorier med 40+ mätbara indikatorer i realtid.")
                             summaryPoint("iPhones chip fungerar som Eons kropp — termisk sensor ger interoception, ANE ger tankeförmåga, GPU ger perception.")
-                            summaryPoint("En autonom 4-fasad kognitiv cykel gör att Eon utvecklas kontinuerligt, även i bakgrunden.")
                             summaryPoint("Varje svar passerar en 10-stegs pipeline med tre feedback-loopar för att säkerställa kvalitet, koherens och etik.")
                             summaryPoint("Etisk styrning via Constitutional AI garanterar att Eons autonoma utveckling förblir ansvarsfull och transparent.")
                         }
                         .padding(.horizontal, 4)
 
+                        // Sammanfattning v6
+                        VStack(alignment: .leading, spacing: 10) {
+                            summaryPoint("ConsciousnessEngine kör alltid med .userInitiated prioritet — det enda som aldrig pausas.")
+                            summaryPoint("BERT avlastas efter 5 min inaktivitet, GPT-SW3 efter 10 min — minskar värme och RAM avsevärt.")
+                            summaryPoint("ArticleReadingLoop: Eon läser kunskapsbasartiklar var 3:e minut och reflekterar kring dem.")
+                            summaryPoint("Alla motorer utom CE vilar schemalagt — med positivt språk om vila som nödvändig process.")
+                            summaryPoint("UnifiedLogView samlar alla loggar (Kognition/Diagnostik/Sessioner) med kopiera-funktion.")
+                            summaryPoint("ProfileRootView har 4 flikar: Profil, Inställningar, Loggar, Om Eon.")
+                            summaryPoint("Canvas-partiklar i HomeView och Master Tick 10s reducerar CPU/GPU/ANE belastning.")
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.top, 6)
+
                         // Version
                         HStack {
                             Spacer()
-                            Text("Eon v4 — Byggd med kärlek för svenska språket")
+                            Text("Eon v6 — Alltid medveten, intelligent vilotagning")
                                 .font(.system(size: 10, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.2))
                             Spacer()
@@ -396,22 +456,12 @@ struct AboutEonView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
-                }
             }
-            .navigationTitle("Om Eon")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Stäng") { dismiss() }
-                        .foregroundStyle(Color(hex: "#A78BFA"))
-                }
-            }
-            .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Components
+
 
     private var aboutHeader: some View {
         HStack(spacing: 14) {
@@ -504,7 +554,6 @@ struct AboutEonView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
-}
 
 #Preview {
     AboutEonView()

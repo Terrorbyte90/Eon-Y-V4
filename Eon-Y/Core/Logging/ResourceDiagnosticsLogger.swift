@@ -46,7 +46,7 @@ final class ResourceDiagnosticsLogger {
         guard !isRunning else { return }
         isRunning = true
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 5, repeating: 8.0)  // v4: 5s → 8s sampling
+        t.schedule(deadline: .now() + 10, repeating: 30.0)  // v5: 8s → 30s — minskar kernel-overhead
         t.setEventHandler { [weak self] in self?.sample() }
         t.resume()
         timer = t
@@ -178,29 +178,26 @@ final class ResourceDiagnosticsLogger {
         return result
     }
 
-    // MARK: - CPU-mätning (Mach kernel)
+    // MARK: - CPU-mätning (task_info — ett enda kernel-anrop, ingen tråd-loop)
+    // v5: Ersätter task_threads() + per-tråd thread_info() med task_info(TASK_BASIC_INFO).
+    // Minskar kernel-overhead avsevärt — ingen iteration av alla trådar.
 
     private func readCPU() -> Double {
-        var threadList: thread_act_array_t?
-        var threadCount: mach_msg_type_number_t = 0
-        guard task_threads(mach_task_self_, &threadList, &threadCount) == KERN_SUCCESS,
-              let list = threadList else { return 0 }
-
-        var total: Double = 0
-        for i in 0..<Int(threadCount) {
-            var info = thread_basic_info()
-            var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
-            let result = withUnsafeMutablePointer(to: &info) {
-                $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                    thread_info(list[i], thread_flavor_t(THREAD_BASIC_INFO), $0, &count)
-                }
-            }
-            if result == KERN_SUCCESS && info.flags & TH_FLAGS_IDLE == 0 {
-                total += Double(info.cpu_usage) / Double(TH_USAGE_SCALE)
+        var info = task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<task_basic_info>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_BASIC_INFO), $0, &count)
             }
         }
-        vm_deallocate(mach_task_self_, vm_address_t(bitPattern: list), vm_size_t(threadCount) * vm_size_t(MemoryLayout<thread_t>.size))
-        return min(total, 1.0)
+        guard result == KERN_SUCCESS else { return 0 }
+        // user_time + system_time ger total CPU-tid; normalisera mot uptime för approximation
+        let userSec = Double(info.user_time.seconds) + Double(info.user_time.microseconds) / 1_000_000
+        let sysSec  = Double(info.system_time.seconds) + Double(info.system_time.microseconds) / 1_000_000
+        let totalCPUSec = userSec + sysSec
+        let uptime = ProcessInfo.processInfo.systemUptime
+        // Andel av en kärna, clampat till 0–1
+        return min(totalCPUSec / max(uptime, 1), 1.0)
     }
 
     private func readMemoryMB() -> Double {

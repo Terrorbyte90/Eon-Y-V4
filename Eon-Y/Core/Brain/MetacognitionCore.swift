@@ -21,12 +21,9 @@ actor MetacognitionCore {
     private var totalReflections: Int = 0
 
     private init() {
-        initializeResourceAllocation()
-    }
-
-    private func initializeResourceAllocation() {
+        let count = Double(CognitiveDimension.allCases.count)
         for dim in CognitiveDimension.allCases {
-            resourceAllocation[dim] = 1.0 / Double(CognitiveDimension.allCases.count)
+            resourceAllocation[dim] = 1.0 / count
         }
     }
 
@@ -141,7 +138,7 @@ actor MetacognitionCore {
     private func detectBiases(state: CognitiveState) async -> [DetectedBias] {
         var biases: [DetectedBias] = []
         let dimensions = await state.dimensions
-        let monologue = await EonBrain.shared.innerMonologue.suffix(30).map { $0.text }
+        let monologue = await MainActor.run { EonBrain.shared.innerMonologue.suffix(30).map { $0.text } }
 
         // 1. Confirmation bias: resources concentrated on already-strong dimensions
         let topDims = dimensions.sorted { $0.value > $1.value }.prefix(3).map { $0.key }
@@ -298,7 +295,6 @@ actor MetacognitionCore {
         }
 
         // Cross-dimension synergy detection
-        let dimensions = await state.dimensions
         let causalInfluences = await state.causalInfluences
         // Find pairs of dimensions that grow together (positive synergy)
         let growing = audit.growingDimensions
@@ -465,7 +461,7 @@ struct DetectedBias: Identifiable {
         case availabilityHeuristic = "Tillgänglighetsheuristik"
     }
 
-    enum BiasSeverity { case low, medium, high }
+    enum BiasSeverity: Equatable, Sendable { case low, medium, high }
 }
 
 struct MetacognitiveInsight: Identifiable {
@@ -500,7 +496,7 @@ struct MetacognitionStats {
 // MARK: - Array extension for most frequent
 
 extension Array where Element: Hashable {
-    func mostFrequent() -> Element? {
+    nonisolated func mostFrequent() -> Element? {
         let counts = Dictionary(self.map { ($0, 1) }, uniquingKeysWith: +)
         return counts.max(by: { $0.value < $1.value })?.key
     }

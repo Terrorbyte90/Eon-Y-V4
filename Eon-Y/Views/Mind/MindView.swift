@@ -17,27 +17,24 @@ struct MindView: View {
     ]
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 4.0)) { tl in // v4: 2s → 4s — reduces GPU redraws
-            let _ = tl.date
-            ZStack(alignment: .top) {
-                mindBackground
-                VStack(spacing: 0) {
-                    mindHeader
-                    mindTabBar
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 14) {
-                            switch selectedTab {
-                            case 0: cycleTab
-                            case 1: monologueTab
-                            case 2: thoughtGlassTab
-                            default: progressTab
-                            }
+        ZStack(alignment: .top) {
+            mindBackground
+            VStack(spacing: 0) {
+                mindHeader
+                mindTabBar
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        switch selectedTab {
+                        case 0: cycleTab
+                        case 1: monologueTab
+                        case 2: thoughtGlassTab
+                        default: progressTab
                         }
-                        .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
-                        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 32)
                     }
-                    .coordinateSpace(name: "scrollSpace")
+                    .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
+                    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 32)
                 }
+                .coordinateSpace(name: "scrollSpace")
             }
         }
         .onAppear {
@@ -1274,9 +1271,9 @@ struct ThoughtGlassView: View {
     }
 }
 
-// MARK: - Phi Gauge Mini
+// PhiGaugeMini, StepState.label, ThinkingStep.pillarDescription → Components/MindComponents.swift
 
-struct PhiGaugeMini: View {
+struct _PhiGaugeMiniRemoved: View {
     let phi: Double
     var body: some View {
         VStack(spacing: 2) {
@@ -1462,6 +1459,7 @@ struct MindProgressBar: View {
     }
 }
 
+#if false
 extension StepState {
     var label: String {
         switch self {
@@ -1492,6 +1490,8 @@ extension ThinkingStep {
         }
     }
 }
+
+#endif
 
 #Preview {
     EonPreviewContainer { MindView() }
