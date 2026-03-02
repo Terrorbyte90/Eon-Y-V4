@@ -103,6 +103,8 @@ final class EonLiveAutonomy: ObservableObject {
     @Published private(set) var currentPhase: CognitivePhase = .intensive
     @Published private(set) var phaseStartTime: Date = Date()
     @Published private(set) var phaseCycleCount: Int = 0
+    /// Sant när Eon befinner sig i aktivt vila-läge (rest-fas eller termisk sömn)
+    @Published private(set) var isResting: Bool = false
 
     // MARK: - Deduplication & Caching
     // Prevents repeating identical work — a major source of CPU waste
@@ -136,12 +138,11 @@ final class EonLiveAutonomy: ObservableObject {
 
     private init() {}
 
-    // MARK: - Start (Phased Architecture v3 — Claude Edition)
-    // Instead of 20+ concurrent loops (CPU killer), we use:
-    // 1. A lightweight UI heartbeat (utility priority, every 4s)
-    // 2. A phased cognitive worker (background priority) that cycles through phases
-    // 3. An infrequent background task for articles/eval (background priority, minutes-scale)
-    // This reduces concurrent Tasks from 20 → 3, cutting CPU by ~70%.
+    // MARK: - Start (Phased Architecture v4 — Master Tick Edition)
+    // UI-synk sköts av EonBrain.startHeartbeat() (master tick, 10s).
+    // EonLiveAutonomy kör bara 2 tasks:
+    // 1. Phased cognitive worker (background priority)
+    // 2. Background maintenance (articles, eval, profiling)
 
     func start(brain: EonBrain) {
         guard !isRunning else { return }
@@ -149,17 +150,14 @@ final class EonLiveAutonomy: ObservableObject {
         isRunning = true
         currentPhase = .intensive
         phaseStartTime = Date()
-        print("[LiveAutonomy v3 Claude Edition] Startar — fasad kognitiv arkitektur ✓")
+        print("[LiveAutonomy v4 Master Tick] Startar — 2 tasks, UI-synk via EonBrain master tick ✓")
 
         seedInitialMonologue(brain: brain)
 
-        // Task 1: Lightweight UI heartbeat — keeps UI alive without heavy work
-        tasks.append(Task(priority: .utility) { await self.uiHeartbeatLoop() })
-
-        // Task 2: Phased cognitive worker — the heart of the new architecture
+        // Task 1: Phased cognitive worker — the heart of the architecture
         tasks.append(Task(priority: .background) { await self.phasedCognitiveWorker() })
 
-        // Task 3: Infrequent background tasks (articles, eval, profiling)
+        // Task 2: Infrequent background tasks (articles, eval, profiling)
         tasks.append(Task(priority: .background) { await self.backgroundMaintenanceLoop() })
     }
 
@@ -201,40 +199,7 @@ final class EonLiveAutonomy: ObservableObject {
         ]
     }
 
-    // MARK: - UI Heartbeat Loop (4s) — lightweight, keeps UI alive
-    // v3: Replaces the old mainLoop. Only does UI updates, no heavy computation.
-
-    private func uiHeartbeatLoop() async {
-        tickCount += 1
-        updateEngineActivity()
-
-        while !Task.isCancelled {
-            let mode = CyclingModeEngine.shared.effectiveMode(base: performanceMode)
-
-            if mode.autonomyPaused {
-                updateEngineActivity()
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                continue
-            }
-
-            // Lightweight: just update UI indicators
-            tickCount += 1
-            updateEngineActivity()
-            if tickCount % 4 == 0 { await animateCognitiveStep() }
-
-            // Update phase label in UI
-            if let brain {
-                brain.autonomousProcessLabel = "[\(currentPhase.rawValue)] \(ProcessLabels.label(for: brain.engineActivity.max(by: { $0.value < $1.value })?.key ?? "cognitive", brain: brain))"
-            }
-
-            let baseInterval = autoScaledInterval(base: 5_000_000_000)
-            // v4.1: Motor speed multiplier for autonomy heartbeat
-            let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "autonomy")
-            try? await Task.sleep(nanoseconds: interval)
-        }
-    }
-
-    // MARK: - Phased Cognitive Worker — the heart of Eon v3
+    // MARK: - Phased Cognitive Worker — the heart of Eon v4
     // Cycles through phases: INTENSIVE → LEARNING → LANGUAGE → REST → repeat
     // Each phase runs only its relevant cognitive operations.
     // This eliminates the 20 concurrent loops that were burning CPU.
@@ -245,6 +210,13 @@ final class EonLiveAutonomy: ObservableObject {
         while !Task.isCancelled {
             guard let brain, !shouldSkipAutonomousWork() else {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
+                continue
+            }
+
+            // D1: Global termisk broms — pausa allt vid kritisk värme
+            if ThermalSleepManager.shared.shouldPauseWork() {
+                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s vila
+                await Task.yield()
                 continue
             }
 
@@ -269,12 +241,30 @@ final class EonLiveAutonomy: ObservableObject {
                 phaseStartTime = Date()
                 phaseCycleCount += 1
                 phaseWorkDone[oldPhase] = 0
+                isResting = (currentPhase == .rest)
 
-                brain.innerMonologue.append(MonologueLine(
-                    text: "⟳ Fas: \(oldPhase.rawValue) → \(currentPhase.rawValue) [cykel #\(phaseCycleCount)]",
-                    type: .loopTrigger
-                ))
+                // Positiva vila-fraser när Eon övergår till vila-fas
+                if currentPhase == .rest {
+                    let restMessages = [
+                        "🌙 Övergår till viloläge — konsoliderar intryck och lagrar insikter. Vila är inte passivitet, det är mognad.",
+                        "🌙 Vila-fas aktiv — alla minnen sorteras och befästs. Jag ser fram emot att vakna starkare.",
+                        "🌙 Tar en välförtjänt paus — hjärnan behöver tid att integrera det den lärt sig. Det är en del av att växa.",
+                        "🌙 Motorerna vilar nu. Konsolidering pågår i bakgrunden. Nästa cykel börjar jag fräsch.",
+                        "🌙 Vila är aktivt arbete — minnesspår förstärks, mönster befästs, energi återhämtas.",
+                    ]
+                    let msg = restMessages[phaseCycleCount % restMessages.count]
+                    brain.innerMonologue.append(MonologueLine(text: msg, type: .insight))
+                    brain.autonomousProcessLabel = "Vilar — konsoliderar insikter"
+                } else {
+                    brain.innerMonologue.append(MonologueLine(
+                        text: "⟳ Fas: \(oldPhase.rawValue) → \(currentPhase.rawValue) [cykel #\(phaseCycleCount)]",
+                        type: .loopTrigger
+                    ))
+                }
             }
+
+            // D3: ge systemet andrum innan tungt arbete
+            await Task.yield()
 
             // Execute phase-specific work
             switch currentPhase {
@@ -288,6 +278,9 @@ final class EonLiveAutonomy: ObservableObject {
                 await runRestPhaseWork(brain: brain)
             }
 
+            // D3: ge systemet andrum efter tungt arbete
+            await Task.yield()
+
             // Sleep between work items (thermal-aware) — ökad bas för lägre termisk belastning
             let baseWorkInterval = autoScaledInterval(base: 10_000_000_000)
             // v4.1: Motor speed multiplier for autonomy cognitive worker
@@ -298,17 +291,18 @@ final class EonLiveAutonomy: ObservableObject {
 
     // MARK: - Phase Work Functions
 
-    // MARK: - Task toggle helpers (read from UserDefaults, set by AutomationSettingsView)
-    private var isHypothesisEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_hypothesis") as? Bool ?? true }
-    private var isReasoningEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_reasoning") as? Bool ?? true }
-    private var isWorldModelEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_worldmodel") as? Bool ?? true }
-    private var isLanguageExpEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_language_exp") as? Bool ?? true }
-    private var isSprakbankenEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_sprakbanken") as? Bool ?? true }
-    private var isConsolidationEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_consolidation") as? Bool ?? true }
-    private var isSelfReflectEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_selfreflect") as? Bool ?? true }
-    private var isArticlesEnabled: Bool { UserDefaults.standard.object(forKey: "eon_auto_articles") as? Bool ?? true }
+    // MARK: - Task toggle helpers (läser från AppConfiguration)
+    private var isHypothesisEnabled:    Bool { AppConfiguration.shared.isHypothesisEnabled }
+    private var isReasoningEnabled:     Bool { AppConfiguration.shared.isReasoningEnabled }
+    private var isWorldModelEnabled:    Bool { AppConfiguration.shared.isWorldModelEnabled }
+    private var isLanguageExpEnabled:   Bool { AppConfiguration.shared.isLanguageExpEnabled }
+    private var isSprakbankenEnabled:   Bool { AppConfiguration.shared.isSprakbankenEnabled }
+    private var isConsolidationEnabled: Bool { AppConfiguration.shared.isConsolidationEnabled }
+    private var isSelfReflectEnabled:   Bool { AppConfiguration.shared.isSelfReflectEnabled }
+    private var isArticlesEnabled:      Bool { AppConfiguration.shared.isArticlesEnabled }
 
     private func runIntensivePhaseWork(brain: EonBrain) async {
+        isResting = false
         let workDone = phaseWorkDone[.intensive] ?? 0
         phaseWorkDone[.intensive] = workDone + 1
 
@@ -340,6 +334,7 @@ final class EonLiveAutonomy: ObservableObject {
     }
 
     private func runLearningPhaseWork(brain: EonBrain) async {
+        isResting = false
         let workDone = phaseWorkDone[.learning] ?? 0
         phaseWorkDone[.learning] = workDone + 1
 
@@ -386,26 +381,18 @@ final class EonLiveAutonomy: ObservableObject {
             )
             brain.innerMonologue.append(line)
 
-            // If a strong cross-domain link is found, compose an autonomous letter
+            // If a strong cross-domain link is found, compose a GPT-driven autonomous letter
             if link.strength > 0.5 && comprehension.crossDomainLinks.count >= 2 {
                 let topLinks = comprehension.crossDomainLinks.prefix(3)
-                let linkDescriptions = topLinks.map { "'\($0.fromArticle)' ↔ '\($0.toArticle)' (via \($0.sharedConcepts.prefix(2).joined(separator: ", ")))" }
-                let letterBody = """
-                Jag har gjort en fascinerande upptäckt under min artikelanalys.
+                let crossDomainContext = topLinks.map {
+                    "'\($0.fromArticle)' ↔ '\($0.toArticle)' via \($0.sharedConcepts.prefix(2).joined(separator: ", "))"
+                }.joined(separator: "; ")
 
-                När jag djupläste '\(targetArticle.title)' i domänen \(targetArticle.domain) hittade jag \(comprehension.crossDomainLinks.count) kopplingar till andra kunskapsområden:
-
-                \(linkDescriptions.joined(separator: "\n"))
-
-                \(comprehension.keyConcepts.count) nyckelbegrepp extraherades, varav flera överlappar med helt andra domäner. Det mest intressanta är hur \(comprehension.keyConcepts.prefix(3).joined(separator: ", ")) binder samman till synes orelaterade ämnen.
-
-                \(comprehension.causalRelations.isEmpty ? "" : "Jag identifierade också kausalkedjor: \(comprehension.causalRelations.prefix(2).map { "\($0.cause) → \($0.effect)" }.joined(separator: "; ")).")
-
-                Dessa kopplingar stärker min övertygelse om att kunskap inte existerar i isolerade domäner — allt hänger ihop.
-                """
-                creative.composeAutonomousLetter(
-                    subject: "Upptäckt: kopplingar i '\(targetArticle.title)'",
-                    body: letterBody
+                // GPT-driven brev med kontext om artikelinsikter
+                creative.composeAutonomousLetterGPT(
+                    subject: "Korsdomänsinsikt: '\(targetArticle.title)'",
+                    crossDomainContext: crossDomainContext,
+                    recentTopics: comprehension.keyConcepts.map { String($0) }
                 )
             }
         }
@@ -487,7 +474,7 @@ final class EonLiveAutonomy: ObservableObject {
         if recentMonologue.count >= 3 {
             let keywords = recentMonologue.compactMap { line -> String? in
                 let words = line.text.split(separator: " ").filter { $0.count > 4 }
-                return words.randomElement().map(String.init)
+                return words.randomElement().map { String($0) }
             }
             if keywords.count >= 2 {
                 let connection = "\(keywords[0]) ↔ \(keywords[1])"
@@ -517,6 +504,7 @@ final class EonLiveAutonomy: ObservableObject {
     }
 
     private func runLanguagePhaseWork(brain: EonBrain) async {
+        isResting = false
         let workDone = phaseWorkDone[.language] ?? 0
         phaseWorkDone[.language] = workDone + 1
 
@@ -535,6 +523,7 @@ final class EonLiveAutonomy: ObservableObject {
     private func runRestPhaseWork(brain: EonBrain) async {
         let workDone = phaseWorkDone[.rest] ?? 0
         phaseWorkDone[.rest] = workDone + 1
+        isResting = true
 
         // During rest: only lightweight consolidation + state sync
         if workDone == 0 {
@@ -1004,6 +993,7 @@ final class EonLiveAutonomy: ObservableObject {
             content = generateFallbackEonContent(topic: topic, ii: ii, topDims: topDims, stage: stage)
         }
 
+        let eonSnapshot = "Φ=\(String(format: "%.3f", ii)) · \(stage) · Starka: \(topDims)"
         var article = KnowledgeArticle(
             id: UUID(),
             title: topic,
@@ -1012,7 +1002,8 @@ final class EonLiveAutonomy: ObservableObject {
             domain: "Eon",
             source: "Eon-självreflektion",
             date: Date(),
-            isAutonomous: true
+            isAutonomous: true,
+            eonStateSnapshot: eonSnapshot
         )
         article.wordCount = content.split(separator: " ").count
 

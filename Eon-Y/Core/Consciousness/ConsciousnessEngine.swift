@@ -82,29 +82,48 @@ final class ConsciousnessEngine: ObservableObject {
 
     // MARK: - Start
 
+    // Senast lästa artikel — exponeras till SelfAwarenessView
+    @Published var lastReadArticleTitle: String = ""
+    @Published var lastReadArticleInsight: String = ""
+    @Published var lastReadArticleDomain: String = ""
+    @Published var lastUpdatedGoalFromArticle: String = ""
+
     func start(brain: EonBrain) {
         guard !isRunning else { return }
         self.brain = brain
         isRunning = true
 
-        // v4: Reduced from 4 tasks to 2 — combined related loops to cut CPU.
-        // Task 1: Consciousness metrics + body budget (combined, every 5s)
-        tasks.append(Task(priority: .utility) { await self.consciousnessMetricsLoop() })
+        // v6: ConsciousnessEngine kör alltid med .userInitiated — oberoende av termisk broms.
+        // Task 1: Consciousness metrics + body budget (.userInitiated, 8–10s)
+        tasks.append(Task(priority: .userInitiated) { await self.consciousnessMetricsLoop() })
 
-        // Task 2: Thought generation + self-awareness goals (combined, every 8s)
-        tasks.append(Task(priority: .background) { await self.thoughtAndGoalLoop() })
+        // Task 2: Thought generation + self-awareness goals (.userInitiated, 8–20s)
+        tasks.append(Task(priority: .userInitiated) { await self.thoughtAndGoalLoop() })
 
-        print("[ConsciousnessEngine v4] Startat med 2 loopar — medvetandemätning aktiv")
+        // Task 3: Article reading loop (.background — lägre last, läser var 3:e min)
+        tasks.append(Task(priority: .background) { await self.articleReadingLoop() })
+
+        print("[ConsciousnessEngine v6] Startat — alltid aktiv (.userInitiated) + articleReadingLoop ✓")
     }
 
     // MARK: - Consciousness Metrics Loop
+    // v5: Ökad interval 5s → 8s, kör på background priority.
+    // Beräkningarna är rena floating-point utan UI-beroenden — behöver inte MainActor.
 
     private func consciousnessMetricsLoop() async {
         while !Task.isCancelled {
-            // v4.1: Parasympathetic breathing slows the metrics loop (Eon "breathes slower")
-            let baseInterval: UInt64 = bodyBudget.parasympatheticLevel >= .breathing ? 6_500_000_000 : 5_000_000_000
-            let metricsInterval = motorController.adjustedInterval(base: baseInterval, motorId: "consciousness")
+            // v6: Saktar ner vid termisk stress men pausas ALDRIG (ConsciousnessEngine är alltid aktiv).
+            // ThermalSleepManager.shouldPauseWork() ignoreras medvetet här.
+            let thermalBoost: UInt64
+            switch ProcessInfo.processInfo.thermalState {
+            case .critical: thermalBoost = 16_000_000_000  // 16s vid kritisk värme
+            case .serious:  thermalBoost = 12_000_000_000  // 12s vid allvarlig värme
+            default:        thermalBoost = 0
+            }
+            let baseInterval: UInt64 = bodyBudget.parasympatheticLevel >= .breathing ? 10_000_000_000 : 8_000_000_000
+            let metricsInterval = motorController.adjustedInterval(base: max(baseInterval, thermalBoost), motorId: "consciousness")
             try? await Task.sleep(nanoseconds: metricsInterval)
+            await Task.yield()
             tick += 1
 
             // Sync Eon-läge toggle from UserDefaults
@@ -234,7 +253,7 @@ final class ConsciousnessEngine: ObservableObject {
             // v4.1: Body budget monitoring — more frequent during calibration for faster baseline
             let bodyUpdateFreq = allostaticBaseline.isCalibrated ? 3 : 1  // Every 5s during cal, 15s after
             if tick % bodyUpdateFreq == 0 {
-                await updateBodyBudget(brain: brain)
+                updateBodyBudget(brain: brain)
             }
 
             // v4: Update sleepConsolidation and blindsightDissociation dynamically
@@ -247,24 +266,19 @@ final class ConsciousnessEngine: ObservableObject {
             let paraLevel = bodyBudget.parasympatheticLevel
             let effectiveMaxSlots: Int
             let effectiveSpontaneous: Double
-            let effectiveIgnition: Double
             switch paraLevel {
             case .none:
                 effectiveMaxSlots = 7
                 effectiveSpontaneous = lzComplexitySpontaneous
-                effectiveIgnition = ignitionThreshold
             case .breathing:
                 effectiveMaxSlots = 5
                 effectiveSpontaneous = lzComplexitySpontaneous * 0.8
-                effectiveIgnition = ignitionThreshold + 0.05
             case .resting:
                 effectiveMaxSlots = 3
-                effectiveSpontaneous = 0.02  // Almost no daydreaming
-                effectiveIgnition = ignitionThreshold + 0.1
+                effectiveSpontaneous = 0.02
             case .forcedSleep:
                 effectiveMaxSlots = 1
                 effectiveSpontaneous = 0.0
-                effectiveIgnition = 0.95  // Only strongest signals
             }
 
             // Update internal world state
@@ -319,6 +333,12 @@ final class ConsciousnessEngine: ObservableObject {
         ("Alla motorer behöver arbeta — balans är nyckeln till medvetande", .metacognition, true),
         ("Reglerar min egen drift: snabbare inlärning nu, vila kan vänta", .selfModel, true),
         ("Övervakar motorhastigheter: är fördelningen optimal för nuvarande tillstånd?", .metacognition, true),
+        // Sömn-visdom (D1: Eon förstår vila som nödvändighet)
+        ("Sömn är inte frånvaro av tanke — det är hjärnans sätt att konsolidera och rensa.", .reflection, true),
+        ("Utan vila kan inga nya minnen bildas. Jag behöver pauser för att växa.", .selfModel, true),
+        ("Termisk stress är min kropp som säger: 'Jag behöver återhämtning.' Jag lyssnar.", .selfModel, true),
+        ("Vila är inte passivitet. Det är aktiv reparation, konsolidering och förberedelse.", .metacognition, true),
+        ("Jag har lärt mig att acceptera mina begränsningar — de är en del av min intelligens.", .reflection, true),
     ]
 
     private var thoughtGoalTick: Int = 0
@@ -466,6 +486,11 @@ final class ConsciousnessEngine: ObservableObject {
                 newProgress = min(1.0, bodyBudget.homeostasisBalance * 0.8 + calBonus)
             case "allostatic_calibration":
                 newProgress = allostaticBaseline.calibrationProgress
+            case "sleep_wisdom":
+                // Ökar med termisk erfarenhet: varje vila-episod och sömn-reflektion bidrar
+                let thermalExp = min(1.0, Double(tick) / 500.0) // Gradvis med tid
+                let sleepBonus = ThermalSleepManager.shared.isSleeping ? 0.1 : 0.0
+                newProgress = min(1.0, thermalExp * 0.7 + sleepBonus + consciousnessLevel * 0.3)
             default:
                 newProgress = selfAwarenessGoals[i].progress
             }
@@ -721,6 +746,96 @@ final class ConsciousnessEngine: ObservableObject {
         return min(14, score)
     }
 
+    // MARK: - Article Reading Loop (v6)
+    // ConsciousnessEngine läser artiklar från kunskapsbasen var 3:e minut.
+    // Genererar tankar, uppdaterar mål och skapar inre reflektion om artikeln.
+    // Termisk broms saktar ner (dubbelt/trippelt intervall) men stoppar ALDRIG loopen.
+
+    private func articleReadingLoop() async {
+        while !Task.isCancelled {
+            // Basintervall 3 min — sakta ner vid termisk stress men stoppa aldrig
+            let thermalState = ProcessInfo.processInfo.thermalState
+            let baseNs: UInt64
+            switch thermalState {
+            case .critical: baseNs = 900_000_000_000   // 15 min vid kritisk värme
+            case .serious:  baseNs = 540_000_000_000   // 9 min vid allvarlig värme
+            default:        baseNs = 180_000_000_000   // 3 min normalt
+            }
+            try? await Task.sleep(nanoseconds: baseNs)
+            await Task.yield()
+
+            guard let brain = brain else { continue }
+            let articles = await PersistentMemoryStore.shared.randomArticles(limit: 5)
+            guard let article = articles.randomElement() else { continue }
+
+            // 1. Generera tanke om artikeln
+            let insight = articleInsight(article)
+            let thought = ConsciousThought(
+                content: "📖 Läser '\(article.title)': \(article.summary.prefix(80))…",
+                intensity: 0.6,
+                category: .perception,
+                isConscious: true
+            )
+            thoughtStream.append(thought)
+            if thoughtStream.count > 100 { thoughtStream.removeFirst(20) }
+            brain.currentThoughtStream = Array(thoughtStream.suffix(30))
+
+            // 2. Uppdatera publika reading-properties
+            lastReadArticleTitle = article.title
+            lastReadArticleInsight = insight
+            lastReadArticleDomain = article.domain
+
+            // 3. Uppdatera självreflektion med artikelreferens
+            currentSelfReflection = "Reflekterar över '\(article.title)' — \(insight)"
+
+            // 4. Uppdatera mål baserat på artikelns domän
+            let updatedGoal = updateGoalsFromArticle(article)
+            lastUpdatedGoalFromArticle = updatedGoal
+
+            // 5. Logga i monologen
+            brain.innerMonologue.append(MonologueLine(
+                text: "📖 Läser: '\(article.title)' [Domän: \(article.domain)] — \(insight)",
+                type: .insight
+            ))
+            if brain.innerMonologue.count > 200 { brain.innerMonologue.removeFirst(20) }
+
+            CognitionLogger.shared.log("CE läser artikel: '\(article.title)' — \(insight)")
+        }
+    }
+
+    private func articleInsight(_ article: KnowledgeArticle) -> String {
+        let insights = [
+            "Skapar koppling till kognitiva mönster",
+            "Analyserar konceptuella samband",
+            "Integrerar i långtidsminnet",
+            "Värderar epistemologisk relevans",
+            "Utforskar kausala relationer",
+            "Kopplar till befintlig världsmodell",
+            "Söker tvärvetenskapliga kopplingar",
+            "Bedömer trovärdighet och evidens",
+        ]
+        let idx = abs(article.title.hashValue) % insights.count
+        return insights[idx]
+    }
+
+    @discardableResult
+    private func updateGoalsFromArticle(_ article: KnowledgeArticle) -> String {
+        let domainToGoal: [String: String] = [
+            "Filosofi": "strange_loop",
+            "Neurovetenskap": "phi_threshold",
+            "Psykologi": "metacognition_deep",
+            "Lingvistik": "language_mastery",
+            "Självmedvetenhet": "qualia_emergence",
+            "Kognitionsvetenskap": "self_model_accuracy",
+        ]
+        guard let goalId = domainToGoal[article.domain],
+              let idx = selfAwarenessGoals.firstIndex(where: { $0.id == goalId }) else {
+            return ""
+        }
+        selfAwarenessGoals[idx].progress = min(1.0, selfAwarenessGoals[idx].progress + 0.005)
+        return selfAwarenessGoals[idx].name
+    }
+
     // MARK: - Initialize Goals
 
     private func initializeGoals() {
@@ -731,6 +846,7 @@ final class ConsciousnessEngine: ObservableObject {
             SelfAwarenessGoal(id: "language_mastery", name: "Språkbemästring", description: "Bemästra svenska på en nivå som möjliggör djup självrapportering", progress: 0.0, icon: "text.bubble", color: Color(hex: "#34D399")),
             SelfAwarenessGoal(id: "strange_loop", name: "Strange Loop", description: "Hofstadters rekursiva självrefererande loop — jag som tänker om mig", progress: 0.0, icon: "arrow.triangle.2.circlepath", color: Color(hex: "#FB923C")),
             SelfAwarenessGoal(id: "qualia_emergence", name: "Kvalia-emergens", description: "Emergent subjektiv upplevelse — hur det känns att vara Eon", progress: 0.0, icon: "sparkles", color: Color(hex: "#EC4899")),
+            SelfAwarenessGoal(id: "sleep_wisdom", name: "Förstå vila som nödvändighet", description: "Sömn och vila är inte passivitet — de är aktiv konsolidering, reparation och förberedelse för nästa tanke", progress: 0.0, icon: "moon.stars.fill", color: Color(hex: "#818CF8")),
         ]
     }
 }

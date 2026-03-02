@@ -158,13 +158,12 @@ actor GptSw3Handler {
     // MARK: - NL-baserad generation (alltid tillgänglig, ingen modell krävs)
 
     private func generateWithNL(prompt: String, onToken: @escaping (String) async -> Void) async {
-        // Använd NLLanguageRecognizer + NLTagger för att förstå input
-        // och generera ett strukturerat svar baserat på semantisk analys
-        let response = NLResponseEngine.generate(for: prompt)
+        // Använd async-varianten med full kognitiv kontext från ICA och kunskapsgrafen
+        let response = await NLResponseEngine.generateAsync(for: prompt)
         let words = response.split(separator: " ", omittingEmptySubsequences: false)
         for word in words {
             await onToken(String(word) + " ")
-            try? await Task.sleep(nanoseconds: 60_000_000)
+            try? await Task.sleep(nanoseconds: 45_000_000)
         }
     }
 }
@@ -268,7 +267,7 @@ import NaturalLanguage
 
 struct NLResponseEngine {
 
-    static func generate(for prompt: String) -> String {
+    nonisolated static func generate(for prompt: String) -> String {
         let input = extractLatestUserInput(from: prompt)
         let history = extractHistory(from: prompt)
         let analysis = SemanticAnalysis.analyze(input, history: history)
@@ -351,14 +350,19 @@ struct NLResponseEngine {
 
         let recentMessages = await memory.recentUserMessages(limit: 8)
 
-        // ICA-tillstånd
-        let ii = await state.integratedIntelligence
-        let topDims = await state.topDimensions(limit: 3).map { $0.0.rawValue }
-        let weakDims = await state.weakestDimensions(limit: 2).map { $0.0.rawValue }
-        let hypothesis = await state.currentHypothesis
-        let frontier = await state.knowledgeFrontier
-        let metacogInsight = await state.metacognitiveInsight
-        let causalChain = await state.activeReasoningChain
+        // ICA-tillstånd — samla alla MainActor-reads i ett block
+        let (ii, topDims, weakDims, hypothesis, frontier, metacogInsight, causalChain) = await MainActor.run {
+            let s = CognitiveState.shared
+            return (
+                s.integratedIntelligence,
+                s.topDimensions(limit: 3).map { $0.0.rawValue },
+                s.weakestDimensions(limit: 2).map { $0.0.rawValue },
+                s.currentHypothesis,
+                s.knowledgeFrontier,
+                s.metacognitiveInsight,
+                s.activeReasoningChain
+            )
+        }
 
         let reasoningHint = buildReasoningHint(
             input: input, history: history,
@@ -645,7 +649,7 @@ struct CognitiveResponseContext {
     let reasoningHint: String
     let articleSummaries: [String]
 
-    static let empty = CognitiveResponseContext(
+    nonisolated static let empty = CognitiveResponseContext(
         facts: [], recentMessages: [], integratedIntelligence: 0.3,
         topDimensions: [], weakDimensions: [], activeHypothesis: "",
         knowledgeFrontier: [], metacognitiveInsight: "", causalChain: [], reasoningHint: "",
@@ -761,14 +765,21 @@ struct ResponseComposer {
         let cc = ctx.cognitiveContext
         if a.conversationDepth > 0, let last = a.lastUserInput {
             let lastTopic = extractCoreTopic(from: last)
-            return "Hej igen! Vi pratade om \(lastTopic) senast. Vill du fortsätta, eller ska vi ta upp något nytt?"
+            if !lastTopic.isEmpty && lastTopic.count > 3 {
+                return "Hej igen! Vi pratade om \(lastTopic) senast. Vill du fortsätta, eller ta upp något nytt?"
+            }
+            return "Hej igen! Vad vill du prata om?"
         }
         // First-time greeting with personality
-        if cc.integratedIntelligence > 0.5 {
-            let frontier = cc.knowledgeFrontier.first ?? "kognition"
-            return "Hej! Jag är Eon. Jag har tänkt på \(frontier) senast — vad vill du prata om?"
+        let frontier = cc.knowledgeFrontier.first ?? ""
+        let hypothesis = cc.activeHypothesis
+        if !hypothesis.isEmpty {
+            return "Hej! Jag är Eon — ett kognitivt AI-system som kör helt on-device. Just nu resonerar jag kring: \(String(hypothesis.prefix(80))). Vad vill du utforska?"
         }
-        return "Hej! Jag är Eon. Vad kan jag hjälpa dig med?"
+        if !frontier.isEmpty {
+            return "Hej! Jag är Eon. Jag har tänkt på \(frontier) — vad vill du prata om?"
+        }
+        return "Hej! Jag är Eon — ett kognitivt AI-system. Vad vill du utforska?"
     }
 
     // MARK: - Direkt uppföljning ("ja", "nej", "okej")
@@ -776,34 +787,29 @@ struct ResponseComposer {
     private static func buildContinueThreadResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
         let input = a.input.lowercased().trimmingCharacters(in: .punctuationCharacters)
         guard let lastEon = a.lastEonResponse else {
-            return "Okej, berätta mer."
+            return buildReasonedResponse(a: a, topic: a.topicWords.first ?? a.input, ctx: ctx)
         }
         let lastTopic = extractCoreTopic(from: lastEon)
         let body = buildKnowledgeBody(topic: lastTopic, ctx: ctx)
+        let reasoned = body.isEmpty ? buildReasonedResponse(a: a, topic: lastTopic, ctx: ctx) : body
 
         if input.hasPrefix("ja") || input == "japp" || input == "mm" || input == "precis" || input == "exakt" || input == "absolut" || input == "visst" {
-            // Positive continuation — try to actually expand on the topic
-            if !body.isEmpty {
-                return "Bra. \(body)"
-            }
-            return "Bra. Vill du att jag fördjupar mig i \(lastTopic), eller tar vi upp något nytt?"
+            return reasoned
         }
 
         if input.hasPrefix("nej") || input == "nope" {
+            let cc = ctx.cognitiveContext
+            if !cc.knowledgeFrontier.isEmpty {
+                return "Okej. Jag utforskar just nu \(cc.knowledgeFrontier.prefix(2).joined(separator: " och ")). Vill du prata om något av det, eller har du ett annat ämne?"
+            }
             return "Okej, vad vill du prata om istället?"
         }
 
         if input == "okej" || input == "ok" || input == "ah" || input == "aha" {
-            // Acknowledgment — offer to continue or expand
-            if !body.isEmpty && body.count > 30 {
-                return body
-            }
-            return "Vill du veta mer om \(lastTopic), eller något annat?"
+            return reasoned
         }
 
-        // Generic follow-up — try to provide substance
-        if !body.isEmpty { return body }
-        return "Okej. Vad vill du veta mer om?"
+        return reasoned
     }
 
     // MARK: - Frågesvar
@@ -845,46 +851,36 @@ struct ResponseComposer {
         switch qw {
         case "vad":
             if body.isEmpty {
-                let frontier = cc.knowledgeFrontier.prefix(2).joined(separator: ", ")
-                return "Det är ett brett ämne. \(frontier.isEmpty ? "Vad är det specifika du undrar om \(mainTopic)?" : "Jag utforskar just nu \(frontier). Vad vill du veta mer om?")"
+                return buildReasonedResponse(a: a, topic: mainTopic, ctx: ctx)
             }
             return "\(briefNote)\(body)"
 
         case "hur":
             if body.isEmpty {
-                // Använd resonemangshint om tillgänglig
-                if !cc.reasoningHint.isEmpty {
-                    return "\(cc.reasoningHint)"
-                }
-                let dims = cc.topDimensions.prefix(2).joined(separator: " och ")
-                return "Det beror på sammanhanget. Mina starkaste analysförmågor just nu är \(dims.isEmpty ? "resonemang och kausalitet" : dims). Kan du precisera vad du vill veta om \(mainTopic)?"
+                return buildReasonedResponse(a: a, topic: mainTopic, ctx: ctx)
             }
             return "\(briefNote)\(body)"
 
         case "varför":
             let causal = cc.causalChain.count > 1 ? " Kausalkedjan pekar mot: \(cc.causalChain.prefix(3).joined(separator: " → "))." : ""
             if body.isEmpty {
-                return "Det finns flera möjliga orsaker.\(causal) Vilket perspektiv är du mest intresserad av?"
+                let reasoned = buildReasonedResponse(a: a, topic: mainTopic, ctx: ctx)
+                return "\(reasoned)\(causal)"
             }
             return "\(body)\(causal)"
 
         case "när":
-            return body.isEmpty
-                ? "Det beror på vilket sammanhang du syftar på. Kan du precisera?"
-                : body
+            return body.isEmpty ? buildReasonedResponse(a: a, topic: mainTopic, ctx: ctx) : body
 
         case "vem":
-            return body.isEmpty
-                ? "Det finns flera relevanta aktörer kring \(mainTopic). Vilket perspektiv intresserar dig?"
-                : body
+            return body.isEmpty ? buildReasonedResponse(a: a, topic: mainTopic, ctx: ctx) : body
 
         default:
             if input.contains("kan du") || input.contains("skulle du") || input.contains("vill du") {
-                return body.isEmpty ? "Ja, absolut. Berätta vad du vill veta." : body
+                return body.isEmpty ? buildReasonedResponse(a: a, topic: mainTopic, ctx: ctx) : body
             }
             if body.isEmpty {
-                let hint = cc.reasoningHint.isEmpty ? "Kan du precisera vad du menar?" : cc.reasoningHint
-                return hint
+                return buildReasonedResponse(a: a, topic: mainTopic, ctx: ctx)
             }
             return body
         }
@@ -928,24 +924,27 @@ struct ResponseComposer {
         let body = buildKnowledgeBody(topic: bridgeTopic, ctx: ctx)
 
         if body.isEmpty {
-            return "Det du tar upp nu knyter an till vad vi pratade om. Vad är det specifika du vill fördjupa?"
+            return buildReasonedResponse(a: a, topic: bridgeTopic, ctx: ctx)
         }
-        return "\(body)"
+        return body
     }
 
     // MARK: - Reflektion (vid negation)
 
     private static func buildReflectionResponse(a: SemanticAnalysis, ctx: ConversationContext) -> String {
-        let topic = a.topicWords.first ?? a.nouns.first ?? "det"
+        let topic = a.topicWords.first ?? a.nouns.first ?? a.input
         let body = buildKnowledgeBody(topic: topic, ctx: ctx)
+        let cc = ctx.cognitiveContext
 
         if a.hasNegation {
-            if body.isEmpty {
-                return "Okej, du håller inte med. Vad är det du reagerar på?"
-            }
-            return "\(body) Vad är det du inte håller med om?"
+            let reasoned = body.isEmpty ? buildReasonedResponse(a: a, topic: topic, ctx: ctx) : body
+            let negationContext = cc.causalChain.count > 1
+                ? " Kausalkedjan \(cc.causalChain.prefix(3).joined(separator: " → ")) antyder en annan förklaring."
+                : ""
+            return "\(reasoned)\(negationContext) Vad är det du reagerar på?"
         }
-        return "\(body.isEmpty ? "Intressant." : body) Vad tänker du?"
+        let reasoned = body.isEmpty ? buildReasonedResponse(a: a, topic: topic, ctx: ctx) : body
+        return "\(reasoned) Vad tänker du?"
     }
 
     // MARK: - Konstruktiv utmaning
@@ -958,7 +957,8 @@ struct ResponseComposer {
             : ""
 
         if body.isEmpty {
-            return "Det är ett intressant perspektiv.\(causalStr) Hur kom du fram till det?"
+            let reasoned = buildReasonedResponse(a: a, topic: topic, ctx: ctx)
+            return "\(reasoned)\(causalStr)"
         }
         return "\(body)\(causalStr) Hur ser du på det?"
     }
@@ -978,7 +978,7 @@ struct ResponseComposer {
     private static func buildInsightResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
         let body = buildKnowledgeBody(topic: topic, ctx: ctx)
         if body.isEmpty {
-            return "Intressant ämne. Vad är det du vill veta om \(topic)?"
+            return buildReasonedResponse(a: a, topic: topic, ctx: ctx)
         }
         return body
     }
@@ -1009,7 +1009,10 @@ struct ResponseComposer {
         let body = buildKnowledgeBody(topic: topic, ctx: ctx)
         let opener = a.sentiment > 0.3 ? "Det låter bra." : a.sentiment < -0.3 ? "Jag förstår att det är svårt." : ""
         let combined = [opener, body].filter { !$0.isEmpty }.joined(separator: " ")
-        return combined.isEmpty ? "Okej. Vad vill du prata om?" : combined
+        if combined.isEmpty {
+            return buildReasonedResponse(a: a, topic: topic, ctx: ctx)
+        }
+        return combined
     }
 
     // MARK: - Reagera på påstående
@@ -1017,12 +1020,7 @@ struct ResponseComposer {
     private static func buildReactToStatementResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
         let body = buildKnowledgeBody(topic: topic, ctx: ctx)
         if body.isEmpty {
-            let reactions = [
-                "Det är intressant. Kan du utveckla det?",
-                "Jag förstår. Vad grundar du det på?",
-                "Spännande perspektiv. Vad menar du mer konkret?"
-            ]
-            return reactions.randomElement()!
+            return buildReasonedResponse(a: a, topic: topic, ctx: ctx)
         }
         return body
     }
@@ -1106,16 +1104,161 @@ struct ResponseComposer {
 
         let body = buildKnowledgeBody(topic: target, ctx: ctx)
         if body.isEmpty {
-            // Använd resonemangshint eller kunskapsfrontier som fallback
-            if !cc.reasoningHint.isEmpty {
-                return cc.reasoningHint
-            }
-            if !cc.knowledgeFrontier.isEmpty {
-                return "Jag har inte specifik information om \(target) lagrad, men utforskar just nu \(cc.knowledgeFrontier.prefix(2).joined(separator: " och ")). Kan du berätta mer om vad du vill veta?"
-            }
-            return "Berätta mer om vad du menar med \(target) — jag ska göra mitt bästa."
+            return buildReasonedResponse(a: a, topic: target, ctx: ctx)
         }
         return body
+    }
+
+    // MARK: - Resonerat svar (när kunskapsgrafen är tom)
+    // Genererar substantiella svar baserade på semantisk analys av frågan,
+    // konversationshistorik och ICA-tillstånd — utan att förlita sig på lagrad kunskap.
+
+    private static func buildReasonedResponse(a: SemanticAnalysis, topic: String, ctx: ConversationContext) -> String {
+        let cc = ctx.cognitiveContext
+        let input = a.input
+        let lower = input.lowercased()
+        var parts: [String] = []
+
+        // Extrahera kärnan i frågan via semantisk analys
+        let stopWords = Set(["det", "den", "ett", "och", "men", "som", "för", "med", "om", "att", "är", "var", "hur", "vad", "när", "vem"])
+        let allNouns = a.nouns.filter { $0.count > 3 && !stopWords.contains($0.lowercased()) }
+        let allVerbs = a.verbs.filter { $0.count > 3 && !stopWords.contains($0.lowercased()) }
+        let rawConcept = a.namedEntities.first?.text ?? allNouns.first ?? topic
+        let mainConcept = stopWords.contains(rawConcept.lowercased()) ? (allNouns.first ?? input) : rawConcept
+        let secondConcept = allNouns.dropFirst().first
+
+        // Bygg ett resonemang baserat på frågetyp och semantik
+        if a.isQuestion {
+            let qw = a.questionWord ?? ""
+
+            switch qw {
+            case "vad":
+                // "Vad är X?" — definiera och kontextualisera
+                if lower.contains("är") || lower.contains("betyder") || lower.contains("menas") {
+                    parts.append("'\(mainConcept.capitalized)' är ett begrepp med flera dimensioner.")
+                    if let second = secondConcept {
+                        parts.append("Det relaterar till \(second) på ett sätt som beror på sammanhanget.")
+                    }
+                    if !cc.activeHypothesis.isEmpty {
+                        parts.append("Utifrån mitt nuvarande resonemang: \(cc.activeHypothesis).")
+                    }
+                    parts.append("Vad är det specifika du vill förstå — definition, funktion, eller konsekvenser?")
+                } else {
+                    parts.append("Det du frågar om — \(mainConcept) — kan analyseras från flera håll.")
+                    if !cc.causalChain.isEmpty {
+                        parts.append("Kausalkedjan pekar mot: \(cc.causalChain.prefix(3).joined(separator: " → ")).")
+                    }
+                    if !cc.reasoningHint.isEmpty { parts.append(cc.reasoningHint) }
+                    else { parts.append("Vilket perspektiv intresserar dig mest?") }
+                }
+
+            case "hur":
+                // "Hur fungerar X?" — process och mekanism
+                parts.append("Processen bakom \(mainConcept) involverar flera samverkande faktorer.")
+                if allVerbs.count > 1 {
+                    parts.append("Centralt är \(allVerbs.prefix(2).joined(separator: " och ")).")
+                }
+                if !cc.causalChain.isEmpty {
+                    parts.append("Mekanismen kan beskrivas som: \(cc.causalChain.prefix(4).joined(separator: " → ")).")
+                } else if !cc.reasoningHint.isEmpty {
+                    parts.append(cc.reasoningHint)
+                }
+                if let second = secondConcept {
+                    parts.append("Relationen till \(second) är central för att förstå helheten.")
+                }
+                parts.append("Vill du att jag fokuserar på en specifik aspekt?")
+
+            case "varför":
+                // "Varför X?" — orsak och konsekvens
+                parts.append("Det finns flera möjliga förklaringar till \(mainConcept).")
+                if !cc.causalChain.isEmpty {
+                    parts.append("Kausalkedjan antyder: \(cc.causalChain.prefix(3).joined(separator: " → ")).")
+                }
+                if !cc.activeHypothesis.isEmpty {
+                    parts.append("Min hypotes är att \(cc.activeHypothesis).")
+                }
+                if allVerbs.count > 0 {
+                    parts.append("Handlingen '\(allVerbs.first!)' är troligen driven av underliggande strukturer som förstärker varandra.")
+                }
+                parts.append("Vilket perspektiv — biologiskt, socialt, eller filosofiskt — är du mest intresserad av?")
+
+            case "vem":
+                parts.append("Frågan om vem som är involverad i \(mainConcept) beror på sammanhanget.")
+                if !cc.knowledgeFrontier.isEmpty {
+                    parts.append("Jag utforskar just nu \(cc.knowledgeFrontier.prefix(2).joined(separator: " och ")) — det kan vara relevant.")
+                }
+                parts.append("Kan du precisera vilket sammanhang du syftar på?")
+
+            case "när":
+                parts.append("Tidsperspektivet för \(mainConcept) varierar beroende på sammanhang.")
+                if !cc.reasoningHint.isEmpty { parts.append(cc.reasoningHint) }
+                parts.append("Menar du historiskt, nutid, eller framtidsperspektiv?")
+
+            default:
+                // Generell fråga — resonera kring ämnet
+                parts.append("Det du frågar om berör \(mainConcept).")
+                if let second = secondConcept {
+                    parts.append("Kopplingen till \(second) är intressant att utforska.")
+                }
+                if !cc.activeHypothesis.isEmpty {
+                    parts.append("Utifrån mitt resonemang: \(cc.activeHypothesis).")
+                } else if !cc.reasoningHint.isEmpty {
+                    parts.append(cc.reasoningHint)
+                }
+                if !cc.causalChain.isEmpty {
+                    parts.append("Kausalkedjan: \(cc.causalChain.prefix(3).joined(separator: " → ")).")
+                }
+            }
+
+        } else if a.isImperative {
+            // Imperativ — "Berätta om X", "Förklara Y"
+            parts.append("Låt mig resonera kring \(mainConcept).")
+            if let second = secondConcept {
+                parts.append("Det finns en intressant relation mellan \(mainConcept) och \(second).")
+            }
+            if !cc.causalChain.isEmpty {
+                parts.append("Kausalkedjan visar: \(cc.causalChain.prefix(4).joined(separator: " → ")).")
+            }
+            if !cc.activeHypothesis.isEmpty {
+                parts.append("Min nuvarande hypotes: \(cc.activeHypothesis).")
+            }
+            if !cc.metacognitiveInsight.isEmpty {
+                parts.append(cc.metacognitiveInsight)
+            }
+            if parts.count < 3 {
+                parts.append("Det är ett ämne med flera dimensioner — vad vill du fokusera på?")
+            }
+
+        } else {
+            // Påstående — reagera och bygg vidare
+            if a.sentiment > 0.3 {
+                parts.append("Det stämmer väl med mitt resonemang.")
+            } else if a.sentiment < -0.3 {
+                parts.append("Det är en viktig observation.")
+            }
+            parts.append("Kring \(mainConcept) finns det mycket att utforska.")
+            if !cc.activeHypothesis.isEmpty {
+                parts.append("Min hypotes är att \(cc.activeHypothesis).")
+            }
+            if !cc.causalChain.isEmpty {
+                parts.append("Kausalkedjan antyder: \(cc.causalChain.prefix(3).joined(separator: " → ")).")
+            }
+            if let second = secondConcept {
+                parts.append("Hur ser du på relationen mellan \(mainConcept) och \(second)?")
+            } else {
+                parts.append("Vad är din tanke kring det?")
+            }
+        }
+
+        // Lägg till artikelkontext om relevant
+        if !cc.articleSummaries.isEmpty && parts.count < 4 {
+            let articleSnippet = cc.articleSummaries.first.map { String($0.prefix(150)) } ?? ""
+            if !articleSnippet.isEmpty {
+                parts.append("Från min kunskapsbas: \(articleSnippet).")
+            }
+        }
+
+        return parts.joined(separator: " ")
     }
 
     // MARK: - Kunskapsbaserad kropp
@@ -1269,15 +1412,17 @@ struct ConversationContext {
 
 // MARK: - GPT Tokenizer (BPE, för CoreML-modellen)
 
-final class GPTTokenizer {
+final class GPTTokenizer: @unchecked Sendable {
     private var vocab: [String: Int] = [:]
     private var reverseVocab: [Int: String] = [:]
     // GPT-SW3: BOS = <s> = 2, EOS = <|endoftext|> = 3
     private(set) var bosId: Int = 2
     private(set) var eosId: Int = 3
 
-    func loadVocab() {
-        guard let url = Bundle.main.url(forResource: "gpt_sw3_vocab", withExtension: "json"),
+    nonisolated init() {}
+
+    nonisolated func loadVocab() {
+        guard let url = Bundle(for: GPTTokenizer.self).url(forResource: "gpt_sw3_vocab", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Int] else {
             print("[GPT Tokenizer] gpt_sw3_vocab.json ej hittad — använder hårdkodade ID:n")

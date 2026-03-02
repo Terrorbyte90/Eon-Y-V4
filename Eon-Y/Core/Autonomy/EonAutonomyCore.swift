@@ -71,9 +71,9 @@ actor EonAutonomyCore {
         // Nyfikenhet/utforskning: var 2h
         scheduleTask(identifier: "com.eon.curiosity",
                      earliestBeginDate: Date(timeIntervalSinceNow: 7200))
-        // Konversationsbrygga: var 30min
+        // Konversationsbrygga: var 4h (C3: var 30min → 4h — BERT NER för frekvent)
         scheduleTask(identifier: "com.eon.conversation-bridge",
-                     earliestBeginDate: Date(timeIntervalSinceNow: 1800))
+                     earliestBeginDate: Date(timeIntervalSinceNow: 14400))
         // Trosrevision (Bayesiansk): var 5h
         scheduleTask(identifier: "com.eon.belief-sync",
                      earliestBeginDate: Date(timeIntervalSinceNow: 18000))

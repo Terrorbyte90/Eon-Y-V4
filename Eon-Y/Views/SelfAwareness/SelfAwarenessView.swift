@@ -8,64 +8,69 @@ import Combine
 struct SelfAwarenessView: View {
     @EnvironmentObject var brain: EonBrain
     @Environment(\.tabBarVisible) private var tabBarVisible
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var consciousness = ConsciousnessEngine.shared
     @State private var selectedSection: SASection = .overview
     @State private var orbPulse: CGFloat = 1.0
     @State private var ringRot: Double = 0
-    @State private var glowPhase: Double = 0
     @State private var showMotorRoom: Bool = false
     @AppStorage("eon_motor_control") private var eonMotorControl = false
 
     enum SASection: String, CaseIterable {
         case overview = "Översikt"
         case thoughts = "Tankar"
+        case reading = "Läsning"
         case innerWorld = "Inre Värld"
         case metrics = "Mätningar"
         case goals = "Mål"
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 3.0)) { tl in // v4: 1.5s → 3s — matches data update frequency
-            let _ = tl.date
-            ZStack(alignment: .top) {
-                saBackground
-                VStack(spacing: 0) {
-                    saHeader
-                    sectionPicker
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 14) {
-                            switch selectedSection {
-                            case .overview:  overviewSection
-                            case .thoughts:  thoughtStreamSection
-                            case .innerWorld: innerWorldSection
-                            case .metrics:   metricsSection
-                            case .goals:     goalsSection
-                            }
+        ZStack(alignment: .top) {
+            saBackground
+            VStack(spacing: 0) {
+                saHeader
+                sectionPicker
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        switch selectedSection {
+                        case .overview:   overviewSection
+                        case .thoughts:   thoughtStreamSection
+                        case .reading:    readingSection
+                        case .innerWorld: innerWorldSection
+                        case .metrics:    metricsSection
+                        case .goals:      goalsSection
                         }
-                        .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 110)
                     }
-                    .coordinateSpace(name: "scrollSpace")
+                    .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 110)
                 }
+                .coordinateSpace(name: "scrollSpace")
             }
         }
         .onAppear {
-            withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) { orbPulse = 1.08 }
-            withAnimation(.linear(duration: 12).repeatForever(autoreverses: false)) { ringRot = 360 }
-            withAnimation(.linear(duration: 6).repeatForever(autoreverses: true)) { glowPhase = 1 }
+            startAnimations()
             consciousness.start(brain: brain)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { startAnimations() }
         }
     }
 
-    // MARK: - Background
+    private func startAnimations() {
+        withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) { orbPulse = 1.08 }
+        withAnimation(.linear(duration: 12).repeatForever(autoreverses: false)) { ringRot = 360 }
+    }
+
+    // MARK: - Background (statisk gradient — ingen repeatForever-animation)
 
     var saBackground: some View {
         ZStack {
             Color(hex: "#050310").ignoresSafeArea()
             RadialGradient(
-                colors: [Color(hex: "#3B0764").opacity(0.25 + glowPhase * 0.1), Color.clear],
+                colors: [Color(hex: "#3B0764").opacity(0.30), Color.clear],
                 center: .init(x: 0.3, y: 0.0), startRadius: 0, endRadius: 500
             ).ignoresSafeArea()
             RadialGradient(
@@ -859,6 +864,130 @@ struct SelfAwarenessView: View {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // MARK: - Reading Section (v6 — ConsciousnessEngine läser artiklar)
+
+    var readingSection: some View {
+        VStack(spacing: 14) {
+            // Senast lästa artikel
+            saCard(tint: Color(hex: "#818CF8")) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "book.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(hex: "#818CF8"))
+                        Text("SENAST LÄST")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(hex: "#818CF8").opacity(0.8))
+                            .tracking(1.2)
+                        Spacer()
+                        if !consciousness.lastReadArticleDomain.isEmpty {
+                            Text(consciousness.lastReadArticleDomain)
+                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .foregroundStyle(Color(hex: "#818CF8").opacity(0.7))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color(hex: "#818CF8").opacity(0.12)))
+                        }
+                    }
+
+                    if consciousness.lastReadArticleTitle.isEmpty {
+                        Text("Ingen artikel läst ännu. Eon läser var 3:e minut.")
+                            .font(.system(size: 13, design: .rounded).italic())
+                            .foregroundStyle(.white.opacity(0.35))
+                    } else {
+                        Text(consciousness.lastReadArticleTitle)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if !consciousness.lastReadArticleInsight.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "lightbulb.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.yellow.opacity(0.7))
+                                Text(consciousness.lastReadArticleInsight)
+                                    .font(.system(size: 12, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.55))
+                            }
+                        }
+
+                        if !consciousness.lastUpdatedGoalFromArticle.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "target")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Color(hex: "#34D399").opacity(0.7))
+                                Text("Mål uppdaterat: \(consciousness.lastUpdatedGoalFromArticle)")
+                                    .font(.system(size: 11, design: .rounded))
+                                    .foregroundStyle(Color(hex: "#34D399").opacity(0.7))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Aktuell självreflektion
+            saCard(tint: Color(hex: "#A78BFA")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "quote.bubble.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(hex: "#A78BFA"))
+                        Text("AKTUELL REFLEKTION")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(hex: "#A78BFA").opacity(0.8))
+                            .tracking(1.2)
+                    }
+                    Text(consciousness.currentSelfReflection.isEmpty
+                         ? "Reflekterar ännu inte — Eon initieras."
+                         : consciousness.currentSelfReflection)
+                        .font(.system(size: 13, design: .rounded).italic())
+                        .foregroundStyle(.white.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            // Läs nu-knapp
+            saCard(tint: Color(hex: "#38BDF8")) {
+                VStack(spacing: 10) {
+                    Text("Eon läser automatiskt var 3:e minut. Använd knappen nedan för att trigga en omedelbar artikel-läsning.")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .multilineTextAlignment(.center)
+
+                    Button {
+                        Task {
+                            let articles = PersistentMemoryStore.shared.randomArticles(limit: 5)
+                            if let article = articles.randomElement() {
+                                let insight = "Analyserar direkt läsning..."
+                                consciousness.lastReadArticleTitle = article.title
+                                consciousness.lastReadArticleDomain = article.domain
+                                consciousness.lastReadArticleInsight = insight
+                                consciousness.currentSelfReflection = "Läser '\(article.title)' nu — \(insight)"
+                                brain.innerMonologue.append(MonologueLine(
+                                    text: "📖 Manuell läsning: '\(article.title)'",
+                                    type: .insight
+                                ))
+                            }
+                        }
+                    } label: {
+                        Label("Läs nu", systemImage: "book.circle.fill")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color(hex: "#38BDF8"))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(hex: "#38BDF8").opacity(0.12))
+                                    .overlay(RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(Color(hex: "#38BDF8").opacity(0.25), lineWidth: 0.7))
+                            )
+                    }
+                    .buttonStyle(EonPressButtonStyle())
                 }
             }
         }

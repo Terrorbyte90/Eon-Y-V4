@@ -116,7 +116,7 @@ struct AutomationSettingsView: View {
                             .fill(Color.white.opacity(0.06))
                         RoundedRectangle(cornerRadius: 4)
                             .fill(Color(hex: phase.color).opacity(0.7))
-                            .frame(width: geo.size.width * progress)
+                            .frame(width: max(0, geo.size.width * max(0, min(1, progress))))
                     }
                 }
                 .frame(height: 6)

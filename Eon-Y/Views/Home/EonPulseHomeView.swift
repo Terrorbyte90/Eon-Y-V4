@@ -1,11 +1,12 @@
 import SwiftUI
 import Combine
 
-// MARK: - EonPulseHomeView v5 — TimelineView-driven, garanterat levande
+// MARK: - EonPulseHomeView v7 — Flip-kognition, öga-animation, uppflyttad layout
 
 struct EonPulseHomeView: View {
     @EnvironmentObject var brain: EonBrain
     @Environment(\.tabBarVisible) private var tabBarVisible
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var ring1: Double = 0
     @State private var ring2: Double = 0
@@ -16,45 +17,70 @@ struct EonPulseHomeView: View {
     @State private var showCognitionLog = false
     @State private var showFullLog = false
 
-    // Flipping meter states
+    // Flip meter states
     @State private var autonomFlipped = false
     @State private var levandeFlipped = false
     @State private var intelligentFlipped = false
     @State private var flipTimer: Timer? = nil
 
+    // Live kognition ↔ Live självmedvetenhet flip
+    @State private var showingSelfAwareness = false
+    @State private var awarenessFlipTimer: Timer? = nil
+
+    // Öga-animation
+    @State private var eyePupilOffset: CGSize = .zero
+    @State private var eyeBlinkScale: CGFloat = 1.0
+    @State private var eyeGlowPulse: CGFloat = 1.0
+    @State private var eyeLookTimer: Timer? = nil
+
     var body: some View {
-        // v4: 2s → 3s — saves GPU while keeping UI lively via SwiftUI animations
-        TimelineView(.periodic(from: .now, by: 3.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            ZStack {
-                background(t: t)
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        orbSection(t: t)
-                            .padding(.top, -40)
-                        titleSection(t: t)
-                            .padding(.top, 18)
-                        if showContent {
-                            monologueSection
-                                .padding(.top, 16).padding(.horizontal, 16)
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
-                        Color.clear.frame(height: 40)
+        ZStack {
+            background
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    orbSection
+                        // 15% uppflyttning: original var -40, nu -40 - (280*0.15) ≈ -82
+                        .padding(.top, -82)
+                    titleSection
+                        .padding(.top, 18)
+                    if showContent {
+                        monologueSection
+                            .padding(.top, 16).padding(.horizontal, 16)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
-                    .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
+                    Color.clear.frame(height: 40)
                 }
-                .coordinateSpace(name: "scrollSpace")
+                .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
             }
+            .coordinateSpace(name: "scrollSpace")
         }
         .onAppear {
             startAnimations()
             withAnimation(.easeOut(duration: 0.5).delay(0.3)) { showContent = true }
+            startAwarenessFlipTimer()
+        }
+        .onDisappear {
+            awarenessFlipTimer?.invalidate()
+            eyeLookTimer?.invalidate()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                startAnimations()
+                startAwarenessFlipTimer()
+            }
+        }
+        .onChange(of: showingSelfAwareness) { _, isAwareness in
+            if isAwareness {
+                startEyeAnimation()
+            } else {
+                eyeLookTimer?.invalidate()
+            }
         }
     }
 
     // MARK: - Background
 
-    func background(t: Double) -> some View {
+    var background: some View {
         let activity = activityLevel
         let dominant = dominantColor
         return ZStack {
@@ -73,7 +99,7 @@ struct EonPulseHomeView: View {
 
     // MARK: - Orb
 
-    func orbSection(t: Double) -> some View {
+    var orbSection: some View {
         let dominant = dominantColor
         let activity = activityLevel
         return ZStack {
@@ -87,10 +113,9 @@ struct EonPulseHomeView: View {
                 .blur(radius: 28)
                 .scaleEffect(orbPulse)
 
-            // Partiklar
-            ForEach(particles) { p in
-                HomeParticleView(particle: p, color: dominant)
-            }
+            // Partiklar — Canvas-baserad, ett enda GPU-pass
+            ParticleCanvasView(particles: particles, dominantColor: dominant)
+                .frame(width: 340, height: 340)
 
             // Ring 3 — yttre, långsam
             Circle()
@@ -158,15 +183,27 @@ struct EonPulseHomeView: View {
                         .frame(width: 136, height: 136)
                         .shadow(color: dominant.opacity(0.6), radius: 20)
 
-                    Image(systemName: "brain.head.profile")
-                        .font(.system(size: 42, weight: .ultraLight))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [dominant, Color(hex: "#38BDF8")],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            )
+                    // Hjärna eller öga beroende på läge
+                    if showingSelfAwareness {
+                        EyeOrbView(
+                            pupilOffset: eyePupilOffset,
+                            blinkScale: eyeBlinkScale,
+                            glowPulse: eyeGlowPulse,
+                            dominant: dominant
                         )
-                        .shadow(color: dominant.opacity(0.9), radius: 14)
+                        .transition(.opacity.combined(with: .scale(scale: 0.7)))
+                    } else {
+                        Image(systemName: "brain.head.profile")
+                            .font(.system(size: 42, weight: .ultraLight))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [dominant, Color(hex: "#38BDF8")],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .shadow(color: dominant.opacity(0.9), radius: 14)
+                            .transition(.opacity.combined(with: .scale(scale: 0.7)))
+                    }
 
                     // Aktivitetsdottar runt kärnan
                     ForEach(0..<7, id: \.self) { i in
@@ -183,20 +220,22 @@ struct EonPulseHomeView: View {
                             .rotationEffect(.degrees(angle + ring1 * 0.06))
                     }
 
-                    // Liten "log"-indikator längst ner på kärnan
+                    // Liten indikator längst ner på kärnan
                     VStack {
                         Spacer()
-                        Text("FULL-LOG")
+                        Text(showingSelfAwareness ? "MEDVETANDE" : "FULL-LOG")
                             .font(.system(size: 6, weight: .black, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.35))
                             .tracking(1)
                             .padding(.bottom, 14)
+                            .animation(.none, value: showingSelfAwareness)
                     }
                     .frame(width: 136, height: 136)
                 }
             }
             .buttonStyle(.plain)
             .scaleEffect(orbPulse)
+            .animation(.easeInOut(duration: 0.6), value: showingSelfAwareness)
             .sheet(isPresented: $showFullLog) {
                 FullLogView()
                     .environmentObject(brain)
@@ -209,7 +248,7 @@ struct EonPulseHomeView: View {
 
     // MARK: - Titel + Ticker
 
-    func titleSection(t: Double) -> some View {
+    var titleSection: some View {
         let dominant = dominantColor
         let label = brain.autonomousProcessLabel
         return VStack(spacing: 10) {
@@ -281,28 +320,43 @@ struct EonPulseHomeView: View {
             .onAppear { startFlipTimer() }
             .onDisappear { flipTimer?.invalidate() }
 
-            // Process-label — uppdateras via TimelineView
+            // Process-label — filtreras vid självmedvetenhet
             HStack(spacing: 8) {
                 Circle()
-                    .fill(dominant)
+                    .fill(showingSelfAwareness ? Color(hex: "#A78BFA") : dominant)
                     .frame(width: 5, height: 5)
-                    .shadow(color: dominant.opacity(0.9), radius: 5)
+                    .shadow(color: (showingSelfAwareness ? Color(hex: "#A78BFA") : dominant).opacity(0.9), radius: 5)
                     .scaleEffect(orbPulse)
-                Text(label)
+                Text(showingSelfAwareness ? awarenessEventLabel : label)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(dominant.opacity(0.9))
+                    .foregroundStyle((showingSelfAwareness ? Color(hex: "#A78BFA") : dominant).opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .id(label) // tvingar omritning när label ändras
+                    .id(showingSelfAwareness ? awarenessEventLabel : label)
+                    .animation(.easeInOut(duration: 0.4), value: showingSelfAwareness)
             }
             .padding(.horizontal, 18).padding(.vertical, 9)
             .background(
                 Capsule()
-                    .fill(dominant.opacity(0.08))
-                    .overlay(Capsule().strokeBorder(dominant.opacity(0.30), lineWidth: 0.7))
+                    .fill((showingSelfAwareness ? Color(hex: "#A78BFA") : dominant).opacity(0.08))
+                    .overlay(Capsule().strokeBorder((showingSelfAwareness ? Color(hex: "#A78BFA") : dominant).opacity(0.30), lineWidth: 0.7))
             )
             .padding(.horizontal, 36)
         }
+    }
+
+    // Hämta senaste självmedvetenhet-event från thoughtStream
+    var awarenessEventLabel: String {
+        let ce = ConsciousnessEngine.shared
+        if !ce.currentSelfReflection.isEmpty {
+            let s = ce.currentSelfReflection
+            return String(s.prefix(60)) + (s.count > 60 ? "..." : "")
+        }
+        if let thought = ce.thoughtStream.last {
+            let s = thought.content
+            return String(s.prefix(60)) + (s.count > 60 ? "..." : "")
+        }
+        return "Självmedvetenhet aktiv..."
     }
 
     var consciousnessShortLabel: String {
@@ -316,38 +370,85 @@ struct EonPulseHomeView: View {
     }
 
     func startFlipTimer() {
-        // Stagger flip initiation
         flipTimer?.invalidate()
-
-        // Use DispatchQueue for repeating flip cycles
         func runFlipCycle() {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
-                autonomFlipped.toggle()
-            }
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) { autonomFlipped.toggle() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
-                    levandeFlipped.toggle()
-                }
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) { levandeFlipped.toggle() }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
-                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
-                    intelligentFlipped.toggle()
-                }
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) { intelligentFlipped.toggle() }
             }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { runFlipCycle() }
+        flipTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { _ in runFlipCycle() }
+    }
 
-        // Initial flip after 3 seconds, then repeat every 6 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            runFlipCycle()
-        }
-        flipTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { _ in
-            runFlipCycle()
+    // MARK: - Awareness Flip Timer (30s kognition, 20s självmedvetenhet)
+
+    func startAwarenessFlipTimer() {
+        awarenessFlipTimer?.invalidate()
+        // Starta med kognition, flippa till självmedvetenhet efter 30s, tillbaka efter 20s
+        awarenessFlipTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: 0.7)) {
+                showingSelfAwareness = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20.0) {
+                withAnimation(.easeInOut(duration: 0.7)) {
+                    showingSelfAwareness = false
+                }
+            }
         }
     }
 
-    // MARK: - Live Monologue
+    // MARK: - Öga-animation
+
+    func startEyeAnimation() {
+        eyeLookTimer?.invalidate()
+        // Ögat tittar runt slumpmässigt
+        eyeLookTimer = Timer.scheduledTimer(withTimeInterval: Double.random(in: 0.8...2.2), repeats: true) { _ in
+            let maxOffset: CGFloat = 8
+            let newOffset = CGSize(
+                width: CGFloat.random(in: -maxOffset...maxOffset),
+                height: CGFloat.random(in: -maxOffset...maxOffset)
+            )
+            withAnimation(.easeInOut(duration: 0.35)) {
+                eyePupilOffset = newOffset
+            }
+            // Blinka ibland
+            if Double.random(in: 0...1) < 0.25 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.1...0.5)) {
+                    withAnimation(.easeInOut(duration: 0.08)) { eyeBlinkScale = 0.05 }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        withAnimation(.easeInOut(duration: 0.12)) { eyeBlinkScale = 1.0 }
+                    }
+                }
+            }
+            // Pulsera glöd
+            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
+                eyeGlowPulse = 1.15
+            }
+        }
+    }
+
+    // MARK: - Live Monologue / Självmedvetenhet
 
     var monologueSection: some View {
+        ZStack {
+            // Kognition-sidan
+            cognitionPanel
+                .opacity(showingSelfAwareness ? 0 : 1)
+                .rotation3DEffect(.degrees(showingSelfAwareness ? -90 : 0), axis: (x: 0, y: 1, z: 0))
+
+            // Självmedvetenhet-sidan
+            selfAwarenessPanel
+                .opacity(showingSelfAwareness ? 1 : 0)
+                .rotation3DEffect(.degrees(showingSelfAwareness ? 0 : 90), axis: (x: 0, y: 1, z: 0))
+        }
+        .animation(.easeInOut(duration: 0.6), value: showingSelfAwareness)
+    }
+
+    var cognitionPanel: some View {
         let lines = brain.innerMonologue.suffix(6)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
@@ -403,7 +504,6 @@ struct EonPulseHomeView: View {
             }
             .padding(.bottom, 6)
 
-            // Knapp: Visa hela loggen
             Button {
                 showCognitionLog = true
             } label: {
@@ -426,7 +526,7 @@ struct EonPulseHomeView: View {
                 .background(Color(hex: "#34D399").opacity(0.05))
             }
             .sheet(isPresented: $showCognitionLog) {
-                CognitionLogView()
+                UnifiedLogView(initialTab: .cognition)
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
@@ -434,7 +534,145 @@ struct EonPulseHomeView: View {
         .background(glassCard(accent: Color(hex: "#34D399")))
     }
 
+    var selfAwarenessPanel: some View {
+        let ce = ConsciousnessEngine.shared
+        let thoughts = Array(ce.thoughtStream.suffix(5))
+        let reflection = ce.currentSelfReflection
+        let accentColor = Color(hex: "#A78BFA")
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                // Litet pulserande öga
+                ZStack {
+                    Circle()
+                        .fill(accentColor.opacity(0.2))
+                        .frame(width: 9, height: 9)
+                    Circle()
+                        .fill(accentColor)
+                        .frame(width: 5, height: 5)
+                }
+                .scaleEffect(orbPulse)
+                Text("LIVE SJÄLVMEDVETENHET")
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.35))
+                Spacer()
+                Text("Φ \(String(format: "%.2f", brain.phiValue))")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.2))
+            }
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
+
+            Rectangle()
+                .fill(accentColor.opacity(0.08))
+                .frame(height: 0.5)
+                .padding(.horizontal, 14)
+
+            // Självreflektion
+            if !reflection.isEmpty {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "quote.bubble.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(accentColor.opacity(0.8))
+                        .frame(width: 18, height: 18)
+                        .background(Circle().fill(accentColor.opacity(0.12)))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("SJÄLVREFLEKTION")
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundStyle(accentColor.opacity(0.7))
+                        Text(reflection)
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.88))
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14).padding(.vertical, 8)
+
+                Rectangle()
+                    .fill(accentColor.opacity(0.05))
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 14)
+            }
+
+            // Tankeström
+            VStack(spacing: 0) {
+                ForEach(Array(thoughts.reversed().enumerated()), id: \.offset) { item in
+                    let (idx, thought) = item
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: thoughtIcon(thought.category.rawValue))
+                            .font(.system(size: 9))
+                            .foregroundStyle(thoughtColor(thought.category.rawValue))
+                            .frame(width: 18, height: 18)
+                            .background(Circle().fill(thoughtColor(thought.category.rawValue).opacity(0.12)))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(thought.category.rawValue.uppercased())
+                                .font(.system(size: 8, weight: .black, design: .monospaced))
+                                .foregroundStyle(thoughtColor(thought.category.rawValue).opacity(0.7))
+                            Text(thought.content)
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundStyle(idx == 0 ? .white.opacity(0.9) : .white.opacity(max(0.2, 0.55 - Double(idx) * 0.08)))
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                }
+            }
+            .padding(.bottom, 6)
+
+            // Senast läst artikel
+            if !ce.lastReadArticleTitle.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "book.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(accentColor.opacity(0.6))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Läser: \(ce.lastReadArticleTitle)")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(accentColor.opacity(0.8))
+                            .lineLimit(1)
+                        if !ce.lastReadArticleInsight.isEmpty {
+                            Text(ce.lastReadArticleInsight)
+                                .font(.system(size: 9, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.4))
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(accentColor.opacity(0.04))
+            }
+        }
+        .background(glassCard(accent: accentColor))
+    }
+
     // MARK: - Helpers
+
+    func thoughtIcon(_ type: String) -> String {
+        switch type.lowercased() {
+        case "observation": return "eye"
+        case "question":    return "questionmark.circle"
+        case "insight":     return "lightbulb"
+        case "reflection":  return "arrow.triangle.2.circlepath"
+        case "goal":        return "target"
+        default:            return "bubble.left"
+        }
+    }
+
+    func thoughtColor(_ type: String) -> Color {
+        switch type.lowercased() {
+        case "observation": return Color(hex: "#38BDF8")
+        case "question":    return Color(hex: "#FBBF24")
+        case "insight":     return Color(hex: "#34D399")
+        case "reflection":  return Color(hex: "#A78BFA")
+        case "goal":        return Color(hex: "#F472B6")
+        default:            return Color(hex: "#A78BFA")
+        }
+    }
 
     var dominantColor: Color {
         let sorted = brain.engineActivity.sorted { $0.value > $1.value }
@@ -494,57 +732,155 @@ struct EonPulseHomeView: View {
         withAnimation(.linear(duration: 25).repeatForever(autoreverses: false)) { ring3 = 360 }
         withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true)) { orbPulse = 1.07 }
     }
-
 }
 
-// MARK: - HomeParticle
+// MARK: - EyeOrbView — Levande öga för självmedvetenhetsläge
+
+struct EyeOrbView: View {
+    let pupilOffset: CGSize
+    let blinkScale: CGFloat
+    let glowPulse: CGFloat
+    let dominant: Color
+
+    private let eyeColor = Color(hex: "#A78BFA")
+
+    var body: some View {
+        ZStack {
+            // Yttre glöd
+            Ellipse()
+                .fill(
+                    RadialGradient(
+                        colors: [eyeColor.opacity(0.4), Color.clear],
+                        center: .center, startRadius: 0, endRadius: 30
+                    )
+                )
+                .frame(width: 60, height: 40)
+                .blur(radius: 8)
+                .scaleEffect(glowPulse)
+
+            // Ögonvita
+            Ellipse()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.white.opacity(0.92), Color.white.opacity(0.75)],
+                        center: .center, startRadius: 0, endRadius: 22
+                    )
+                )
+                .frame(width: 46, height: 30)
+                .scaleEffect(CGSize(width: 1.0, height: blinkScale))
+                .shadow(color: eyeColor.opacity(0.6), radius: 8)
+
+            // Iris
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [eyeColor, Color(hex: "#5B21B6"), Color(hex: "#1E0A3E")],
+                        center: .center, startRadius: 0, endRadius: 12
+                    )
+                )
+                .frame(width: 22, height: 22)
+                .offset(pupilOffset)
+                .scaleEffect(CGSize(width: 1.0, height: blinkScale))
+
+            // Pupill
+            Circle()
+                .fill(Color.black)
+                .frame(width: 10, height: 10)
+                .offset(pupilOffset)
+                .scaleEffect(CGSize(width: 1.0, height: blinkScale))
+
+            // Ljusreflex
+            Circle()
+                .fill(Color.white.opacity(0.85))
+                .frame(width: 4, height: 4)
+                .offset(CGSize(
+                    width: pupilOffset.width + 4,
+                    height: pupilOffset.height - 4
+                ))
+                .scaleEffect(CGSize(width: 1.0, height: blinkScale))
+
+            // Ögonlock-linjer
+            Ellipse()
+                .trim(from: 0, to: 0.5)
+                .stroke(eyeColor.opacity(0.6), lineWidth: 1.5)
+                .frame(width: 46, height: 30)
+                .scaleEffect(CGSize(width: 1.0, height: blinkScale))
+
+            Ellipse()
+                .trim(from: 0.5, to: 1.0)
+                .stroke(eyeColor.opacity(0.4), lineWidth: 1.0)
+                .frame(width: 46, height: 30)
+                .scaleEffect(CGSize(width: 1.0, height: blinkScale))
+        }
+        .frame(width: 60, height: 50)
+    }
+}
+
+// MARK: - HomeParticle (Canvas-baserad — ett enda GPU-pass)
 
 struct HomeParticle: Identifiable {
     let id = UUID()
     let x: CGFloat; let y: CGFloat
-    let size: CGFloat; let opacity: Double; let color: Color
+    let size: CGFloat; let baseOpacity: Double
+    let colorIndex: Int
+    let phaseOffset: Double
+    let driftX: CGFloat; let driftY: CGFloat
 
     static func generate(count: Int) -> [HomeParticle] {
-        let colors: [Color] = [
-            Color(hex: "#7C3AED"), Color(hex: "#38BDF8"),
-            Color(hex: "#34D399"), Color(hex: "#A78BFA"), Color(hex: "#F472B6")
-        ]
-        return (0..<count).map { _ in
+        return (0..<count).map { i in
             HomeParticle(
                 x: CGFloat.random(in: -170...170),
                 y: CGFloat.random(in: -170...170),
                 size: CGFloat.random(in: 1.5...4.5),
-                opacity: Double.random(in: 0.15...0.6),
-                color: colors.randomElement()!
+                baseOpacity: Double.random(in: 0.15...0.55),
+                colorIndex: Int.random(in: 0...4),
+                phaseOffset: Double(i) / Double(count) * .pi * 2,
+                driftX: CGFloat.random(in: -14...14),
+                driftY: CGFloat.random(in: -14...14)
             )
         }
     }
 }
 
-struct HomeParticleView: View {
-    let particle: HomeParticle
-    let color: Color
-    @State private var offset: CGSize = .zero
-    @State private var opacity: Double = 0
+// Canvas-renderer: ritar alla partiklar i ett enda GPU-pass.
+struct ParticleCanvasView: View {
+    let particles: [HomeParticle]
+    let dominantColor: Color
+
+    @State private var phase: Double = 0
+
+    private let colors: [Color] = [
+        Color(hex: "#7C3AED"), Color(hex: "#38BDF8"),
+        Color(hex: "#34D399"), Color(hex: "#A78BFA"), Color(hex: "#F472B6")
+    ]
 
     var body: some View {
-        Circle()
-            .fill(particle.color)
-            .frame(width: particle.size, height: particle.size)
-            .opacity(opacity)
-            .blur(radius: particle.size > 3 ? 1 : 0)
-            .offset(x: particle.x + offset.width, y: particle.y + offset.height)
-            .onAppear {
-                opacity = particle.opacity
-                withAnimation(.easeInOut(duration: Double.random(in: 3.5...7.0)).repeatForever(autoreverses: true)) {
-                    offset = CGSize(width: CGFloat.random(in: -18...18), height: CGFloat.random(in: -18...18))
-                    opacity = particle.opacity * Double.random(in: 0.25...1.0)
-                }
+        Canvas { ctx, size in
+            let cx = size.width / 2
+            let cy = size.height / 2
+            for p in particles {
+                let t = phase + p.phaseOffset
+                let ox = p.driftX * CGFloat(sin(t * 0.7))
+                let oy = p.driftY * CGFloat(cos(t * 0.5))
+                let opacity = p.baseOpacity * (0.5 + 0.5 * sin(t * 1.1))
+                let color = colors[p.colorIndex % colors.count].opacity(opacity)
+                let rect = CGRect(
+                    x: cx + p.x + ox - p.size / 2,
+                    y: cy + p.y + oy - p.size / 2,
+                    width: p.size, height: p.size
+                )
+                ctx.fill(Path(ellipseIn: rect), with: .color(color))
             }
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
+                phase = .pi * 2
+            }
+        }
     }
 }
 
-// MARK: - FlipMeterView — flippar regelbundet mellan framsida (label) och baksida (mätning)
+// MARK: - FlipMeterView
 
 struct FlipMeterView: View {
     let frontLabel: String
@@ -555,7 +891,6 @@ struct FlipMeterView: View {
 
     var body: some View {
         ZStack {
-            // Front side
             HStack(spacing: 5) {
                 Circle()
                     .fill(frontColor)
@@ -569,7 +904,6 @@ struct FlipMeterView: View {
             .opacity(isFlipped ? 0 : 1)
             .rotation3DEffect(.degrees(isFlipped ? 180 : 0), axis: (x: 1, y: 0, z: 0))
 
-            // Back side
             backContent
                 .opacity(isFlipped ? 1 : 0)
                 .rotation3DEffect(.degrees(isFlipped ? 0 : -180), axis: (x: 1, y: 0, z: 0))

@@ -2,7 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- App Identity -->
 	<key>CFBundleName</key>
 	<string>Eon-Y</string>
 	<key>CFBundleDisplayName</key>
@@ -21,8 +20,6 @@
 	<string>sv</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-
-	<!-- UI Configuration -->
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIApplicationSceneManifest</key>
@@ -47,17 +44,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>UIRequiresFullScreen</key>
-	<false/>
-
-	<!-- Background Modes — KRÄVS för BGProcessingTask -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>
 		<string>fetch</string>
 	</array>
-
-	<!-- BGTask-identifierare — ALLA 10 måste finnas här -->
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.eon.curiosity</string>
@@ -71,8 +62,6 @@
 		<string>com.eon.eval</string>
 		<string>com.eon.lora-training</string>
 	</array>
-
-	<!-- Nätverkssäkerhet — tillåter Gemini API + Språkbanken -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -95,12 +84,12 @@
 			</dict>
 		</dict>
 	</dict>
-
-	<!-- Integritetsbeskrivningar (krävs av App Store) -->
 	<key>NSUserTrackingUsageDescription</key>
 	<string>Eon använder inte spårning. All data stannar på din enhet.</string>
-
-	<!-- Lokalisering -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Eon använder mikrofonen för röstinmatning.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Eon använder taligenkänning för att förstå dina röstkommandon.</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>sv</string>

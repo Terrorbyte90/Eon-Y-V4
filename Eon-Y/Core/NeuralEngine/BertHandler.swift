@@ -175,7 +175,7 @@ actor BertHandler {
 
 // MARK: - BertTokenizer (förenklad WordPiece)
 
-class BertTokenizer {
+final class BertTokenizer: @unchecked Sendable {
     private var vocab: [String: Int] = [:]
     private var reverseVocab: [Int: String] = [:]
 
@@ -184,13 +184,13 @@ class BertTokenizer {
     let padToken = 0
     let unkToken = 100
 
-    init() {
+    nonisolated init() {
         loadVocab()
     }
 
-    private func loadVocab() {
-        guard let url = Bundle.main.url(forResource: "bert_vocab", withExtension: "txt"),
-              let content = try? String(contentsOf: url) else {
+    nonisolated private func loadVocab() {
+        guard let url = Bundle(for: BertTokenizer.self).url(forResource: "bert_vocab", withExtension: "txt"),
+              let content = try? String(contentsOf: url, encoding: .utf8) else {
             print("[BERT Tokenizer] vocab.txt ej hittad")
             return
         }

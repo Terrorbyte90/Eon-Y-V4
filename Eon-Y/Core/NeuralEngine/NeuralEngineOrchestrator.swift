@@ -21,6 +21,11 @@ actor NeuralEngineOrchestrator {
     // Modell-version för cache-invalidering
     private var modelVersion: Int = 1
 
+    // Inaktivitetstimers för lazy unload
+    private var lastBertUse: Date = .distantPast
+    private var lastGptUse: Date = .distantPast
+    private var idleCheckTask: Task<Void, Never>?
+
     private init() {}
 
     // MARK: - Loading
@@ -33,10 +38,12 @@ actor NeuralEngineOrchestrator {
             let bert = BertHandler()
             try await bert.load()
             bertHandler = bert
+            lastBertUse = Date()
 
             let gpt = GptSw3Handler()
             try await gpt.load()
             gptHandler = gpt
+            lastGptUse = Date()
 
             isLoaded = true
             print("[ANE] Alla modeller laddade ✓")
@@ -44,6 +51,61 @@ actor NeuralEngineOrchestrator {
             loadError = error.localizedDescription
             print("[ANE] Laddningsfel: \(error)")
         }
+
+        startIdleCheck()
+    }
+
+    // MARK: - Idle unload loop
+
+    private func startIdleCheck() {
+        idleCheckTask?.cancel()
+        idleCheckTask = Task(priority: .background) {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 120_000_000_000) // var 2:e minut
+                await self.unloadIfIdle()
+            }
+        }
+    }
+
+    func unloadIfIdle() async {
+        let now = Date()
+        if bertHandler != nil && now.timeIntervalSince(lastBertUse) > 300 {
+            bertHandler = nil
+            print("[ANE] BERT avlastad — inaktiv >5 min")
+            RunSessionLogger.shared.log("BERT avlastad (inaktiv >5 min)")
+        }
+        if gptHandler != nil && now.timeIntervalSince(lastGptUse) > 600 {
+            gptHandler = nil
+            isLoaded = false
+            print("[ANE] GPT-SW3 avlastad — inaktiv >10 min")
+            RunSessionLogger.shared.log("GPT-SW3 avlastad (inaktiv >10 min)")
+        }
+    }
+
+    var bertLoaded: Bool { bertHandler != nil }
+    var gptLoaded: Bool { gptHandler != nil }
+
+    // Ladda om BERT om avlastad
+    private func ensureBert() async {
+        guard bertHandler == nil else { return }
+        print("[ANE] Laddar om BERT...")
+        RunSessionLogger.shared.log("BERT laddas om (lazy reload)")
+        let bert = BertHandler()
+        try? await bert.load()
+        bertHandler = bert
+        lastBertUse = Date()
+    }
+
+    // Ladda om GPT om avlastad
+    private func ensureGpt() async {
+        guard gptHandler == nil else { return }
+        print("[ANE] Laddar om GPT-SW3...")
+        RunSessionLogger.shared.log("GPT-SW3 laddas om (lazy reload)")
+        let gpt = GptSw3Handler()
+        try? await gpt.load()
+        gptHandler = gpt
+        isLoaded = true
+        lastGptUse = Date()
     }
 
     // MARK: - Embedding (KB-BERT)
@@ -52,6 +114,9 @@ actor NeuralEngineOrchestrator {
         // Hash-baserad cache-nyckel — förhindrar kollisioner
         let cacheKey = (text + "\(modelVersion)").hashValue
         if let cached = embeddingCache[cacheKey] { return cached }
+
+        await ensureBert()
+        lastBertUse = Date()
 
         guard let bert = bertHandler else {
             return fallbackEmbed(text)
@@ -100,6 +165,8 @@ actor NeuralEngineOrchestrator {
     // MARK: - Generation (GPT-SW3)
 
     func generate(prompt: String, maxTokens: Int = 200, temperature: Float = 0.7) async -> String {
+        await ensureGpt()
+        lastGptUse = Date()
         guard let gpt = gptHandler else {
             return await fallbackGenerate(prompt)
         }
@@ -109,7 +176,9 @@ actor NeuralEngineOrchestrator {
     func generateStream(prompt: String, maxTokens: Int = 200, temperature: Float = 0.7) -> AsyncStream<String> {
         AsyncStream { continuation in
             Task {
-                guard let gpt = gptHandler else {
+                await self.ensureGpt()
+                self.lastGptUse = Date()
+                guard let gpt = await self.gptHandler else {
                     let fallback = await self.fallbackGenerate(prompt)
                     for word in fallback.split(separator: " ") {
                         continuation.yield(String(word) + " ")
@@ -129,6 +198,8 @@ actor NeuralEngineOrchestrator {
     // MARK: - BERT-PLL (Pseudo-Log-Likelihood för validering)
 
     func bertPLL(sentence: String) async -> Double {
+        await ensureBert()
+        lastBertUse = Date()
         guard let bert = bertHandler else { return 0.5 }
         return await bert.pseudoLogLikelihood(sentence)
     }
@@ -136,6 +207,8 @@ actor NeuralEngineOrchestrator {
     // MARK: - NER (Named Entity Recognition via BERT)
 
     func extractEntities(from text: String) async -> [ExtractedEntity] {
+        await ensureBert()
+        lastBertUse = Date()
         guard let bert = bertHandler else { return [] }
         return await bert.extractEntities(from: text)
     }
@@ -153,9 +226,22 @@ actor NeuralEngineOrchestrator {
 
     // MARK: - Fallbacks (när modeller inte är laddade)
 
+    // C2: Cachat NLEmbedding-objekt — töms vid termisk stress för att frigöra ANE/RAM
+    private var cachedSwedishEmbedding: NLEmbedding?
+
     private func fallbackEmbed(_ text: String) -> [Float] {
-        // NLEmbedding som fallback
-        let embedding = NLEmbedding.wordEmbedding(for: .swedish)
+        // C2: Returnera nollvektor vid termisk stress — undviker ANE-last
+        let thermal = ProcessInfo.processInfo.thermalState
+        if thermal == .serious || thermal == .critical {
+            cachedSwedishEmbedding = nil
+            return [Float](repeating: 0, count: 768)
+        }
+
+        // Lazy-ladda NLEmbedding och cacha referensen
+        if cachedSwedishEmbedding == nil {
+            cachedSwedishEmbedding = NLEmbedding.wordEmbedding(for: .swedish)
+        }
+        let embedding = cachedSwedishEmbedding
         let words = text.split(separator: " ").prefix(10)
         var result = [Float](repeating: 0, count: 768)
         var count = 0

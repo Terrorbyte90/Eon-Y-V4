@@ -26,6 +26,11 @@ final class CognitionLogger {
         }
     }
 
+    // Convenience alias — används av ConsciousnessEngine och andra system
+    func log(_ text: String, type: String = "TANKE") {
+        append(text: text, type: type)
+    }
+
     // Lägg till en rad i loggen (asynkront, blockerar inte UI)
     func append(text: String, type: String = "TANKE") {
         queue.async { [weak self] in

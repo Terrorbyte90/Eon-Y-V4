@@ -620,7 +620,7 @@ struct CognitiveProcess: Identifiable {
     enum ProcessStatus { case running, completed, failed }
 }
 
-struct IntelligenceGap: Identifiable {
+struct IntelligenceGap: Identifiable, Sendable {
     let id = UUID()
     let dimension: CognitiveDimension
     let currentLevel: Double
@@ -629,8 +629,8 @@ struct IntelligenceGap: Identifiable {
     let blockedDimensions: [CognitiveDimension]
     let suggestedActions: [String]
 
-    var gapSize: Double { targetLevel - currentLevel }
-    var priorityLabel: String {
+    nonisolated var gapSize: Double { targetLevel - currentLevel }
+    nonisolated var priorityLabel: String {
         urgency > 3.0 ? "KRITISK" : urgency > 2.0 ? "HÖG" : urgency > 1.0 ? "MEDEL" : "LÅG"
     }
 }

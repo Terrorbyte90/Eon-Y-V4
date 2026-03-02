@@ -6,7 +6,13 @@ struct ProfileRootView: View {
     @EnvironmentObject var brain: EonBrain
     @State private var selectedSection = 0
 
-    private let sections = ["Profil", "Inställningar", "Resurser"]
+    private let sections = ["Profil", "Inställningar", "Loggar", "Om Eon"]
+    private let sectionColors: [Color] = [
+        Color(hex: "#F472B6"),
+        Color(hex: "#A78BFA"),
+        Color(hex: "#38BDF8"),
+        Color(hex: "#34D399"),
+    ]
 
     var body: some View {
         ZStack {
@@ -15,20 +21,20 @@ struct ProfileRootView: View {
             VStack(spacing: 0) {
                 profileHeader
 
-                // Custom segmented control
+                // Custom segmented control — 4 sektioner
                 HStack(spacing: 4) {
                     ForEach(sections.indices, id: \.self) { i in
                         Button {
                             withAnimation(.spring(response: 0.3)) { selectedSection = i }
                         } label: {
                             Text(sections[i])
-                                .font(.system(size: 12, weight: selectedSection == i ? .semibold : .regular, design: .rounded))
-                                .foregroundStyle(selectedSection == i ? Color(hex: "#F472B6") : Color.white.opacity(0.38))
+                                .font(.system(size: 11, weight: selectedSection == i ? .semibold : .regular, design: .rounded))
+                                .foregroundStyle(selectedSection == i ? sectionColors[i] : Color.white.opacity(0.38))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(selectedSection == i ? Color(hex: "#F472B6").opacity(0.14) : Color.clear)
+                                        .fill(selectedSection == i ? sectionColors[i].opacity(0.14) : Color.clear)
                                 )
                         }
                     }
@@ -38,15 +44,29 @@ struct ProfileRootView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        switch selectedSection {
-                        case 0: profileSection
-                        case 1: SettingsView()
-                        case 2: ResourceView()
-                        default: profileSection
+                // Sektion-innehåll
+                switch selectedSection {
+                case 0:
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            profileSection
+                            Color.clear.frame(height: 20)
                         }
-                        Color.clear.frame(height: 20)
+                    }
+                case 1:
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            SettingsView()
+                            Color.clear.frame(height: 20)
+                        }
+                    }
+                case 2:
+                    UnifiedLogView()
+                case 3:
+                    AboutEonView(embedded: true)
+                default:
+                    ScrollView(showsIndicators: false) {
+                        profileSection
                     }
                 }
             }
@@ -111,12 +131,14 @@ struct ProfileRootView: View {
                 .padding(.top, 16)
                 .padding(.bottom, 10)
             } else {
+                let titles = ["Din profil", "Inställningar", "Loggar", "Om Eon"]
+                let subtitles = ["Eons bild av dig", "Konfigurera Eon", "All aktivitetsloggning", "Eons arkitektur"]
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(["Din profil", "Inställningar", "Resurser"][selectedSection])
+                        Text(titles[min(selectedSection, titles.count - 1)])
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
-                        Text(["Eons bild av dig", "Konfigurera Eon", "Systemprestanda"][selectedSection])
+                        Text(subtitles[min(selectedSection, subtitles.count - 1)])
                             .font(.system(size: 12, design: .rounded))
                             .foregroundStyle(Color.white.opacity(0.45))
                     }
@@ -162,7 +184,7 @@ struct ProfileRootView: View {
         VStack(spacing: 14) {
             UserIdentityCard()
             CommunicationProfileView(style: userProfile.communicationStyle)
-            DomainKnowledgeHeatmap(domains: userProfile.domainKnowledge)
+            InterestRadarCard(axes: userProfile.interestRadarData, conversations: userProfile.totalConversations, sessions: userProfile.totalSessions)
             ProfileMemoryTimeline(memories: userProfile.topMemories)
         }
         .padding(.horizontal, 16)
@@ -340,41 +362,90 @@ struct CommunicationProfileView: View {
     }
 }
 
-// MARK: - Domain Knowledge Heatmap
+// MARK: - Interest Radar Card
 
-struct DomainKnowledgeHeatmap: View {
-    let domains: [DomainKnowledge]
+struct InterestRadarCard: View {
+    let axes: [RadarAxis]
+    let conversations: Int
+    let sessions: Int
+
+    private let accentColor = Color(hex: "#06B6D4")
 
     var body: some View {
-        GlassCard(tint: Color(hex: "#06B6D4")) {
-            VStack(alignment: .leading, spacing: 12) {
-                PanelHeader(icon: "square.grid.3x3.fill", title: "Kunskapsnivå per domän", color: Color(hex: "#06B6D4")) { EmptyView() }
+        GlassCard(tint: accentColor) {
+            VStack(alignment: .leading, spacing: 14) {
+                PanelHeader(icon: "chart.bar.xaxis", title: "Intressen & Aktivitet", color: accentColor) { EmptyView() }
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    ForEach(domains) { domain in
-                        VStack(spacing: 4) {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(domain.estimatedLevel.color.opacity(0.75))
-                                .frame(height: 38)
-                                .overlay(
-                                    Text(domain.domain)
-                                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                        .foregroundStyle(.white)
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 4)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .strokeBorder(domain.estimatedLevel.color, lineWidth: 0.5)
-                                )
-                            Text(domain.estimatedLevel.label)
-                                .font(.system(size: 9, design: .rounded))
-                                .foregroundStyle(Color.white.opacity(0.35))
+                // Aktivitetsöversikt
+                HStack(spacing: 0) {
+                    activityStat(value: "\(conversations)", label: "Samtal", icon: "bubble.left.and.bubble.right.fill", color: accentColor)
+                    Divider().background(Color.white.opacity(0.1)).frame(height: 36)
+                    activityStat(value: "\(sessions)", label: "Sessioner", icon: "calendar.badge.clock", color: Color(hex: "#A78BFA"))
+                    Divider().background(Color.white.opacity(0.1)).frame(height: 36)
+                    activityStat(value: topInterest, label: "Topintresse", icon: "star.fill", color: Color(hex: "#FBBF24"))
+                }
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.white.opacity(0.03))
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5))
+                )
+
+                // Intresseaxlar som horisontella staplar
+                VStack(spacing: 8) {
+                    ForEach(sortedAxes.prefix(6)) { axis in
+                        HStack(spacing: 10) {
+                            Text(axis.label)
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundStyle(Color.white.opacity(0.6))
+                                .frame(width: 72, alignment: .leading)
+
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.white.opacity(0.06))
+                                    Capsule()
+                                        .fill(LinearGradient(
+                                            colors: [accentColor.opacity(0.5), accentColor],
+                                            startPoint: .leading, endPoint: .trailing
+                                        ))
+                                        .frame(width: max(4, geo.size.width * axis.value))
+                                        .animation(.easeInOut(duration: 0.8), value: axis.value)
+                                }
+                            }
+                            .frame(height: 6)
+
+                            Text("\(Int(axis.value * 100))%")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(accentColor.opacity(0.7))
+                                .frame(width: 32, alignment: .trailing)
                         }
                     }
                 }
             }
         }
+    }
+
+    private var sortedAxes: [RadarAxis] {
+        axes.sorted { $0.value > $1.value }
+    }
+
+    private var topInterest: String {
+        sortedAxes.first?.label ?? "–"
+    }
+
+    private func activityStat(value: String, label: String, icon: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundStyle(color)
+            Text(value)
+                .font(.system(size: 14, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+            Text(label)
+                .font(.system(size: 9, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.38))
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

@@ -275,8 +275,6 @@ struct CategoryCard: View {
     let pulse: CGFloat
     let action: () -> Void
 
-    @State private var pressed = false
-
     var body: some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
@@ -333,15 +331,8 @@ struct CategoryCard: View {
                 .padding(.horizontal, 8)
             }
             .frame(height: 101)
-            .scaleEffect(pressed ? 0.93 : 1.0)
-            .animation(.spring(response: 0.2, dampingFraction: 0.65), value: pressed)
         }
-        .buttonStyle(.plain)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressed = true }
-                .onEnded { _ in pressed = false }
-        )
+        .buttonStyle(EonPressButtonStyle())
     }
 }
 
@@ -482,8 +473,6 @@ struct ArticleCard: View {
     let article: KnowledgeArticle
     let action: () -> Void
 
-    @State private var pressed = false
-
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 14) {
@@ -535,22 +524,15 @@ struct ArticleCard: View {
             .padding(14)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(pressed ? 0.06 : 0.04))
+                    .fill(Color.white.opacity(0.04))
                     .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.8)
                     )
             )
-            .scaleEffect(pressed ? 0.98 : 1.0)
-            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: pressed)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressed = true }
-                .onEnded { _ in pressed = false }
-        )
+        .buttonStyle(EonPressButtonStyle())
     }
 }
 
@@ -559,8 +541,6 @@ struct ArticleCard: View {
 struct ArticleRow: View {
     let article: KnowledgeArticle
     let action: () -> Void
-
-    @State private var pressed = false
 
     var body: some View {
         Button(action: action) {
@@ -598,19 +578,13 @@ struct ArticleRow: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .contentShape(Rectangle())
-            .background(pressed ? Color.white.opacity(0.04) : Color.clear)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(EonPressButtonStyle())
         .overlay(
             Rectangle()
                 .fill(Color.white.opacity(0.05))
                 .frame(height: 0.5),
             alignment: .bottom
-        )
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressed = true }
-                .onEnded { _ in pressed = false }
         )
     }
 }
@@ -691,15 +665,27 @@ struct ArticleDetailView: View {
                             .padding(.top, 8)
                         }
 
-                        // Eon-genererad badge — endast för autonomt skapade artiklar
+                        // Eon-genererad badge + kognitiv snapshot
                         if article.isAutonomous {
-                            HStack(spacing: 6) {
-                                Image(systemName: "brain.head.profile")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(article.domainColor)
-                                Text("Genererad autonomt av Eon")
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.3))
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "brain.head.profile")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(article.domainColor)
+                                    Text("Genererad autonomt av Eon")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.3))
+                                }
+                                if !article.eonStateSnapshot.isEmpty {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "waveform.path.ecg")
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.purple.opacity(0.5))
+                                        Text(article.eonStateSnapshot)
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(.white.opacity(0.2))
+                                    }
+                                }
                             }
                             .padding(.top, 4)
                         }
@@ -1045,13 +1031,17 @@ struct KnowledgeArticle: Identifiable {
     let domain: String; let source: String; let date: Date
     var isGenerating: Bool = false; var wordCount: Int = 0
     var generatedAt: Date = Date(); var isAutonomous: Bool = false
+    /// Eons kognitiva tillstånd vid skrivtillfället (Φ-värde, stadium etc.) — visas i ArticleDetailView
+    var eonStateSnapshot: String = ""
 
     init(id: UUID = UUID(), title: String, content: String, summary: String,
-         domain: String, source: String, date: Date, isAutonomous: Bool = false) {
+         domain: String, source: String, date: Date, isAutonomous: Bool = false,
+         eonStateSnapshot: String = "") {
         self.id = id
         self.title = title; self.content = content; self.summary = summary
         self.domain = domain; self.source = source; self.date = date
         self.isAutonomous = isAutonomous
+        self.eonStateSnapshot = eonStateSnapshot
     }
 
     var domainColor: Color {

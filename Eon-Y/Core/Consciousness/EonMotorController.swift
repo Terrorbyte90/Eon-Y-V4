@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 // MARK: - EonMotorController
 // Eon's self-regulation of cognitive motors. When "Eon-läge" is active,
@@ -121,7 +122,7 @@ final class EonMotorController: ObservableObject {
         let valence = bodyBudget.valence
         let arousal = bodyBudget.arousal
         let thermal = bodyBudget.thermalLevel
-        let cpu = bodyBudget.cpuLoad
+        _ = bodyBudget.cpuLoad
         let isCalibrating = bodyBudget.isCalibrating
         let paraLevel = bodyBudget.parasympatheticLevel
 

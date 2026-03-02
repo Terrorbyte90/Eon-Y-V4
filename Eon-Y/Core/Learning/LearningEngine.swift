@@ -20,17 +20,12 @@ actor LearningEngine {
     private var knowledgeGaps: [KnowledgeGap] = []
 
     private init() {
-        initializeCompetencies()
-    }
-
-    private func initializeCompetencies() {
         let domains = [
             "Morfologi", "Syntax", "Semantik", "Pragmatik", "Diskurs",
             "Kausalitet", "Analogibyggande", "Metakognition", "Epistemologi",
             "AI & Maskininlärning", "Kognitionsvetenskap", "Filosofi",
             "Historia", "Psykologi", "Naturvetenskap"
         ]
-        // Starta på 0.05 — verklig nivå byggs upp från faktisk data, inte slumpmässigt
         for domain in domains {
             competencyBook[domain] = DomainCompetency(
                 domain: domain,
@@ -39,7 +34,6 @@ actor LearningEngine {
                 lastStudied: Date(timeIntervalSince1970: 0)
             )
         }
-        // Ladda persisterade nivåer från UserDefaults om de finns
         for domain in domains {
             let key = "competency_\(domain)"
             let saved = UserDefaults.standard.double(forKey: key)
@@ -615,7 +609,7 @@ struct FSRSItem: Identifiable {
     var dueDate: Date
     var reviewCount: Int
     var lastReview: Date?
-    var priority: Double { stability * (1.0 - difficulty) }
+    nonisolated var priority: Double { stability * (1.0 - difficulty) }
 }
 
 struct ScheduledLesson: Identifiable {
@@ -646,7 +640,7 @@ struct LearningCycleResult {
 // MARK: - Array safe subscript
 
 extension Array {
-    subscript(safe index: Int) -> Element? {
+    nonisolated subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
 }

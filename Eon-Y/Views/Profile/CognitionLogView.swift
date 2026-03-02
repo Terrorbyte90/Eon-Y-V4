@@ -223,7 +223,7 @@ struct CognitionLogView: View {
     private func loadLog() async {
         isLoading = true
         let text = await Task.detached(priority: .userInitiated) {
-            CognitionLogger.shared.readAll()
+            await CognitionLogger.shared.readAll()
         }.value
         logText = text
         isLoading = false

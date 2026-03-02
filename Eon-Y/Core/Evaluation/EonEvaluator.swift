@@ -228,7 +228,7 @@ struct EvalRun: Identifiable {
         return completed.timeIntervalSince(startedAt)
     }
 
-    static let empty = EvalRun(startedAt: Date())
+    nonisolated static let empty = EvalRun(startedAt: .distantPast)
 }
 
 struct EvalTrend {
