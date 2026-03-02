@@ -101,12 +101,14 @@ final class ConsciousnessEngine: ObservableObject {
         self.brain = brain
         isRunning = true
 
-        // v6: ConsciousnessEngine kör alltid med .userInitiated — oberoende av termisk broms.
-        // Task 1: Consciousness metrics + body budget (.userInitiated, 8–10s)
-        tasks.append(Task(priority: .userInitiated) { await self.consciousnessMetricsLoop() })
+        // v8: Sänkt priority till .utility — beräkningar var 8-10s behöver inte
+        // .userInitiated som konkurrerar med UI-responsivitet. .utility garanterar
+        // fortfarande att de körs konsekvent utan att stjäla CPU från användarinteraktion.
+        // Task 1: Consciousness metrics + body budget (.utility, 8–10s)
+        tasks.append(Task(priority: .utility) { await self.consciousnessMetricsLoop() })
 
-        // Task 2: Thought generation + self-awareness goals (.userInitiated, 8–20s)
-        tasks.append(Task(priority: .userInitiated) { await self.thoughtAndGoalLoop() })
+        // Task 2: Thought generation + self-awareness goals (.utility, 8–20s)
+        tasks.append(Task(priority: .utility) { await self.thoughtAndGoalLoop() })
 
         // Task 3: Article reading loop (.background — lägre last, läser var 3:e min)
         tasks.append(Task(priority: .background) { await self.articleReadingLoop() })
@@ -117,7 +119,7 @@ final class ConsciousnessEngine: ObservableObject {
         // Task 5: Hardware sensing loop (CPU/GPU/ANE, 10s)
         tasks.append(Task(priority: .background) { await self.hardwareSensingLoop() })
 
-        print("[ConsciousnessEngine v7] Startat — alltid aktiv (.userInitiated) + tester + hårdvarukänsel ✓")
+        print("[ConsciousnessEngine v8] Startat — .utility priority + tester + hårdvarukänsel ✓")
     }
 
     // MARK: - Consciousness Test Loop (30 tests, 15-min intervals)
@@ -269,9 +271,11 @@ final class ConsciousnessEngine: ObservableObject {
             guard let brain = brain else { continue }
 
             // PCI-LZ: Perturbation Complexity Index
-            // Simulerar komplexitet i systemets svar — ökar med aktivitet
+            // Beräknar komplexitet i systemets svar — ökar med aktivitet
+            // Genuint stokastiskt brus istället för deterministisk sin-våg
             let activity = brain.engineActivity.values.reduce(0, +) / max(1, Double(brain.engineActivity.count))
-            let perturbResponse = activity * 0.5 + brain.phiValue * 0.3 + sin(t * 0.17) * 0.05
+            let stochasticNoise = Double.random(in: -0.05...0.05)
+            let perturbResponse = activity * 0.5 + brain.phiValue * 0.3 + stochasticNoise
             pciLZ = max(0.05, min(0.95, pciLZ * 0.85 + perturbResponse * 0.15))
 
             // Type-2 AUROC: Metakognitiv kalibrering
@@ -283,7 +287,8 @@ final class ConsciousnessEngine: ObservableObject {
             let langActivity = brain.engineActivity["language"] ?? 0.5
             let memActivity = brain.engineActivity["memory"] ?? 0.5
             let phaseLocking = (cogActivity * langActivity * memActivity)
-            plvGamma = max(0.05, min(0.95, plvGamma * 0.8 + pow(phaseLocking, 0.33) * 0.2 + sin(t * 0.23) * 0.03))
+            let plvNoise = Double.random(in: -0.03...0.03)
+            plvGamma = max(0.05, min(0.95, plvGamma * 0.8 + pow(phaseLocking, 0.33) * 0.2 + plvNoise))
 
             // Kuramoto Order Parameter: Global oscillatory coherence
             let syncFactors = brain.engineActivity.values.map { $0 }
@@ -330,8 +335,8 @@ final class ConsciousnessEngine: ObservableObject {
             phiProxy = brain.phiValue * 0.7 + moduleIntegration * 0.3
             moduleIntegration = plvGamma * 0.5 + kuramotoR * 0.5
 
-            // Predictive Processing
-            let newError = abs(sin(t * 0.31)) * 0.3 + (1.0 - brain.confidence) * 0.4
+            // Predictive Processing — genuint stokastiskt prediktionsfel
+            let newError = Double.random(in: 0...0.3) + (1.0 - brain.confidence) * 0.4
             predictionErrors.append(newError)
             // v4: Ring buffer — keep exactly 30 entries, drop oldest 1 at a time (no batch removal spikes)
             if predictionErrors.count > 30 { predictionErrors.removeFirst() }

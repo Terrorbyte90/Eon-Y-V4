@@ -92,12 +92,14 @@ final class CognitiveState: ObservableObject {
     // v3 Claude Edition: Added diminishing returns — high dimensions get smaller boosts.
     // This prevents runaway inflation where II reaches 0.96 while actual performance is grade F.
 
+    // Räknare för att throttla tunga beräkningar
+    private var updatesSinceLastRecalc: Int = 0
+    private var pendingPropagations: [(CognitiveDimension, Double)] = []
+
     func update(dimension: CognitiveDimension, delta: Double, source: String) {
         let old = dimensions[dimension] ?? 0.3
 
         // Diminishing returns: adapt based on growth phase.
-        // During positive growth: slightly relaxed diminishing (learning is accelerating)
-        // During stagnation/decline: standard diminishing
         let velocityBonus = growthVelocity > 0.0005 ? 0.15 : 0.0
         let diminishingFactor = max(0.1, (1.0 - old * 0.9) + velocityBonus)
         let effectiveDelta = delta * diminishingFactor
@@ -111,22 +113,36 @@ final class CognitiveState: ObservableObject {
             dimensionHistory[dimension]?.removeFirst(20)
         }
 
-        // Adaptive causal propagation factor:
-        // Stable system (many data points, low variance) → stronger propagation (0.18)
-        // Noisy system (few data points, high variance) → weaker propagation (0.10)
+        // Samla kausal propagation i batch istället för att köra omedelbart
+        let propagationFactor: Double = 0.12
         let historyCount = dimensionHistory[dimension]?.count ?? 0
-        let propagationFactor: Double
         if historyCount > 30 {
             let values = dimensionHistory[dimension] ?? []
             let mean = values.reduce(0, +) / Double(values.count)
             let variance = values.map { pow($0 - mean, 2) }.reduce(0, +) / Double(values.count)
-            let stability = max(0, 1.0 - sqrt(variance) * 5.0) // 0..1 where 1 = very stable
-            propagationFactor = 0.10 + stability * 0.08 // 0.10..0.18
+            let stability = max(0, 1.0 - sqrt(variance) * 5.0)
+            let factor = 0.10 + stability * 0.08
+            pendingPropagations.append((dimension, effectiveDelta * factor))
         } else {
-            propagationFactor = 0.12 // Conservative default for early system
+            pendingPropagations.append((dimension, effectiveDelta * propagationFactor))
         }
-        propagateCausalEffect(from: dimension, delta: effectiveDelta * propagationFactor)
 
+        updatesSinceLastRecalc += 1
+
+        // Kör tunga beräkningar i batch — max var 5:e uppdatering
+        // Undviker att varje litet delta triggar full propagation + II-omberäkning
+        if updatesSinceLastRecalc >= 5 {
+            flushPendingUpdates()
+        }
+    }
+
+    /// Kör alla ackumulerade propagationer och omberäkna II
+    private func flushPendingUpdates() {
+        for (dimension, delta) in pendingPropagations {
+            propagateCausalEffect(from: dimension, delta: delta)
+        }
+        pendingPropagations.removeAll()
+        updatesSinceLastRecalc = 0
         recalculateIntegratedIntelligence()
     }
 
@@ -370,6 +386,8 @@ final class CognitiveState: ObservableObject {
     private func startStateMonitor() async {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 12_000_000_000) // v4: 8s → 12s — further CPU reduction
+            // Flush eventuella pending propagations som inte nått batch-tröskeln
+            if !pendingPropagations.isEmpty { flushPendingUpdates() }
             updateFeedbackLoops()
             applyHomeostaticDecay()
             updateCognitiveLoad()

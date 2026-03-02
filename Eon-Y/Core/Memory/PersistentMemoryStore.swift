@@ -241,8 +241,17 @@ actor PersistentMemoryStore {
         sqlite3_finalize(stmt)
         if success {
             let rowId = sqlite3_last_insert_rowid(db)
-            let safe = content.replacingOccurrences(of: "'", with: "''")
-            execute("INSERT INTO conversations_fts(rowid, content) VALUES (\(rowId), '\(safe)')")
+            // Parametriserad FTS-insert — undviker SQL-injection
+            let ftsSql = "INSERT INTO conversations_fts(rowid, content) VALUES (?, ?)"
+            var ftsStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, ftsSql, -1, &ftsStmt, nil) == SQLITE_OK {
+                sqlite3_bind_int64(ftsStmt, 1, rowId)
+                bindText(ftsStmt, 2, content)
+                if sqlite3_step(ftsStmt) != SQLITE_DONE {
+                    print("[Memory] FTS insert fel: \(String(cString: sqlite3_errmsg(db)))")
+                }
+            }
+            sqlite3_finalize(ftsStmt)
         }
         return success
     }
@@ -429,22 +438,17 @@ actor PersistentMemoryStore {
         return max(0, count)
     }
 
-    // Räknar faktiska kunskapsnoder: fakta + artiklar
+    // Räknar faktiska kunskapsnoder: fakta + artiklar (en enda query)
     func knowledgeNodeCount() -> Int {
         guard isReady else { return 0 }
-        var factCount = 0
-        var articleCount = 0
+        var count = 0
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM facts", -1, &stmt, nil) == SQLITE_OK {
-            if sqlite3_step(stmt) == SQLITE_ROW { factCount = Int(sqlite3_column_int(stmt, 0)) }
+        let sql = "SELECT (SELECT COUNT(*) FROM facts) + (SELECT COUNT(*) FROM articles) * 10"
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW { count = Int(sqlite3_column_int(stmt, 0)) }
         }
         sqlite3_finalize(stmt)
-        stmt = nil
-        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM articles", -1, &stmt, nil) == SQLITE_OK {
-            if sqlite3_step(stmt) == SQLITE_ROW { articleCount = Int(sqlite3_column_int(stmt, 0)) }
-        }
-        sqlite3_finalize(stmt)
-        return factCount + articleCount * 10
+        return count
     }
 
     @discardableResult
@@ -553,8 +557,16 @@ actor PersistentMemoryStore {
     }
 
     func deleteArticle(title: String) {
-        let safe = title.replacingOccurrences(of: "'", with: "''")
-        execute("DELETE FROM articles WHERE title = '\(safe)'")
+        guard isReady else { return }
+        let sql = "DELETE FROM articles WHERE title = ?"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, 1, title)
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                print("[Memory] deleteArticle fel: \(String(cString: sqlite3_errmsg(db)))")
+            }
+        }
+        sqlite3_finalize(stmt)
     }
 
     func articleCount() -> Int {
@@ -596,7 +608,18 @@ actor PersistentMemoryStore {
     }
 
     func recentArticleTitles(limit: Int = 200) -> [String] {
-        loadAllArticles(limit: limit).map { $0.title }
+        guard isReady else { return [] }
+        var results: [String] = []
+        let sql = "SELECT title FROM articles ORDER BY created_at DESC LIMIT ?"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                results.append(sqlText(stmt, 0))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
     }
 
     func recentUserMessages(limit: Int = 10) -> [String] {
@@ -750,10 +773,10 @@ actor PersistentMemoryStore {
         for (i, param) in params.enumerated() {
             let idx = Int32(i + 1)
             switch param {
-            case let v as String: sqlite3_bind_text(stmt, idx, (v as NSString).utf8String, -1, nil)
+            case let v as String: bindText(stmt, idx, v)
             case let v as Int:    sqlite3_bind_int64(stmt, idx, Int64(v))
             case let v as Double: sqlite3_bind_double(stmt, idx, v)
-            default:              sqlite3_bind_text(stmt, idx, "\(param)", -1, nil)
+            default:              bindText(stmt, idx, "\(param)")
             }
         }
         let rc = sqlite3_step(stmt)
@@ -768,10 +791,10 @@ actor PersistentMemoryStore {
         for (i, param) in params.enumerated() {
             let idx = Int32(i + 1)
             switch param {
-            case let v as String: sqlite3_bind_text(stmt, idx, (v as NSString).utf8String, -1, nil)
+            case let v as String: bindText(stmt, idx, v)
             case let v as Int:    sqlite3_bind_int64(stmt, idx, Int64(v))
             case let v as Double: sqlite3_bind_double(stmt, idx, v)
-            default:              sqlite3_bind_text(stmt, idx, "\(param)", -1, nil)
+            default:              bindText(stmt, idx, "\(param)")
             }
         }
         var rows: [[Any]] = []

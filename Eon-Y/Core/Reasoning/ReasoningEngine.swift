@@ -596,30 +596,41 @@ actor ReasoningEngine {
 
 // MARK: - Kausalgraf
 
-// CausalGraph är en class (referenstyp) så att addRelation inte kräver mutating/inout.
-// Markerad @unchecked Sendable + nonisolated metoder för att fungera i Swift 6 actor-kontext.
+// CausalGraph är en class (referenstyp) skyddad av NSLock för trådsäkerhet.
+// Alla mutationer och läsningar av relations sker under lock.
 final class CausalGraph: @unchecked Sendable {
     private var relations: [CausalRelation] = []
+    private let lock = NSLock()
 
     nonisolated init() {}
 
     nonisolated var nodeCount: Int {
-        Set(relations.flatMap { [$0.cause, $0.effect] }).count
+        lock.lock()
+        defer { lock.unlock() }
+        return Set(relations.flatMap { [$0.cause, $0.effect] }).count
     }
 
     nonisolated func addRelation(cause: String, effect: String, strength: Double) {
+        lock.lock()
+        defer { lock.unlock() }
         relations.append(CausalRelation(cause: cause, effect: effect, strength: strength))
     }
 
     nonisolated func findCauses(of concept: String) -> [String] {
-        relations.filter { $0.effect.lowercased() == concept.lowercased() && $0.strength > 0 }.map { $0.cause }
+        lock.lock()
+        defer { lock.unlock() }
+        return relations.filter { $0.effect.lowercased() == concept.lowercased() && $0.strength > 0 }.map { $0.cause }
     }
 
     nonisolated func findEffects(of concept: String) -> [String] {
-        relations.filter { $0.cause.lowercased() == concept.lowercased() && $0.strength > 0 }.map { $0.effect }
+        lock.lock()
+        defer { lock.unlock() }
+        return relations.filter { $0.cause.lowercased() == concept.lowercased() && $0.strength > 0 }.map { $0.effect }
     }
 
     nonisolated func findChain(from concept: String, maxDepth: Int = 4) -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
         var chain = [concept]
         var current = concept
         for _ in 0..<maxDepth {

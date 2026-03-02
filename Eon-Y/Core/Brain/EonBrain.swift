@@ -150,20 +150,11 @@ final class EonBrain: ObservableObject {
         return b
     }
 
-    // Lägg till en rad i innerMonologue och spara till loggfil
+    // Lägg till en rad i innerMonologue.
+    // Loggning till fil sker automatiskt via $innerMonologue Combine-observer (startMonologueLogging).
     func appendMonologue(_ line: MonologueLine) {
         innerMonologue.append(line)
         if innerMonologue.count > 500 { innerMonologue.removeFirst(100) }
-        guard !isPreviewInstance else { return }
-        let typeLabel: String
-        switch line.type {
-        case .thought:     typeLabel = "TANKE"
-        case .loopTrigger: typeLabel = "LOOP"
-        case .revision:    typeLabel = "REVISION"
-        case .memory:      typeLabel = "MINNE"
-        case .insight:     typeLabel = "INSIKT"
-        }
-        CognitionLogger.shared.append(text: line.text, type: typeLabel)
     }
 
     // Kallas från Eon_YApp.body (.task) — garanterar att MainActor är fullt redo
