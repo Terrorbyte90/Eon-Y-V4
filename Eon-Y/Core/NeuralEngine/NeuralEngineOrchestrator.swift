@@ -171,8 +171,9 @@ actor NeuralEngineOrchestrator {
             return await fallbackGenerate(prompt)
         }
         let raw = await gpt.generate(prompt: prompt, maxNewTokens: maxTokens, temperature: temperature)
-        // v10: Post-generation deduplication — remove repeated sentences
-        return Self.deduplicateSentences(raw)
+        // v10: Post-generation deduplication + v11: output cleaning
+        let deduped = Self.deduplicateSentences(raw)
+        return Self.cleanOutput(deduped)
     }
 
     func generateStream(prompt: String, maxTokens: Int = 200, temperature: Float = 0.7) -> AsyncStream<String> {
@@ -282,6 +283,55 @@ actor NeuralEngineOrchestrator {
         let intersection = wordsA.intersection(wordsB).count
         let union = wordsA.union(wordsB).count
         return Double(intersection) / Double(union) // Jaccard similarity
+    }
+
+    /// v11: Clean generated output — remove prompt leakage, incomplete sentences, garbled text
+    nonisolated static func cleanOutput(_ text: String) -> String {
+        var result = text
+
+        // 1. Remove prompt leakage — if model echoes system instructions or meta-text
+        let leakagePatterns = [
+            "ABSOLUTA REGLER", "KÄRNPRINCIPER", "SVARSSTRUKTUR", "SKRIVKVALITET",
+            "VIKTIGT:", "[Frågeanalys:", "[Medvetandetillstånd:", "[Kognitiv kontext:",
+            "[Relevanta fakta:", "[Kunskapsartiklar:", "[Konversation:", "[Minnen:",
+            "[OBS:", "Eon (svar om", "Eon (djupanalys om", "Användare:",
+            "UPPREPA ALDRIG", "bryt ALDRIG", "Kognitiv profil:", "II=",
+            "KORRIGERING:", "REVISION:", "Reviderat svar"
+        ]
+        for pattern in leakagePatterns {
+            if let range = result.range(of: pattern) {
+                // Remove from the leaked pattern to end of line
+                let lineEnd = result[range.upperBound...].firstIndex(of: "\n") ?? result.endIndex
+                result.removeSubrange(range.lowerBound..<lineEnd)
+            }
+        }
+
+        // 2. Remove incomplete final sentence (no ending punctuation)
+        result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !result.isEmpty {
+            let lastChar = result.last!
+            if lastChar != "." && lastChar != "!" && lastChar != "?" {
+                // Find the last complete sentence
+                if let lastPeriod = result.lastIndex(where: { ".!?".contains($0) }) {
+                    let afterPeriod = result.index(after: lastPeriod)
+                    let trailing = String(result[afterPeriod...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Only truncate if the trailing part is significant (>5 chars = likely incomplete)
+                    if trailing.count > 5 {
+                        result = String(result[...lastPeriod])
+                    }
+                }
+            }
+        }
+
+        // 3. Clean up excessive whitespace
+        while result.contains("  ") {
+            result = result.replacingOccurrences(of: "  ", with: " ")
+        }
+        while result.contains("\n\n\n") {
+            result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - BERT-PLL (Pseudo-Log-Likelihood för validering)
