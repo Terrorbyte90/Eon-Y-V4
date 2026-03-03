@@ -170,7 +170,9 @@ actor NeuralEngineOrchestrator {
         guard let gpt = gptHandler else {
             return await fallbackGenerate(prompt)
         }
-        return await gpt.generate(prompt: prompt, maxNewTokens: maxTokens, temperature: temperature)
+        let raw = await gpt.generate(prompt: prompt, maxNewTokens: maxTokens, temperature: temperature)
+        // v10: Post-generation deduplication — remove repeated sentences
+        return Self.deduplicateSentences(raw)
     }
 
     func generateStream(prompt: String, maxTokens: Int = 200, temperature: Float = 0.7) -> AsyncStream<String> {
@@ -187,12 +189,99 @@ actor NeuralEngineOrchestrator {
                     continuation.finish()
                     return
                 }
+                // v10: Real-time n-gram repetition detection during streaming
+                var accumulated = ""
+                var ngramCounts: [String: Int] = [:]
+                var recentSentences: [String] = []
+                var stopped = false
+
                 await gpt.generateStream(prompt: prompt, maxNewTokens: maxTokens, temperature: temperature) { token in
+                    guard !stopped else { return }
+                    accumulated += token
+
+                    // --- Check 1: 4-gram repetition detection ---
+                    // Track 4-word sequences; if any repeats 3+ times, stop generation
+                    let words = accumulated.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                    if words.count >= 4 {
+                        let lastNgram = words.suffix(4).joined(separator: " ")
+                        ngramCounts[lastNgram, default: 0] += 1
+                        if ngramCounts[lastNgram, default: 0] >= 3 {
+                            stopped = true
+                            print("[ANE] Repetition stoppad: 4-gram '\(lastNgram)' upprepat 3+ gånger")
+                            return
+                        }
+                    }
+
+                    // --- Check 2: Sentence-level repetition ---
+                    // If we detect a sentence ending, check if it duplicates a previous sentence
+                    if token.contains(".") || token.contains("!") || token.contains("?") {
+                        let sentences = accumulated
+                            .components(separatedBy: CharacterSet(charactersIn: ".!?"))
+                            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                            .filter { $0.count > 15 }
+                        if let lastSentence = sentences.last {
+                            let priorMatches = recentSentences.filter { Self.sentenceSimilarity($0, lastSentence) > 0.80 }.count
+                            if priorMatches >= 1 {
+                                stopped = true
+                                print("[ANE] Repetition stoppad: mening upprepad (likhet >80%)")
+                                return
+                            }
+                            recentSentences.append(lastSentence)
+                        }
+                    }
+
                     continuation.yield(token)
                 }
                 continuation.finish()
             }
         }
+    }
+
+    // MARK: - Anti-repetition utilities (v10)
+
+    /// Remove duplicate or near-duplicate sentences from generated text
+    nonisolated static func deduplicateSentences(_ text: String) -> String {
+        guard !text.isEmpty else { return text }
+        // Split on sentence-ending punctuation while preserving the delimiter
+        let pattern = try! NSRegularExpression(pattern: "([^.!?]+[.!?]+)", options: [])
+        let range = NSRange(text.startIndex..., in: text)
+        let matches = pattern.matches(in: text, range: range)
+
+        var seen: [String] = []
+        var result: [String] = []
+
+        for match in matches {
+            guard let matchRange = Range(match.range, in: text) else { continue }
+            let sentence = String(text[matchRange])
+            let normalized = sentence.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+            // Skip if too short to be meaningful
+            guard normalized.count > 10 else {
+                result.append(sentence)
+                continue
+            }
+
+            // Check if this sentence is a near-duplicate of any seen sentence
+            let isDuplicate = seen.contains { sentenceSimilarity($0, normalized) > 0.75 }
+            if !isDuplicate {
+                seen.append(normalized)
+                result.append(sentence)
+            }
+        }
+
+        // If regex didn't match anything (no sentence-ending punctuation), return original
+        if result.isEmpty { return text }
+        return result.joined()
+    }
+
+    /// Word-overlap based sentence similarity (fast, no ML needed)
+    nonisolated static func sentenceSimilarity(_ a: String, _ b: String) -> Double {
+        let wordsA = Set(a.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 2 })
+        let wordsB = Set(b.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 2 })
+        guard !wordsA.isEmpty, !wordsB.isEmpty else { return 0 }
+        let intersection = wordsA.intersection(wordsB).count
+        let union = wordsA.union(wordsB).count
+        return Double(intersection) / Double(union) // Jaccard similarity
     }
 
     // MARK: - BERT-PLL (Pseudo-Log-Likelihood för validering)

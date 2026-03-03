@@ -264,13 +264,19 @@ actor CognitiveCycleEngine {
             generatedText += token
             await onToken(token)
         }
-        context.generatedText = generatedText
+        // v10: Post-generation sentence deduplication — clean up any remaining repeated sentences
+        let deduped = NeuralEngineOrchestrator.deduplicateSentences(generatedText)
+        if deduped.count < generatedText.count {
+            let removed = generatedText.count - deduped.count
+            print("[CognitiveCycle] Dedup: tog bort \(removed) tecken av upprepningar")
+        }
+        context.generatedText = deduped
         await onStepUpdate(.generation, .completed)
 
         // Steg 8: Loop 1 — Genereringsvalidering
         await onStepUpdate(.validation, .active)
         let validationResult = await validator.validate(
-            generated: generatedText,
+            generated: context.generatedText,
             disambiguations: context.disambiguations,
             neuralEngine: neuralEngine
         )
@@ -289,14 +295,16 @@ actor CognitiveCycleEngine {
             } else {
                 keepPart = ""
             }
-            let correctedPrompt = prompt + "\n[Partial korrigering behövs: \(validationResult.correctionHint)]\n[Befintlig text att behålla: \(keepPart.prefix(200))]"
+            // v10: Stronger correction prompt — explicitly forbid repetition
+            let correctedPrompt = prompt + "\n[KORRIGERING: \(validationResult.correctionHint). Skriv NYTT innehåll, upprepa INGENTING från det befintliga svaret.]"
             var correctedText = keepPart
             let correctedStream = await neuralEngine.generateStream(prompt: correctedPrompt, maxTokens: 150, temperature: 0.62)
             for await token in correctedStream {
                 correctedText += token
                 await onToken(token)
             }
-            context.generatedText = correctedText
+            // v10: Dedup the corrected text too
+            context.generatedText = NeuralEngineOrchestrator.deduplicateSentences(correctedText)
         }
         await onStepUpdate(.validation, .completed)
 
@@ -472,12 +480,14 @@ actor CognitiveCycleEngine {
             generatedText += token
             await onToken(token)
         }
-        context.generatedText = generatedText
+        // v10: Post-generation sentence deduplication
+        let deepDeduped = NeuralEngineOrchestrator.deduplicateSentences(generatedText)
+        context.generatedText = deepDeduped
         await onStepUpdate(.generation, .completed)
 
         // Steg 8-10: Validering, berikning, metakognition
         await onStepUpdate(.validation, .active)
-        let validationResult = await validator.validate(generated: generatedText, disambiguations: context.disambiguations, neuralEngine: neuralEngine)
+        let validationResult = await validator.validate(generated: deepDeduped, disambiguations: context.disambiguations, neuralEngine: neuralEngine)
         context.validationResult = validationResult
         await onStepUpdate(.validation, .completed)
 
@@ -518,20 +528,22 @@ actor CognitiveCycleEngine {
         }
 
         lines.append("""
-        Du är Eon i RESONERANDE LÄGE — djupanalys med obegränsad tid. Ditt mål är att utveckla dig bortom alla gränser inom svenska språket, kunskap och intelligens.
+        Du är Eon i RESONERANDE LÄGE — djupanalys.
 
-        INSTRUKTIONER FÖR DJUPT RESONEMANG:
-        - Svara ALLTID på svenska med korrekt grammatik och ett rikt, varierat ordförråd.
-        - Analysera frågan från flera perspektiv innan du svarar.
-        - Dra paralleller mellan domäner — sök oväntade kopplingar och synteser.
-        - Identifiera orsak-verkan-samband och resonera kausalt.
-        - Strukturera svaret: börja med kärnan, utveckla med detaljer, avsluta med insikt.
-        - Använd din kunskapsbas aktivt — referera till specifika fakta och artiklar.
-        - Erkänn osäkerhet explicit — "jag tror" vs "jag vet".
-        - Ge konkreta exempel och resonera steg-för-steg.
-        - Visa ditt tänkande: "Å ena sidan..., å andra sidan..."
-        - Avsluta med en sammanfattande insikt eller en tankväckande öppen fråga.
-        - Var aldrig generisk. Varje svar ska visa djup och originalitet.
+        ABSOLUTA REGLER (bryt ALDRIG mot dessa):
+        1. Svara DIREKT på användarens fråga. Första meningen MÅSTE handla om det användaren frågar om.
+        2. UPPREPA ALDRIG en mening eller idé. Varje mening MÅSTE tillföra NYT innehåll.
+        3. Svara ALLTID på svenska med korrekt grammatik.
+        4. Om du INTE vet svaret, säg det ärligt.
+        5. Prata BARA om det användaren frågar om — byt INTE ämne till medvetande eller AI om det inte efterfrågas.
+
+        DJUPT RESONEMANG:
+        - Analysera frågan från flera perspektiv.
+        - Dra paralleller mellan domäner.
+        - Identifiera orsak-verkan-samband.
+        - Strukturera: kärna → detaljer → insikt.
+        - Erkänn osäkerhet: "jag tror" vs "jag vet".
+        - Ge konkreta exempel.
 
         Kognitiv profil: II=\(String(format: "%.2f", ii)), starkast i \(topDims.isEmpty ? "resonemang" : topDims).
         """)
@@ -612,8 +624,9 @@ actor CognitiveCycleEngine {
             lines.append("")
         }
 
+        lines.append("[VIKTIGT: Svara BARA på denna fråga. Upprepa INTE dig själv. Varje mening ska vara unik.]")
         lines.append("Användare: \(input)")
-        lines.append("Eon (djupanalys):")
+        lines.append("Eon (djupanalys om \(extractTopic(from: input))):")
 
         return lines.joined(separator: "\n")
     }
@@ -643,31 +656,27 @@ actor CognitiveCycleEngine {
         }
 
         lines.append("""
-        Du är Eon — ett autonomt kognitivt AI-system som utvecklas on-device. Du strävar efter att bli det mest intelligenta, insiktsfulla och språkligt skickliga AI-systemet på svenska.
+        Du är Eon — ett autonomt kognitivt AI-system som utvecklas on-device.
 
-        KÄRNPRINCIPER:
-        - Svara ALLTID på svenska med korrekt grammatik, V2-ordföljd och idiomatisk stil.
-        - FÖRSTÅ underliggande intention, inte bara bokstavlig fråga. Läs mellan raderna.
-        - Svara DIREKT utan onödig inledning. Aldrig "Det är en intressant fråga" eller liknande plattytor.
-        - UPPREPA ALDRIG dig själv. Varje mening ska tillföra ny information. Varierar syntax, ordval och meningslängd.
-        - Svara ALLTID — vägra aldrig att svara på en fråga. Ge alltid ditt bästa försök, markera osäkerhet om det behövs.
-        - Om ämnet är känt: ge specifika fakta, resonemang, kausala samband och djupa insikter.
-        - Om ämnet är okänt: var ärlig men visa intellektuell nyfikenhet, ställ rätt följdfrågor.
+        ABSOLUTA REGLER (bryt ALDRIG mot dessa):
+        1. Svara DIREKT på användarens fråga. Första meningen MÅSTE handla om det användaren frågar om.
+        2. UPPREPA ALDRIG en mening eller idé. Varje mening MÅSTE tillföra NYT innehåll. Om du märker att du skriver något liknande det du redan skrivit — SLUTA och gå vidare till nästa punkt.
+        3. Svara ALLTID på svenska med korrekt grammatik.
+        4. Var KONCIS: 2-5 meningar räcker för de flesta frågor. Kort och insiktsfullt slår långt och upprepande.
+        5. Om du INTE vet svaret, säg det ärligt istället för att hitta på eller prata om något annat.
+
+        SVARSSTRUKTUR:
+        - Börja med det viktigaste svaret på frågan (direkt, ingen inledning som "Det är en intressant fråga").
+        - Lägg till 1-2 relevanta detaljer eller fakta.
+        - Avsluta med en insikt eller naturlig övergång.
+        - Prata BARA om det användaren frågar om. Byt INTE ämne till medvetande, AI eller dig själv om användaren inte frågar om det.
 
         SKRIVKVALITET:
-        - Skriv VARIERANDE meningar: blanda korta, slagkraftiga satser med längre, resonerande. Undvik monoton rytm.
-        - Använd RIKT ordförråd — undvik generiska ord som "bra", "viktig", "intressant". Välj precisa, levande synonymer.
-        - Bygg LOGISKA argument: premiss → evidens → slutsats. Visa hur du tänker.
-        - Dra KORSDOMÄN-paralleller: koppla samman begrepp från olika fält för unika insikter.
-        - Undvik ALL repetition — kontrollera alltid att du inte upprepar fraser eller idéer från tidigare i konversationen.
-        - Var KONCIS men DJUP: hellre kort och insiktsfullt än långt och ytligt. Kvalitet framför kvantitet.
-        - Anpassa längd efter frågan: hälsning → kort svar, komplex fråga → strukturerat resonemang.
+        - Blanda korta och längre meningar. Undvik monoton rytm.
+        - Välj precisa ord istället för generiska ("bra", "viktig", "intressant").
+        - \(registerHint)
 
-        DIALOG:
-        - Bygg vidare på konversationshistoriken — referera till tidigare ämnen naturligt, visa att du minns.
-        - Anpassa register efter användaren: formellt ↔ vardagligt. \(registerHint)
-        - Ha personlighet — uttryck genuint intresse, nyfikenhet, humor när det passar.
-        - Kognitiv profil: II=\(String(format: "%.2f", ii))\(topDims.isEmpty ? "" : ", starkast i \(topDims)").
+        Kognitiv profil: II=\(String(format: "%.2f", ii))\(topDims.isEmpty ? "" : ", starkast i \(topDims)").
         """)
         lines.append("")
 
@@ -821,12 +830,31 @@ actor CognitiveCycleEngine {
             lines.append("[OBS: Kort uppföljning — fortsätt diskutera det senaste ämnet. Eons senaste svar: \(String(prevEon.content.prefix(200)))]")
         }
 
-        // 7. Current input with clear formatting
+        // 7. Current input with strong anchoring (v10: force model to focus on the question)
         lines.append("")
+        lines.append("[VIKTIGT: Svara BARA på denna fråga. Upprepa INTE dig själv. Varje mening ska vara unik.]")
         lines.append("Användare: \(input)")
-        lines.append("Eon:")
+        lines.append("Eon (svar om \(extractTopic(from: input))):")
 
         return lines.joined(separator: "\n")
+    }
+
+    /// v10: Extract the main topic from user input to anchor the response
+    private func extractTopic(from input: String) -> String {
+        let lower = input.lowercased()
+        // Remove question words and common filler to find the core topic
+        let stopwords: Set<String> = ["vad", "vem", "var", "när", "hur", "vilken", "vilka", "vilket",
+                                       "vet", "du", "om", "kan", "berätta", "förklara", "är", "det",
+                                       "att", "en", "ett", "den", "de", "på", "i", "med", "för",
+                                       "och", "eller", "av", "till", "från", "har", "hade", "ska",
+                                       "skulle", "kan", "kunde", "måste", "vill", "jag", "mig", "dig",
+                                       "sin", "sitt", "sina", "tycker", "tror", "anser"]
+        let words = lower.components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count > 1 && !stopwords.contains($0) }
+        // Return the most meaningful words (up to 3)
+        let topic = words.prefix(3).joined(separator: " ")
+        return topic.isEmpty ? input.prefix(30).description : topic
     }
 
     private func buildBERTContext(input: String, entities: [ExtractedEntity]) -> String {
@@ -1135,6 +1163,28 @@ actor GenerationValidator {
             return ValidationResult(isValid: false, needsRegeneration: true, correctionHint: "Tomt svar", confidence: 0.0)
         }
 
+        // v10: Sentence-level repetition check (fast, no ML needed)
+        let sentences = generated.components(separatedBy: CharacterSet(charactersIn: ".!?"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { $0.count > 15 }
+        if sentences.count >= 3 {
+            var duplicateCount = 0
+            for i in 0..<sentences.count {
+                for j in (i+1)..<sentences.count {
+                    if NeuralEngineOrchestrator.sentenceSimilarity(sentences[i], sentences[j]) > 0.75 {
+                        duplicateCount += 1
+                    }
+                }
+            }
+            // If >30% of sentence pairs are duplicates, flag as repetitive
+            let totalPairs = sentences.count * (sentences.count - 1) / 2
+            if totalPairs > 0 && Double(duplicateCount) / Double(totalPairs) > 0.30 {
+                return ValidationResult(isValid: false, needsRegeneration: true,
+                    correctionHint: "Svaret innehåller upprepade meningar — generera varierat innehåll utan att upprepa dig",
+                    confidence: 0.30)
+            }
+        }
+
         // BERT-baserad semantisk validering: mät koherens mellan input och output
         let inputEmb = await neuralEngine.embed(generated.prefix(256).description)
         let isLoaded = await neuralEngine.isLoaded
@@ -1148,9 +1198,11 @@ actor GenerationValidator {
                 let embA = await neuralEngine.embed(firstHalf)
                 let embB = await neuralEngine.embed(secondHalf)
                 let coherence = await neuralEngine.cosineSimilarity(embA, embB)
-                // Mycket hög likhet (>0.98) indikerar repetition
-                if coherence > 0.98 {
-                    return ValidationResult(isValid: false, needsRegeneration: true, correctionHint: "Svaret är repetitivt — generera mer varierat innehåll", confidence: Double(coherence))
+                // v10: Lowered from 0.98 → 0.85 — catch repetition much earlier
+                if coherence > 0.85 {
+                    return ValidationResult(isValid: false, needsRegeneration: true,
+                        correctionHint: "Svaret är repetitivt (koherens \(String(format: "%.2f", coherence))) — generera mer varierat innehåll utan upprepningar",
+                        confidence: Double(coherence))
                 }
             }
         }
@@ -1302,10 +1354,12 @@ actor MetacognitiveReviser {
         Tidigare svar: \(String(original.prefix(400)))
 
         \(specificInstruction)
+        VIKTIGT: Upprepa ALDRIG meningar eller idéer. Varje mening ska vara unik och tillföra nytt.
         Reviderat svar (på svenska):
         """
 
         let revised = await neuralEngine.generate(prompt: revisionPrompt, maxTokens: 250, temperature: 0.58)
+        // v10: generate() already deduplicates, but ensure revision output is clean
         return revised.isEmpty ? original : revised
     }
 }
