@@ -145,12 +145,15 @@ final class SleepConsolidationEngine: ObservableObject {
         synapticLoad = max(0.2, synapticLoad * 0.97)
 
         // 2. Sharp-wave ripple replay: återaktivera starka minnen
-        // Hämta nyliga fakta med hög konfidens
+        // v9: Selective replay — high-confidence facts get stronger consolidation
         let recentFacts = await memoryStore.recentFacts(limit: 10)
         for fact in recentFacts {
-            // Stärk kopplingarna för viktiga minnen via Hebbsk plasticitet
-            if Double.random(in: 0...1) < 0.3 { // 30% chans per tick
-                esn.applyHebbianPlasticity(learningRate: 0.0005)
+            // v9: Replay probability scales with fact confidence (important memories first)
+            let replayProb = 0.15 + fact.confidence * 0.25  // 15-40% based on confidence
+            if Double.random(in: 0...1) < replayProb {
+                // Scale learning rate by confidence — important facts get stronger
+                let scaledLR = 0.0003 + fact.confidence * 0.0004  // 0.0003-0.0007
+                esn.applyHebbianPlasticity(learningRate: scaledLR)
                 memoriesConsolidated += 1
             }
         }
@@ -159,26 +162,50 @@ final class SleepConsolidationEngine: ObservableObject {
         sleepPressure = max(0, sleepPressure - 0.015)
     }
 
-    // MARK: - REM: Kreativ rekombination
+    // MARK: - REM: Kreativ rekombination (v9: genuine memory-based associations)
 
     /// REM-sömn: sampla 2-4 minnen, blanda dem för kreativ insikt.
     private func runREM(esn: EchoStateNetwork, memoryStore: PersistentMemoryStore) async {
         // 1. Sampla slumpmässiga minnen
         let randomFacts = await memoryStore.randomFacts(limit: 4)
 
-        // 2. Kör ESN med blandad input (kreativ rekombination)
+        // 2. v9: Convert actual fact content to numerical representation for ESN
         if randomFacts.count >= 2 {
-            // Skapa blandad input från fakta (enkelt: hash subject+object till numerisk representation)
-            let mixedInput = (0..<32).map { _ in Double.random(in: -0.5...0.5) }
+            // Genuine memory-based input: hash actual fact strings to deterministic values
+            var mixedInput = [Double](repeating: 0, count: 32)
+            for (fi, fact) in randomFacts.enumerated() {
+                let combined = "\(fact.subject)_\(fact.predicate)_\(fact.object)"
+                let hash = combined.utf8.reduce(0) { ($0 &+ UInt64($1)) &* 31 }
+                for ch in 0..<min(8, 32 - fi * 8) {
+                    let shifted = Double((hash >> (ch * 8)) & 0xFF) / 255.0 - 0.5
+                    mixedInput[fi * 8 + ch] = shifted
+                }
+            }
             esn.tick(externalInput: mixedInput, arousal: 0.3) // Låg arousal under REM
+
+            // v9: If ESN generates a spontaneous thought during REM, create new association
+            if let spontaneous = esn.spontaneousThoughts.last,
+               spontaneous.salience > 0.4,
+               randomFacts.count >= 2 {
+                let a = randomFacts[0]
+                let b = randomFacts[1]
+                await memoryStore.saveFact(
+                    subject: a.subject,
+                    predicate: "drömassocieras_med",
+                    object: b.subject,
+                    confidence: spontaneous.salience * 0.5,
+                    source: "rem_sleep"
+                )
+                dreamsGenerated += 1
+            }
         }
 
         // 3. Minska sömnbehov (långsammare under REM)
         sleepPressure = max(0, sleepPressure - 0.008)
-
-        // 4. Kreativitetsstegring: spontan aktivitet genererar nya associationer
-        // ESN:s spontana tankar under REM kan leda till nya insikter
     }
+
+    /// v9: Count of dream-like associations generated during REM
+    @Published private(set) var dreamsGenerated: Int = 0
 
     // MARK: - Avsluta sömn
 

@@ -37,6 +37,11 @@ final class CriticalityController: ObservableObject {
     /// Regimklassificering
     @Published private(set) var regime: CriticalityRegime = .critical
 
+    /// v9: Hysteresis counter — only change regime after 3 consecutive ticks in new regime
+    private var pendingRegime: CriticalityRegime = .critical
+    private var pendingRegimeCount: Int = 0
+    private let hysteresisThreshold: Int = 3
+
     /// Homeostatisk korrektionsstyrka
     private var correctionRate: Double = 0.05
 
@@ -61,13 +66,16 @@ final class CriticalityController: ObservableObject {
         activationHistory.append(avgActivity)
         if activationHistory.count > 200 { activationHistory.removeFirst() }
 
-        // Beräkna branching ratio: σ = aktivering(t) / aktivering(t-1)
+        // v9: Adaptive branching ratio with faster response near regime transitions
         if activationHistory.count >= 2 {
             let current = activationHistory.last!
             let previous = activationHistory[activationHistory.count - 2]
             if previous > 0.01 {
                 let instantBR = current / previous
-                branchingRatio = branchingRatio * 0.9 + instantBR * 0.1
+                // v9: Adaptive alpha — faster response when far from criticality
+                let deviation = abs(branchingRatio - 1.0)
+                let alpha = deviation > 0.2 ? 0.75 : 0.9  // Fast adapt when far, stable when near
+                branchingRatio = branchingRatio * alpha + instantBR * (1.0 - alpha)
             }
         }
 
@@ -85,13 +93,25 @@ final class CriticalityController: ObservableObject {
         let inhibition = moduleActivities.filter { $0 < 0.3 }.count
         eiBalance = Double(excitation - inhibition) / max(1, Double(moduleActivities.count))
 
-        // Klassificera regime
+        // v9: Regime classification with hysteresis (prevents oscillation near boundaries)
+        let candidateRegime: CriticalityRegime
         if branchingRatio < 0.85 {
-            regime = .subcritical
+            candidateRegime = .subcritical
         } else if branchingRatio > 1.15 {
-            regime = .supercritical
+            candidateRegime = .supercritical
         } else {
-            regime = .critical
+            candidateRegime = .critical
+        }
+
+        // Hysteresis: only switch regime after N consecutive ticks in new regime
+        if candidateRegime == pendingRegime {
+            pendingRegimeCount += 1
+        } else {
+            pendingRegime = candidateRegime
+            pendingRegimeCount = 1
+        }
+        if pendingRegimeCount >= hysteresisThreshold || candidateRegime == .critical {
+            regime = candidateRegime
         }
 
         // Homeostatisk korrigering
@@ -105,24 +125,23 @@ final class CriticalityController: ObservableObject {
 
     // MARK: - Homeostatisk korrigering
 
-    /// Justerar systemet mot kritikalitet genom att modifiera oscillatorkoppling
-    /// och aktivitetströsklar.
+    /// v9: Multi-lever homeostatic correction — coupling + proportional control
     private func applyCorrection(oscillators: OscillatorBank) {
+        let deviation = branchingRatio - 1.0  // Negative=too ordered, positive=too chaotic
+        let correctionMagnitude = min(0.2, abs(deviation) * 0.5)
+
         switch regime {
         case .subcritical:
-            // Systemet är för ordnat → sänk trösklar, öka koppling
-            oscillators.couplingStrength += correctionRate * 0.5
-            // Minska brus lite (ordnad drift behöver mer konnektivitet, inte mer brus)
+            // Too ordered → increase coupling (more interaction)
+            oscillators.couplingStrength += correctionRate * 0.5 * (1.0 + correctionMagnitude)
 
         case .supercritical:
-            // Systemet är för kaotiskt → höj trösklar, minska koppling
-            oscillators.couplingStrength -= correctionRate * 0.5
-            // Öka inhibition
+            // Too chaotic → decrease coupling (less interaction)
+            oscillators.couplingStrength -= correctionRate * 0.5 * (1.0 + correctionMagnitude)
 
         case .critical:
-            // Vi är i rätt zon — finjustera
-            let deviation = branchingRatio - 1.0
-            oscillators.couplingStrength -= deviation * correctionRate * 0.2
+            // Fine-tune: proportional correction scaled by deviation
+            oscillators.couplingStrength -= deviation * correctionRate * 0.25
         }
 
         // Begränsa koppling till realistiskt intervall

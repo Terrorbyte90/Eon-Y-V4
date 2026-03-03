@@ -96,12 +96,15 @@ final class GlobalWorkspaceEngine: ObservableObject {
         // Phase 0: Thought Coalescence — merge highly similar thoughts into stronger combined ones
         coalesceThoughts()
 
-        // Phase 1: Adaptive decay — older thoughts decay faster, focused thoughts decay slower
-        let decayRate = baseDecayRate * (focusStrength > 0.7 ? 0.6 : 1.0) // Slower decay when focused
+        // Phase 1: v9 — Continuous adaptive decay with cognitive load sensitivity
+        let focusDecay = 1.0 - (focusStrength * 0.4)  // 0.6-1.0 continuously (not binary)
+        let cogLoad = CognitiveState.shared.cognitiveLoad
+        let loadDecay = 1.0 + (cogLoad * 0.3)  // Higher load = faster decay
         for i in activeThoughts.indices {
-            let age = Date().timeIntervalSince(activeThoughts[i].timestamp) / 60.0 // minutes
-            let ageFactor = 1.0 + min(0.5, age * 0.02) // Older thoughts decay up to 1.5x faster
-            activeThoughts[i].activation *= (1.0 - decayRate * ageFactor)
+            let age = Date().timeIntervalSince(activeThoughts[i].timestamp) / 60.0
+            let ageFactor = 1.0 + min(0.5, age * 0.02)
+            let effectiveDecay = baseDecayRate * focusDecay * ageFactor * loadDecay
+            activeThoughts[i].activation *= (1.0 - effectiveDecay)
             activeThoughts[i].activation += calculateResonance(activeThoughts[i])
         }
 
@@ -252,8 +255,17 @@ final class GlobalWorkspaceEngine: ObservableObject {
             }
         }
 
-        // Driva oscillatorer med broadcast-signal (kopplar GWT till neural synkronisering)
-        let driveSignal = Array(repeating: thought.activation * 0.5, count: 12)
+        // v9: Category-aware oscillator drive (kopplar GWT till neural synkronisering)
+        let amplification: Double
+        switch thought.category {
+        case .reasoning:  amplification = 1.2
+        case .emotion:    amplification = 0.9
+        case .memory:     amplification = 1.1
+        case .perception: amplification = 1.0
+        case .language:   amplification = 1.05
+        case .general:    amplification = 1.0
+        }
+        let driveSignal = Array(repeating: thought.activation * 0.5 * amplification, count: 12)
         OscillatorBank.shared.tick(dt: 0.01, externalDrive: driveSignal)
 
         // Meddela AttentionSchema om ny broadcast
@@ -412,9 +424,21 @@ final class GlobalWorkspaceEngine: ObservableObject {
         }
         let semanticCoherence = pairCount > 0 ? coherenceSum / pairCount : 0.5
 
-        // Integration = activation × coherence × (1 - variance)
-        // High integration = thoughts are active, related, and balanced
-        integrationLevel = avgActivation * (0.6 + semanticCoherence * 0.4) * max(0.3, 1.0 - variance)
+        // v9: Cross-module coherence bonus — thoughts from different categories integrate better
+        let uniqueCategories = Set(activeThoughts.map { $0.category }).count
+        let crossModuleBonus = uniqueCategories >= 3 ? 0.15 : (uniqueCategories >= 2 ? 0.08 : 0.0)
+
+        // v9: Broadcast effectiveness — recent broadcasts reached many modules
+        let recentBroadcasts = broadcastHistory.suffix(5)
+        let broadcastResonance = recentBroadcasts.isEmpty ? 0.5
+            : recentBroadcasts.map { Double($0.receivingModules.count) / Double(registeredModules.count) }.reduce(0, +) / Double(recentBroadcasts.count)
+
+        // Integration = activation × coherence × (1 - variance) × cross-module × broadcast
+        integrationLevel = avgActivation *
+            (0.5 + semanticCoherence * 0.4) *
+            max(0.3, 1.0 - variance) *
+            (1.0 + crossModuleBonus) *
+            (0.8 + broadcastResonance * 0.2)
     }
 
     // MARK: - Convenience
