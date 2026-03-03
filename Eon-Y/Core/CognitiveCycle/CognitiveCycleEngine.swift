@@ -3,6 +3,197 @@ import NaturalLanguage
 
 // MARK: - CognitiveCycleEngine: Orkestrator för de 3 feedback-looparna
 
+// MARK: - InputAnalyzer (v11: Deep question understanding)
+// Analyzes the user's input BEFORE generation to extract:
+// - Core topic/entity the user is asking about
+// - Question type (what/who/where/when/how/why)
+// - Key nouns and named entities via NLTagger
+// - Whether the question requires factual knowledge or opinion
+// This analysis is then used to anchor the prompt and validate the response.
+
+struct InputAnalysis: Sendable {
+    let coreTopic: String           // Main subject being asked about
+    let questionType: QuestionType  // What kind of question
+    let keyNouns: [String]          // Important nouns extracted via NLTagger
+    let namedEntities: [String]     // Named entities (proper nouns)
+    let requiresKnowledge: Bool     // Does this need factual retrieval?
+    let questionSummary: String     // One-line summary for prompt anchoring
+
+    enum QuestionType: String, Sendable {
+        case what = "vad"
+        case who = "vem"
+        case when = "när"
+        case where_ = "var"
+        case how = "hur"
+        case why = "varför"
+        case yesNo = "ja/nej"
+        case imperative = "imperativ"
+        case statement = "påstående"
+        case unknown = "okänt"
+    }
+}
+
+struct InputAnalyzer {
+    nonisolated static func analyze(input: String) -> InputAnalysis {
+        let lower = input.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 1. Determine question type from first word / structure
+        let questionType = detectQuestionType(lower)
+
+        // 2. Extract key nouns and named entities using NLTagger
+        let (keyNouns, namedEntities) = extractNounsAndEntities(input)
+
+        // 3. Extract core topic — the main thing being asked about
+        let coreTopic = extractCoreTopic(input: input, lower: lower, nouns: keyNouns, entities: namedEntities)
+
+        // 4. Determine if knowledge retrieval is needed
+        let requiresKnowledge = questionType != .imperative &&
+            questionType != .statement &&
+            !keyNouns.isEmpty
+
+        // 5. Build question summary
+        let summary = buildSummary(questionType: questionType, coreTopic: coreTopic, input: input)
+
+        return InputAnalysis(
+            coreTopic: coreTopic,
+            questionType: questionType,
+            keyNouns: keyNouns,
+            namedEntities: namedEntities,
+            requiresKnowledge: requiresKnowledge,
+            questionSummary: summary
+        )
+    }
+
+    private static func detectQuestionType(_ lower: String) -> InputAnalysis.QuestionType {
+        if lower.hasPrefix("vad ") || lower.hasPrefix("vad?") { return .what }
+        if lower.hasPrefix("vem ") || lower.hasPrefix("vem?") { return .who }
+        if lower.hasPrefix("när ") || lower.hasPrefix("när?") { return .when }
+        if lower.hasPrefix("var ") || lower.hasPrefix("var?") { return .where_ }
+        if lower.hasPrefix("hur ") { return .how }
+        if lower.hasPrefix("varför ") { return .why }
+        // Question words mid-sentence
+        if lower.contains("vad ") && lower.contains("?") { return .what }
+        if lower.contains("vem ") && lower.contains("?") { return .who }
+        if lower.contains("varför ") && lower.contains("?") { return .why }
+        if lower.contains("hur ") && lower.contains("?") { return .how }
+        // Yes/no questions (Swedish V1 word order — verb first)
+        let firstWord = String(lower.prefix(while: { $0 != " " }))
+        let yesNoVerbs: Set<String> = ["är", "kan", "har", "ska", "vet", "tycker", "tror",
+                                         "finns", "gillar", "vill", "behöver", "bör", "måste"]
+        if yesNoVerbs.contains(firstWord) && lower.contains("?") { return .yesNo }
+        // Imperative
+        let imperativeVerbs: Set<String> = ["berätta", "förklara", "beskriv", "visa", "lista",
+                                             "jämför", "analysera", "sammanfatta", "definiera",
+                                             "ge", "skriv", "sök", "hitta"]
+        if imperativeVerbs.contains(firstWord) { return .imperative }
+        // Has question mark → try to detect
+        if lower.contains("?") { return .unknown }
+        return .statement
+    }
+
+    private static func extractNounsAndEntities(_ input: String) -> ([String], [String]) {
+        let tagger = NLTagger(tagSchemes: [.lexicalClass, .nameType])
+        tagger.string = input
+
+        var nouns: [String] = []
+        var entities: [String] = []
+
+        // Extract nouns
+        tagger.enumerateTags(in: input.startIndex..<input.endIndex, unit: .word,
+                             scheme: .lexicalClass, options: [.omitWhitespace, .omitPunctuation]) { tag, range in
+            let word = String(input[range])
+            if tag == .noun && word.count > 2 {
+                nouns.append(word)
+            }
+            return true
+        }
+
+        // Extract named entities (proper nouns, organizations, places)
+        tagger.enumerateTags(in: input.startIndex..<input.endIndex, unit: .word,
+                             scheme: .nameType, options: [.omitWhitespace, .omitPunctuation, .joinNames]) { tag, range in
+            if tag != nil {
+                let entity = String(input[range])
+                if entity.count > 1 {
+                    entities.append(entity)
+                }
+            }
+            return true
+        }
+
+        // Also detect capitalized words as potential named entities (NLTagger sometimes misses Swedish names)
+        let words = input.components(separatedBy: .whitespacesAndNewlines)
+        for (i, word) in words.enumerated() {
+            let cleaned = word.trimmingCharacters(in: .punctuationCharacters)
+            if cleaned.count > 1,
+               cleaned.first?.isUppercase == true,
+               i > 0, // Skip first word (capitalized due to sentence start)
+               !entities.contains(cleaned) {
+                entities.append(cleaned)
+            }
+        }
+
+        // For single-word inputs or first word that's a proper noun
+        if words.count <= 3 {
+            let firstCleaned = words.first?.trimmingCharacters(in: .punctuationCharacters) ?? ""
+            if firstCleaned.first?.isUppercase == true && firstCleaned.count > 1 && !entities.contains(firstCleaned) {
+                entities.append(firstCleaned)
+            }
+        }
+
+        return (nouns, entities)
+    }
+
+    private static func extractCoreTopic(input: String, lower: String, nouns: [String], entities: [String]) -> String {
+        // Priority 1: Named entities are usually the core topic
+        if let firstEntity = entities.first {
+            return firstEntity
+        }
+
+        // Priority 2: Last noun in a question (Swedish puts topic at end typically)
+        // "Vad vet du om Flashback?" → "Flashback"
+        // Remove question words and filler to find the topic
+        let stopwords: Set<String> = ["vad", "vem", "var", "när", "hur", "vilken", "vilka", "vilket",
+                                       "vet", "du", "om", "kan", "berätta", "förklara", "är", "det",
+                                       "att", "en", "ett", "den", "de", "på", "i", "med", "för",
+                                       "och", "eller", "av", "till", "från", "har", "hade", "ska",
+                                       "skulle", "kunde", "måste", "vill", "jag", "mig", "dig",
+                                       "sin", "sitt", "sina", "tycker", "tror", "anser", "inte",
+                                       "så", "här", "där", "alla", "allt", "denna", "detta", "dessa"]
+
+        // Try to find meaningful words from the end (topic usually at end in Swedish questions)
+        let words = lower.components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count > 1 && !stopwords.contains($0) }
+
+        if let lastMeaningful = words.last {
+            return lastMeaningful
+        }
+
+        // Priority 3: First noun
+        if let firstNoun = nouns.first {
+            return firstNoun
+        }
+
+        // Fallback: first few words
+        return String(input.prefix(30))
+    }
+
+    private static func buildSummary(questionType: InputAnalysis.QuestionType, coreTopic: String, input: String) -> String {
+        switch questionType {
+        case .what:      return "Användaren frågar vad \(coreTopic) är/innebär"
+        case .who:       return "Användaren frågar vem \(coreTopic) är"
+        case .when:      return "Användaren frågar om tidpunkt för \(coreTopic)"
+        case .where_:    return "Användaren frågar var \(coreTopic) finns/ligger"
+        case .how:       return "Användaren frågar hur \(coreTopic) fungerar/görs"
+        case .why:       return "Användaren frågar varför \(coreTopic)"
+        case .yesNo:     return "Användaren ställer en ja/nej-fråga om \(coreTopic)"
+        case .imperative: return "Användaren ber om information om \(coreTopic)"
+        case .statement: return "Användaren säger något om \(coreTopic)"
+        case .unknown:   return "Fråga om \(coreTopic)"
+        }
+    }
+}
+
 // MARK: - ComplexityEstimator
 // Klassificerar en fråga som simple/medium/complex för att anpassa pipeline.
 // Enkla frågor hoppar över BERT-embedding (steg 4) och grafberikning (steg 9) — sparar ANE-resurser.
@@ -136,6 +327,11 @@ actor CognitiveCycleEngine {
 
         var context = CognitiveCycleContext(userInput: input, sessionId: sessionId)
 
+        // Steg 0 (v11): InputAnalyzer — deep question understanding BEFORE anything else
+        let inputAnalysis = InputAnalyzer.analyze(input: input)
+        context.inputAnalysis = inputAnalysis
+        await onMonologue(MonologueLine(text: "Frågeanalys: \(inputAnalysis.questionSummary) [ämne: \(inputAnalysis.coreTopic)]", type: .thought))
+
         // Steg 1: Morfologianalys (Pelare A)
         await onStepUpdate(.morphology, .active)
         await onMonologue(MonologueLine(text: "Analyserar morfologi i '\(input.prefix(40))'...", type: .thought))
@@ -153,10 +349,24 @@ actor CognitiveCycleEngine {
         context.register = analysis.register
         await onStepUpdate(.wsd, .completed)
 
-        // Steg 3: Minneshämtning (v8: wider search window + temporal decay + BERT ranking)
+        // Steg 3: Minneshämtning (v11: search by input + core topic + named entities)
         await onStepUpdate(.memoryRetrieval, .active)
-        await onMonologue(MonologueLine(text: "Söker i minnet efter relevanta kontexter...", type: .memory))
-        let rawMemories = await memory.searchConversations(query: input, limit: 30)
+        await onMonologue(MonologueLine(text: "Söker i minnet efter '\(inputAnalysis.coreTopic)'...", type: .memory))
+        // v11: Search with original input AND core topic for better recall
+        var rawMemories = await memory.searchConversations(query: input, limit: 30)
+        // Also search by core topic and named entities for broader coverage
+        if inputAnalysis.coreTopic.count > 2 {
+            let topicMemories = await memory.searchConversations(query: inputAnalysis.coreTopic, limit: 10)
+            for mem in topicMemories where !rawMemories.contains(where: { $0.id == mem.id }) {
+                rawMemories.append(mem)
+            }
+        }
+        for entity in inputAnalysis.namedEntities.prefix(2) {
+            let entityMemories = await memory.searchConversations(query: entity, limit: 5)
+            for mem in entityMemories where !rawMemories.contains(where: { $0.id == mem.id }) {
+                rawMemories.append(mem)
+            }
+        }
         // v8: BERT semantic ranking with temporal decay
         let inputEmb = await neuralEngine.embed(input)
         let bertAvailable = !inputEmb.allSatisfy({ $0 == 0 })
@@ -264,13 +474,14 @@ actor CognitiveCycleEngine {
             generatedText += token
             await onToken(token)
         }
-        // v10: Post-generation sentence deduplication — clean up any remaining repeated sentences
+        // v10: Post-generation sentence deduplication + v11: output cleaning
         let deduped = NeuralEngineOrchestrator.deduplicateSentences(generatedText)
-        if deduped.count < generatedText.count {
-            let removed = generatedText.count - deduped.count
-            print("[CognitiveCycle] Dedup: tog bort \(removed) tecken av upprepningar")
+        let cleaned = NeuralEngineOrchestrator.cleanOutput(deduped)
+        if cleaned.count < generatedText.count {
+            let removed = generatedText.count - cleaned.count
+            print("[CognitiveCycle] Dedup+Clean: tog bort \(removed) tecken")
         }
-        context.generatedText = deduped
+        context.generatedText = cleaned
         await onStepUpdate(.generation, .completed)
 
         // Steg 8: Loop 1 — Genereringsvalidering
@@ -307,6 +518,37 @@ actor CognitiveCycleEngine {
             context.generatedText = NeuralEngineOrchestrator.deduplicateSentences(correctedText)
         }
         await onStepUpdate(.validation, .completed)
+
+        // v11: BERT Question-Answer Relevance Check
+        // Verify the response actually addresses the user's question
+        if bertAvailable && !context.generatedText.isEmpty && context.generatedText.count > 20 {
+            let questionEmb = await neuralEngine.embed(input)
+            let answerEmb = await neuralEngine.embed(String(context.generatedText.prefix(400)))
+            let qaRelevance = Double(await neuralEngine.cosineSimilarity(questionEmb, answerEmb))
+            context.relevanceScore = qaRelevance
+
+            // If the response is semantically unrelated to the question (< 0.25), it's about the wrong topic
+            if qaRelevance < 0.25 && inputAnalysis.requiresKnowledge {
+                await onMonologue(MonologueLine(text: "Relevans \(String(format: "%.0f%%", qaRelevance * 100)) — svaret verkar inte handla om \(inputAnalysis.coreTopic), regenererar...", type: .loopTrigger))
+                // Regenerate with a much more focused prompt
+                let focusedPrompt = """
+                Svara KORT och DIREKT på svenska om: \(inputAnalysis.coreTopic)
+                \(inputAnalysis.questionSummary)
+                \(inputAnalysis.namedEntities.isEmpty ? "" : "Det handlar om: \(inputAnalysis.namedEntities.joined(separator: ", "))")
+                Användare: \(input)
+                Eon (kort svar om \(inputAnalysis.coreTopic)):
+                """
+                let focusedText = await neuralEngine.generate(prompt: focusedPrompt, maxTokens: 200, temperature: 0.55)
+                if !focusedText.isEmpty {
+                    context.generatedText = focusedText
+                    // Check relevance of the new answer
+                    let newEmb = await neuralEngine.embed(String(focusedText.prefix(400)))
+                    context.relevanceScore = Double(await neuralEngine.cosineSimilarity(questionEmb, newEmb))
+                }
+            } else if qaRelevance > 0.4 {
+                await onMonologue(MonologueLine(text: "Svar-relevans: \(String(format: "%.0f%%", qaRelevance * 100)) — svaret adresserar frågan", type: .thought))
+            }
+        }
 
         // Steg 9: Loop 2 — Grafberikning (hoppas vid enkla frågor)
         await onStepUpdate(.enrichment, .active)
@@ -360,6 +602,11 @@ actor CognitiveCycleEngine {
         var context = CognitiveCycleContext(userInput: input, sessionId: sessionId)
 
         await onMonologue(MonologueLine(text: "Resonerande läge aktiverat — djup analys påbörjas...", type: .thought))
+
+        // v11: InputAnalyzer for deep mode too
+        let inputAnalysis = InputAnalyzer.analyze(input: input)
+        context.inputAnalysis = inputAnalysis
+        await onMonologue(MonologueLine(text: "Djup frågeanalys: \(inputAnalysis.questionSummary)", type: .thought))
 
         // Steg 1-4: Samma som normalt men med fler iterationer
         await onStepUpdate(.morphology, .active)
@@ -480,9 +727,9 @@ actor CognitiveCycleEngine {
             generatedText += token
             await onToken(token)
         }
-        // v10: Post-generation sentence deduplication
+        // v10: Post-generation sentence deduplication + v11: output cleaning
         let deepDeduped = NeuralEngineOrchestrator.deduplicateSentences(generatedText)
-        context.generatedText = deepDeduped
+        context.generatedText = NeuralEngineOrchestrator.cleanOutput(deepDeduped)
         await onStepUpdate(.generation, .completed)
 
         // Steg 8-10: Validering, berikning, metakognition
@@ -624,9 +871,20 @@ actor CognitiveCycleEngine {
             lines.append("")
         }
 
-        lines.append("[VIKTIGT: Svara BARA på denna fråga. Upprepa INTE dig själv. Varje mening ska vara unik.]")
-        lines.append("Användare: \(input)")
-        lines.append("Eon (djupanalys om \(extractTopic(from: input))):")
+        // v11: Use InputAnalysis for deep mode anchoring too
+        if let analysis = context.inputAnalysis {
+            lines.append("[FRÅGEANALYS: \(analysis.questionSummary)]")
+            if !analysis.namedEntities.isEmpty {
+                lines.append("[Nämnda namn: \(analysis.namedEntities.joined(separator: ", "))]")
+            }
+            lines.append("[VIKTIGT: Svaret MÅSTE handla om \(analysis.coreTopic). Upprepa INTE dig själv.]")
+            lines.append("Användare: \(input)")
+            lines.append("Eon (djupanalys om \(analysis.coreTopic)):")
+        } else {
+            lines.append("[VIKTIGT: Svara BARA på denna fråga. Upprepa INTE dig själv.]")
+            lines.append("Användare: \(input)")
+            lines.append("Eon (djupanalys):")
+        }
 
         return lines.joined(separator: "\n")
     }
@@ -720,9 +978,24 @@ actor CognitiveCycleEngine {
         }
 
         // 3. Knowledge graph facts — BERT-ranked for semantic relevance, deduplicated
+        // v11: Search by input + core topic + named entities from InputAnalysis
         let relevantFacts = await memory.searchFacts(query: input, limit: 12)
-        // Also search by extracted entities for broader coverage
         var allFacts = relevantFacts
+        // Search by InputAnalysis core topic
+        if let analysis = context.inputAnalysis, analysis.coreTopic.count > 2 {
+            let topicFacts = await memory.searchFacts(query: analysis.coreTopic, limit: 8)
+            for fact in topicFacts where !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate }) {
+                allFacts.append(fact)
+            }
+            // Search by named entities from InputAnalysis
+            for entity in analysis.namedEntities.prefix(3) {
+                let entityFacts = await memory.searchFacts(query: entity, limit: 5)
+                for fact in entityFacts where !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate }) {
+                    allFacts.append(fact)
+                }
+            }
+        }
+        // Also search by NER-extracted entities for broader coverage
         for entity in context.entities.prefix(3) {
             let entityFacts = await memory.searchFacts(query: entity.text, limit: 4)
             for fact in entityFacts {
@@ -822,7 +1095,6 @@ actor CognitiveCycleEngine {
         }
 
         // v8: Follow-up context — if user gives a short reply, carry forward the topic
-        let lastUserMsg = context.conversationHistory.last(where: { $0.role == "user" })
         let lastEonMsg = context.conversationHistory.last(where: { $0.role == "assistant" })
         let inputWordCount = input.split(separator: " ").count
         if inputWordCount <= 4, let prevEon = lastEonMsg {
@@ -830,31 +1102,27 @@ actor CognitiveCycleEngine {
             lines.append("[OBS: Kort uppföljning — fortsätt diskutera det senaste ämnet. Eons senaste svar: \(String(prevEon.content.prefix(200)))]")
         }
 
-        // 7. Current input with strong anchoring (v10: force model to focus on the question)
+        // 7. v11: Deep question anchoring using InputAnalysis
         lines.append("")
-        lines.append("[VIKTIGT: Svara BARA på denna fråga. Upprepa INTE dig själv. Varje mening ska vara unik.]")
-        lines.append("Användare: \(input)")
-        lines.append("Eon (svar om \(extractTopic(from: input))):")
+        if let analysis = context.inputAnalysis {
+            // Tell the model exactly what the user is asking about
+            lines.append("[FRÅGEANALYS: \(analysis.questionSummary)]")
+            if !analysis.namedEntities.isEmpty {
+                lines.append("[Nämnda namn/entiteter: \(analysis.namedEntities.joined(separator: ", "))]")
+            }
+            if analysis.keyNouns.count > 1 {
+                lines.append("[Nyckelbegrepp: \(analysis.keyNouns.prefix(4).joined(separator: ", "))]")
+            }
+            lines.append("[VIKTIGT: Svaret MÅSTE handla om \(analysis.coreTopic). Upprepa INTE dig själv. Varje mening ska vara unik.]")
+            lines.append("Användare: \(input)")
+            lines.append("Eon (svar om \(analysis.coreTopic)):")
+        } else {
+            lines.append("[VIKTIGT: Svara BARA på denna fråga. Upprepa INTE dig själv.]")
+            lines.append("Användare: \(input)")
+            lines.append("Eon:")
+        }
 
         return lines.joined(separator: "\n")
-    }
-
-    /// v10: Extract the main topic from user input to anchor the response
-    private func extractTopic(from input: String) -> String {
-        let lower = input.lowercased()
-        // Remove question words and common filler to find the core topic
-        let stopwords: Set<String> = ["vad", "vem", "var", "när", "hur", "vilken", "vilka", "vilket",
-                                       "vet", "du", "om", "kan", "berätta", "förklara", "är", "det",
-                                       "att", "en", "ett", "den", "de", "på", "i", "med", "för",
-                                       "och", "eller", "av", "till", "från", "har", "hade", "ska",
-                                       "skulle", "kan", "kunde", "måste", "vill", "jag", "mig", "dig",
-                                       "sin", "sitt", "sina", "tycker", "tror", "anser"]
-        let words = lower.components(separatedBy: .whitespacesAndNewlines)
-            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-            .filter { $0.count > 1 && !stopwords.contains($0) }
-        // Return the most meaningful words (up to 3)
-        let topic = words.prefix(3).joined(separator: " ")
-        return topic.isEmpty ? input.prefix(30).description : topic
     }
 
     private func buildBERTContext(input: String, entities: [ExtractedEntity]) -> String {
@@ -983,6 +1251,15 @@ actor CognitiveCycleEngine {
 
         // v8: Verb-heavy without question → chitchat or command
         if verbCount >= 2 && nounCount <= 1 && !lower.contains("?") { return .command }
+
+        // v11: If input contains a proper noun (capitalized word not at start), it's likely a factual query
+        // e.g., "Berätta om Flashback" or "Vad tycker du om Sverige"
+        let words = input.components(separatedBy: .whitespacesAndNewlines)
+        let hasProperNoun = words.dropFirst().contains { word in
+            let cleaned = word.trimmingCharacters(in: .punctuationCharacters)
+            return cleaned.first?.isUppercase == true && cleaned.count > 1
+        }
+        if hasProperNoun { return .factualQuery }
 
         // Default: question mark → factual, otherwise chitchat
         return lower.contains("?") ? .factualQuery : .chitchat
@@ -1150,6 +1427,34 @@ actor CognitiveCycleEngine {
         let informativeness = responseWords.isEmpty ? 0.5 : min(0.90, Double(novelWords.count) / max(1.0, Double(responseWords.count)) * 1.2)
         weightedSum += informativeness * 1.0
         totalWeight += 1.0
+
+        // v11: 10. Question-answer relevance (weight: 3.0 — HIGHEST weight, most important signal)
+        // This measures whether the response actually addresses what the user asked about
+        if context.relevanceScore > 0 {
+            let relevanceConfidence = min(0.95, max(0.20, context.relevanceScore * 1.5))
+            weightedSum += relevanceConfidence * 3.0
+            totalWeight += 3.0
+        }
+
+        // v11: 11. Topic match — check if core topic appears in the response (weight: 2.0)
+        if let analysis = context.inputAnalysis {
+            let topicLower = analysis.coreTopic.lowercased()
+            let responseContainsTopic = context.generatedText.lowercased().contains(topicLower)
+            // Also check if any named entity appears in the response
+            let entityMatch = analysis.namedEntities.contains { entity in
+                context.generatedText.lowercased().contains(entity.lowercased())
+            }
+            let topicScore: Double
+            if responseContainsTopic || entityMatch {
+                topicScore = 0.85  // Response mentions the topic — good
+            } else if analysis.requiresKnowledge {
+                topicScore = 0.30  // Should mention topic but doesn't — bad
+            } else {
+                topicScore = 0.60  // Doesn't require specific topic mention
+            }
+            weightedSum += topicScore * 2.0
+            totalWeight += 2.0
+        }
 
         return min(0.95, weightedSum / totalWeight)
     }
@@ -1381,6 +1686,8 @@ struct CognitiveCycleContext {
     var validationResult: ValidationResult? = nil
     var finalConfidence: Double = 0.75
     var consciousness: ConsciousnessContext? = nil
+    var inputAnalysis: InputAnalysis? = nil  // v11: deep question understanding
+    var relevanceScore: Double = 0.0        // v11: BERT question-answer relevance
 }
 
 struct ValidationResult {
