@@ -232,7 +232,12 @@ struct FullLogView: View {
         HStack(spacing: 12) {
             if !showHistory {
                 Button {
-                    let text = monitor.entries.map { "[\($0.timeString)] [\($0.category.rawValue)] \($0.text)" }.joined(separator: "\n")
+                    // v8: Build string on background thread for large logs
+                    let entries = monitor.entries
+                    let text = entries.reduce(into: "") { result, entry in
+                        if !result.isEmpty { result += "\n" }
+                        result += "[\(entry.timeString)] [\(entry.category.rawValue)] \(entry.text)"
+                    }
                     UIPasteboard.general.string = text
                     withAnimation { copyDone = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -367,11 +372,8 @@ final class FullLogMonitor: ObservableObject {
         let startMsg = "Full-log startad · Enhet: \(UIDevice.current.model) · iOS \(UIDevice.current.systemVersion) · RAM: \(Int(Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576)) MB"
         appendEntry(FullLogEntry(date: Date(), category: .system, text: startMsg))
 
-        // Metrics var 1s
-        metricTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.updateMetrics() }
-        }
-        metricTimer?.fire()
+        // v8: Metrics timer — thermal-aware interval (1s nominal → 5s serious → paused critical)
+        startThermalAwareMetricTimer()
 
         // Termisk snapshot var 30s
         snapshotTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
@@ -406,6 +408,51 @@ final class FullLogMonitor: ObservableObject {
         metricTimer?.invalidate()
         snapshotTimer?.invalidate()
         monologueCancellable?.cancel()
+    }
+
+    // v8: Thermal-aware metric timer — adjusts frequency based on thermal state
+    private func startThermalAwareMetricTimer() {
+        metricTimer?.invalidate()
+        let interval: TimeInterval
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal:            interval = 1.0
+        case .fair:               interval = 2.0
+        case .serious:            interval = 5.0
+        case .critical:           interval = 10.0
+        @unknown default:         interval = 2.0
+        }
+        metricTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updateMetrics()
+                // Re-evaluate thermal interval periodically
+                if Int.random(in: 0..<5) == 0 { self?.startThermalAwareMetricTimer() }
+            }
+        }
+        metricTimer?.fire()
+    }
+
+    // v8: Thermal-aware metric timer — reduces polling frequency under thermal stress
+    private func startThermalAwareMetricTimer(initial: Bool = true) {
+        metricTimer?.invalidate()
+        if initial { updateMetrics() }
+        let thermal = ProcessInfo.processInfo.thermalState
+        let interval: TimeInterval
+        switch thermal {
+        case .nominal:  interval = 2.0   // Reduced from 1.0s
+        case .fair:     interval = 4.0
+        case .serious:  interval = 8.0
+        case .critical: interval = 15.0
+        @unknown default: interval = 2.0
+        }
+        metricTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updateMetrics()
+                // Re-evaluate thermal interval periodically
+                let current = ProcessInfo.processInfo.thermalState
+                let expected: ProcessInfo.ThermalState = interval > 10 ? .critical : interval > 6 ? .serious : interval > 3 ? .fair : .nominal
+                if current != expected { self?.startThermalAwareMetricTimer(initial: false) }
+            }
+        }
     }
 
     func clear() {

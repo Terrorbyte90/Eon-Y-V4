@@ -507,6 +507,9 @@ struct ChatView: View {
         }
         .disabled(!canSend)
         .animation(.spring(response: 0.3), value: canSend)
+        // v8: Accessibility
+        .accessibilityLabel(brain.isThinking ? "Eon tänker" : "Skicka meddelande")
+        .accessibilityHint(canSend ? "Tryck för att skicka ditt meddelande" : "Skriv ett meddelande först")
     }
 
     var canSend: Bool {

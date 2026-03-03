@@ -746,9 +746,26 @@ class ResourceMonitor: ObservableObject {
 
     func startMonitoring() {
         updateMetrics()
-        // Del 7: Byt 2s → 5s — halverar UI-renderingsfrekvensen utan märkbar eftersläpning
-        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.updateMetrics() }
+        // v8: Thermal-aware monitoring — 5s nominal → 15s serious → paused critical
+        startThermalAwareTimer()
+    }
+
+    private func startThermalAwareTimer() {
+        timer?.invalidate()
+        let interval: TimeInterval
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal:            interval = 5.0
+        case .fair:               interval = 8.0
+        case .serious:            interval = 15.0
+        case .critical:           interval = 30.0
+        @unknown default:         interval = 8.0
+        }
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updateMetrics()
+                // Re-check thermal state periodically to adjust timer
+                if Int.random(in: 0..<3) == 0 { self?.startThermalAwareTimer() }
+            }
         }
     }
 

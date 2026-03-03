@@ -153,30 +153,35 @@ actor CognitiveCycleEngine {
         context.register = analysis.register
         await onStepUpdate(.wsd, .completed)
 
-        // Steg 3: Minneshämtning (v7: BERT semantic ranking when available)
+        // Steg 3: Minneshämtning (v8: wider search window + temporal decay + BERT ranking)
         await onStepUpdate(.memoryRetrieval, .active)
         await onMonologue(MonologueLine(text: "Söker i minnet efter relevanta kontexter...", type: .memory))
-        let rawMemories = await memory.searchConversations(query: input, limit: 8)
-        // v7: If BERT is available, re-rank memories by semantic similarity
+        let rawMemories = await memory.searchConversations(query: input, limit: 30)
+        // v8: BERT semantic ranking with temporal decay
         let inputEmb = await neuralEngine.embed(input)
         let bertAvailable = !inputEmb.allSatisfy({ $0 == 0 })
         if bertAvailable && rawMemories.count > 2 {
-            var scored: [(record: ConversationRecord, score: Float)] = []
+            let now = Date()
+            var scored: [(record: ConversationRecord, score: Double)] = []
             for mem in rawMemories {
-                let memEmb = await neuralEngine.embed(String(mem.content.prefix(200)))
-                let sim = await neuralEngine.cosineSimilarity(inputEmb, memEmb)
-                scored.append((mem, sim))
+                let memEmb = await neuralEngine.embed(String(mem.content.prefix(300)))
+                let rawSim = Double(await neuralEngine.cosineSimilarity(inputEmb, memEmb))
+                // v8: Temporal decay — recent memories weighted higher (24h half-life)
+                let ageHours = now.timeIntervalSince(mem.date) / 3600.0
+                let recencyBoost = exp(-ageHours / 24.0) * 0.15
+                scored.append((mem, rawSim + recencyBoost))
             }
             context.retrievedMemories = scored.sorted { $0.score > $1.score }
-                .prefix(5).map { $0.record }
+                .filter { $0.score > 0.20 }  // v8: relevance threshold
+                .prefix(6).map { $0.record }
         } else {
             context.retrievedMemories = Array(rawMemories.prefix(5))
         }
         // Hämta senaste konversationsturerna för kontextmedvetenhet
-        let recentHistory = await memory.getRecentConversation(limit: 8)
+        let recentHistory = await memory.getRecentConversation(limit: 10)
         context.conversationHistory = recentHistory
         if !context.retrievedMemories.isEmpty {
-            let rankMethod = bertAvailable ? "BERT-rankade" : "nyckelord"
+            let rankMethod = bertAvailable ? "BERT+tidsvikt" : "nyckelord"
             await onMonologue(MonologueLine(text: "Hittade \(context.retrievedMemories.count) relevanta minnen (\(rankMethod)), \(recentHistory.count) historikturer laddade", type: .memory))
         }
         await onStepUpdate(.memoryRetrieval, .completed)
@@ -214,6 +219,11 @@ actor CognitiveCycleEngine {
         context.consciousness = consciousness
         if !consciousness.promptDescription.isEmpty {
             await onMonologue(MonologueLine(text: "Medvetandekontext: \(String(consciousness.promptDescription.prefix(120)))", type: .insight))
+        }
+
+        // v8: Consciousness narration — express what the system is experiencing
+        if let narration = consciousnessNarration(consciousness) {
+            await onMonologue(narration)
         }
 
         let prompt = await buildPrompt(input: input, context: context)
@@ -356,10 +366,29 @@ actor CognitiveCycleEngine {
 
         await onStepUpdate(.memoryRetrieval, .active)
         await onMonologue(MonologueLine(text: "Söker djupt i minnet och kunskapsbanken...", type: .memory))
-        let memories = await memory.searchConversations(query: input, limit: 15)
-        context.retrievedMemories = memories
+        // v8: Wider search + BERT re-ranking in deep mode too
+        let rawDeepMemories = await memory.searchConversations(query: input, limit: 40)
+        let deepInputEmb = await neuralEngine.embed(input)
+        let deepBertAvail = !deepInputEmb.allSatisfy({ $0 == 0 })
+        if deepBertAvail && rawDeepMemories.count > 3 {
+            let now = Date()
+            var scored: [(record: ConversationRecord, score: Double)] = []
+            for mem in rawDeepMemories {
+                let memEmb = await neuralEngine.embed(String(mem.content.prefix(300)))
+                let rawSim = Double(await neuralEngine.cosineSimilarity(deepInputEmb, memEmb))
+                let ageHours = now.timeIntervalSince(mem.date) / 3600.0
+                let recencyBoost = exp(-ageHours / 48.0) * 0.10
+                scored.append((mem, rawSim + recencyBoost))
+            }
+            context.retrievedMemories = scored.sorted { $0.score > $1.score }
+                .filter { $0.score > 0.15 }
+                .prefix(10).map { $0.record }
+        } else {
+            context.retrievedMemories = Array(rawDeepMemories.prefix(10))
+        }
         let recentHistory = await memory.getRecentConversation(limit: 20)
         context.conversationHistory = recentHistory
+        await onMonologue(MonologueLine(text: "Hittade \(context.retrievedMemories.count) relevanta minnen (\(deepBertAvail ? "BERT+tidsvikt" : "nyckelord")), \(recentHistory.count) historikturer", type: .memory))
         await onStepUpdate(.memoryRetrieval, .completed)
 
         // Compute BERT embedding early — used for both article ranking and fact ranking
@@ -780,7 +809,16 @@ actor CognitiveCycleEngine {
         if !context.retrievedMemories.isEmpty {
             let uniqueMemories = context.retrievedMemories.prefix(5)
             let mem = uniqueMemories.map { $0.content }.joined(separator: " | ")
-            lines.append("[Minnen: \(String(mem.prefix(400)))]")
+            lines.append("[Minnen: \(String(mem.prefix(500)))]")
+        }
+
+        // v8: Follow-up context — if user gives a short reply, carry forward the topic
+        let lastUserMsg = context.conversationHistory.last(where: { $0.role == "user" })
+        let lastEonMsg = context.conversationHistory.last(where: { $0.role == "assistant" })
+        let inputWordCount = input.split(separator: " ").count
+        if inputWordCount <= 4, let prevEon = lastEonMsg {
+            lines.append("")
+            lines.append("[OBS: Kort uppföljning — fortsätt diskutera det senaste ämnet. Eons senaste svar: \(String(prevEon.content.prefix(200)))]")
         }
 
         // 7. Current input with clear formatting
@@ -809,7 +847,7 @@ actor CognitiveCycleEngine {
         return parts.joined(separator: ", ")
     }
 
-    // MARK: - Intent Detection (v7: NLTagger-assisted + multi-signal)
+    // MARK: - Intent Detection (v8: NLTagger-assisted + multi-signal + broader patterns)
     // Uses NLTagger lexical class analysis combined with keyword patterns
     // for more accurate intent classification.
 
@@ -821,14 +859,17 @@ actor CognitiveCycleEngine {
 
         // Greeting detection — only very short inputs
         let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "god natt",
-                         "tjena", "hejhej", "yo", "tjo", "morsning", "tjabba", "tjenare"]
+                         "tjena", "hejhej", "yo", "tjo", "morsning", "tjabba", "tjenare",
+                         "hej där", "hej på dig", "god dag"]
         if greetings.contains(where: { lower.hasPrefix($0) }) && wordCount <= 4 { return .greeting }
 
         // Short follow-up (1-3 words) — only when there is conversation history
         let followUps = ["ja", "nej", "ok", "okej", "mm", "japp", "precis", "exakt", "visst",
                          "aha", "oh", "absolut", "korrekt", "stämmer", "just det", "klart",
-                         "självklart", "naturligtvis", "verkligen", "sant", "inte alls", "aldrig"]
-        if wordCount <= 3 && followUps.contains(where: { lower.hasPrefix($0) }) && !history.isEmpty { return .followUp }
+                         "självklart", "naturligtvis", "verkligen", "sant", "inte alls", "aldrig",
+                         "berätta mer", "fortsätt", "ge mig mer", "mer om det", "utveckla",
+                         "varför det", "hur då", "på vilket sätt"]
+        if wordCount <= 4 && followUps.contains(where: { lower.hasPrefix($0) }) && !history.isEmpty { return .followUp }
 
         // --- Phase 2: NLTagger POS analysis for structural intent ---
         let tagger = NLTagger(tagSchemes: [.lexicalClass])
@@ -846,60 +887,118 @@ actor CognitiveCycleEngine {
         }
 
         // Multi-part or long input → complex
-        if wordCount > 15 || (lower.contains("?") && wordCount > 8) { return .complex }
+        if wordCount > 15 || (lower.contains("?") && wordCount > 8 && nounCount >= 3) { return .complex }
 
         // Self-reference questions about Eon
         let selfPatterns = ["vem är du", "vad är du", "berätta om dig", "hur fungerar du", "vad kan du",
                             "hur smart", "hur intelligent", "vad vet du", "vad tänker du om dig",
                             "vad tycker du om dig", "är du medveten", "har du känslor", "upplever du",
-                            "kan du tänka", "vad är medvetande", "är du levande"]
+                            "kan du tänka", "vad är medvetande", "är du levande", "hur mår du",
+                            "hur känner du", "vad upplever du", "vad drömmer du"]
         if selfPatterns.contains(where: { lower.contains($0) }) { return .selfReference }
 
-        // Explanation request — broad matching
+        // Explanation request — v8: broader matching incl. "kan du förklara", "jag undrar"
         let explainPatterns = ["förklara", "hur fungerar", "vad innebär", "vad betyder", "kan du beskriva",
                                "berätta om", "beskriv", "vad är skillnaden", "hur skiljer", "vad menas",
-                               "redogör", "vad handlar", "hur uppstår", "hur bildas"]
+                               "redogör", "vad handlar", "hur uppstår", "hur bildas",
+                               "kan du förklara", "jag undrar", "jag förstår inte",
+                               "vad är det för", "hur hänger", "vad menar man med",
+                               "vad är poängen med", "ge en överblick", "sammanfatta"]
         if explainPatterns.contains(where: { lower.contains($0) }) { return .explanation }
 
         // Why/opinion/reasoning — deep thought questions
         let opinionPatterns = ["varför", "tycker du", "vad anser", "vad tror du", "vad tänker du",
                                "vad är din syn", "hur ser du på", "vad är ditt", "resonera", "reflektera",
-                               "vad menar du", "håller du med", "argumentera för", "argumentera mot"]
+                               "vad menar du", "håller du med", "argumentera för", "argumentera mot",
+                               "vad skulle du säga", "om du fick välja", "vad är viktigast",
+                               "finns det någon mening", "vad är syftet"]
         if opinionPatterns.contains(where: { lower.contains($0) }) { return .opinion }
 
         // Imperative / Command — Swedish imperative first word OR verb-initial sentence
         let imperative: Set<String> = ["gör", "visa", "beräkna", "sök", "skriv", "skapa", "lista",
                           "sammanfatta", "analysera", "jämför", "definiera", "exemplifiera",
                           "argumentera", "diskutera", "räkna", "hitta", "lös", "förklara",
-                          "svara", "hjälp", "generera", "översätt", "korrigera"]
+                          "svara", "hjälp", "generera", "översätt", "korrigera",
+                          "rangordna", "kategorisera", "klassificera", "utvärdera"]
         let firstWord = String(lower.prefix(while: { $0 != " " }))
         if imperative.contains(firstWord) || (firstWordTag == .verb && wordCount <= 10) { return .command }
 
         // Factual query — question words + NLTagger detecting noun-heavy structure
-        let factualStarters = ["vad", "vem", "var", "när", "hur många", "hur mycket", "vilket", "vilken", "vilka", "hur långt", "hur stor", "hur gammal"]
+        let factualStarters = ["vad", "vem", "var", "när", "hur många", "hur mycket", "vilket",
+                               "vilken", "vilka", "hur långt", "hur stor", "hur gammal",
+                               "hur lång", "hur bred", "hur djup", "hur hög", "stämmer det att"]
         if factualStarters.contains(where: { lower.hasPrefix($0) }) { return .factualQuery }
 
         // Creative — broader patterns
         let creativePatterns = ["hitta på", "dikt", "berättelse", "fantisera", "skriv en", "skapa en",
                                 "dikta", "saga", "novell", "poem", "limerick", "historia om",
-                                "föreställ dig", "tänk dig att", "låtsas att"]
+                                "föreställ dig", "tänk dig att", "låtsas att",
+                                "uppfinn", "brainstorma", "ge förslag", "kreativ", "inspirera"]
         if creativePatterns.contains(where: { lower.contains($0) }) { return .creative }
 
         // Emotional/personal — expanded with NLTagger adjective detection
         let emotionalWords = ["ledsen", "glad", "orolig", "arg", "trött", "mår", "ensam",
                               "rädd", "stressad", "lycklig", "nedstämd", "frustrerad",
-                              "ångest", "deprimerad", "tacksam", "bekymrad", "nöjd", "upprörd"]
+                              "ångest", "deprimerad", "tacksam", "bekymrad", "nöjd", "upprörd",
+                              "kär", "hatisk", "förvirrad", "överväldigad", "lugn", "nervös"]
         if emotionalWords.contains(where: { lower.contains($0) }) { return .emotional }
 
         // --- Phase 3: NLTagger-based structural inference ---
+        // v8: "Kan du..." + verb → explanation/command pattern
+        if lower.hasPrefix("kan du") && verbCount >= 2 { return .explanation }
+
         // Noun-heavy + question mark → factual query
         if lower.contains("?") && nounCount >= 2 && verbCount <= 1 { return .factualQuery }
 
         // Adjective-heavy + personal pronouns → emotional
         if adjCount >= 2 && (lower.contains("jag") || lower.contains("mig") || lower.contains("mitt")) { return .emotional }
 
+        // v8: Verb-heavy without question → chitchat or command
+        if verbCount >= 2 && nounCount <= 1 && !lower.contains("?") { return .command }
+
         // Default: question mark → factual, otherwise chitchat
         return lower.contains("?") ? .factualQuery : .chitchat
+    }
+
+    // v8: Consciousness narration — expresses what the system is experiencing during thinking
+    private func consciousnessNarration(_ cc: ConsciousnessContext) -> MonologueLine? {
+        if cc.isSurprised && cc.surpriseStrength > 0.4 {
+            return MonologueLine(
+                text: "Överraskad — detta avviker från prediktioner (styrka \(String(format: "%.0f%%", cc.surpriseStrength * 100))), utforskar nytt territorium",
+                type: .insight
+            )
+        }
+        if cc.epistemicValue > 0.7 {
+            return MonologueLine(
+                text: "Hög nyfikenhet (\(String(format: "%.0f%%", cc.epistemicValue * 100))) — söker djupare kopplingar och alternativa perspektiv",
+                type: .insight
+            )
+        }
+        if cc.sleepPressure > 0.7 {
+            return MonologueLine(
+                text: "Sömnbehov \(String(format: "%.0f%%", cc.sleepPressure * 100)) — konsoliderar tänkandet",
+                type: .thought
+            )
+        }
+        if cc.criticalityRegime == .supercritical {
+            return MonologueLine(
+                text: "Superkritiskt tillstånd — stabiliserar resonemang före svar",
+                type: .revision
+            )
+        }
+        if cc.freeEnergy > 0.7 {
+            return MonologueLine(
+                text: "Hög prediktionsosäkerhet (FE=\(String(format: "%.2f", cc.freeEnergy))) — överväger flera möjligheter",
+                type: .thought
+            )
+        }
+        if cc.dmnLZComplexity > 0.4 && !cc.recentSpontaneousThoughts.isEmpty {
+            return MonologueLine(
+                text: "DMN-aktivitet hög — associerar fritt: \(cc.recentSpontaneousThoughts.prefix(2).joined(separator: ", "))",
+                type: .thought
+            )
+        }
+        return nil
     }
 
     private func generationParams(for intent: ConversationIntent, inputLength: Int) -> (maxTokens: Int, temperature: Double) {
@@ -924,7 +1023,7 @@ actor CognitiveCycleEngine {
         }
     }
 
-    // MARK: - Konfidens-aggregering
+    // MARK: - Konfidens-aggregering (v8: anti-repetition + addressiveness + informativeness)
 
     private func computeAggregatedConfidence(context: CognitiveCycleContext) -> Double {
         // Weighted confidence from multiple complementary signals
@@ -960,7 +1059,6 @@ actor CognitiveCycleEngine {
         totalWeight += 2.0
 
         // 4. Knowledge grounding — response backed by facts/articles (weight: 2.5)
-        // Check if response text actually references retrieved knowledge
         let responseWords = Set(context.generatedText.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
         var knowledgeOverlap = 0
         for entity in context.entities {
@@ -968,11 +1066,11 @@ actor CognitiveCycleEngine {
         }
         let groundingScore: Double
         if context.entities.isEmpty && context.retrievedMemories.isEmpty {
-            groundingScore = 0.50  // No knowledge available
+            groundingScore = 0.50
         } else if knowledgeOverlap > 0 {
-            groundingScore = min(0.90, 0.65 + Double(knowledgeOverlap) * 0.08)  // Uses knowledge
+            groundingScore = min(0.90, 0.65 + Double(knowledgeOverlap) * 0.08)
         } else {
-            groundingScore = 0.60  // Knowledge available but not used
+            groundingScore = 0.60
         }
         weightedSum += groundingScore * 2.5
         totalWeight += 2.5
@@ -985,33 +1083,45 @@ actor CognitiveCycleEngine {
         // 6. Response diversity — penalize repetitive/low-variety text (weight: 1.0)
         let words = context.generatedText.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 2 }
         let uniqueRatio = words.isEmpty ? 0.5 : Double(Set(words).count) / Double(words.count)
-        let diversityScore = min(0.90, uniqueRatio * 1.1)  // Reward lexical variety
+        let diversityScore = min(0.90, uniqueRatio * 1.1)
         weightedSum += diversityScore * 1.0
         totalWeight += 1.0
 
         // 7. Consciousness-derived confidence (weight: 1.5)
-        // Genuina mätvärden från oscillatorer, active inference och kritikalitet
         if let cc = context.consciousness {
             var consciousnessScore: Double = 0.5
-
-            // Forward model accuracy — hur bra förutsäger systemet?
             consciousnessScore += cc.forwardModelAccuracy * 0.2
-
-            // Kritikalitet — optimalt regime ger bättre svar
             if cc.criticalityRegime == .critical { consciousnessScore += 0.15 }
-
-            // Global oscillatorsynkronisering — hög koherens = bättre integration
             consciousnessScore += cc.globalSync * 0.1
-
-            // Hög sömnpress reducerar konfidens
             consciousnessScore -= cc.sleepPressure * 0.15
-
-            // Meta-uppmärksamhet — systemet vet vad det gör
             consciousnessScore += cc.metaAttentionLevel * 0.1
-
             weightedSum += max(0.2, min(0.95, consciousnessScore)) * 1.5
             totalWeight += 1.5
         }
+
+        // v8: 8. Anti-repetition vs conversation history (weight: 1.5)
+        // Penalize if response repeats phrasing from recent Eon messages
+        if !context.conversationHistory.isEmpty {
+            let recentEonWords = Set(
+                context.conversationHistory
+                    .filter { $0.role == "assistant" }
+                    .suffix(3)
+                    .flatMap { $0.content.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 4 } }
+            )
+            let currentWords = Set(words.filter { $0.count > 4 })
+            let overlapRatio = currentWords.isEmpty ? 0 : Double(currentWords.intersection(recentEonWords).count) / Double(currentWords.count)
+            // Low overlap = good (novel), high overlap = bad (repetitive)
+            let noveltyScore = max(0.3, min(0.90, 1.0 - overlapRatio * 1.5))
+            weightedSum += noveltyScore * 1.5
+            totalWeight += 1.5
+        }
+
+        // v8: 9. Informativeness — response provides substantially more info than question (weight: 1.0)
+        let inputWords = Set(context.userInput.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+        let novelWords = responseWords.subtracting(inputWords)
+        let informativeness = responseWords.isEmpty ? 0.5 : min(0.90, Double(novelWords.count) / max(1.0, Double(responseWords.count)) * 1.2)
+        weightedSum += informativeness * 1.0
+        totalWeight += 1.0
 
         return min(0.95, weightedSum / totalWeight)
     }
@@ -1076,7 +1186,7 @@ actor GenerationValidator {
 // MARK: - GraphEnricher (Loop 2)
 
 actor GraphEnricher {
-    /// v7: Enriched fact extraction patterns for Swedish text — 15 patterns
+    /// v8: Enriched fact extraction patterns for Swedish text — 19 patterns
     private static let factPatterns: [(pattern: String, predicate: String, confidence: Double)] = [
         // "X är Y" — basic identity/classification
         ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+är\\s+((?:en|ett|den|det)?\\s*[\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "är", 0.65),
@@ -1108,6 +1218,14 @@ actor GraphEnricher {
         ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+(?:uppfanns|utvecklades|skapades)\\s+av\\s+([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "skapades_av", 0.65),
         // v7: "X ligger i Y" / "X finns i Y" — location
         ("([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+(?:ligger|finns|befinner sig)\\s+i\\s+([A-ZÅÄÖ][\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,2})", "finns_i", 0.60),
+        // v8: "X förhindrar Y" / "X motverkar Y" — prevention
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+(?:förhindrar|motverkar|hindrar)\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "förhindrar", 0.55),
+        // v8: "X leder till Y" — consequence (separate from orsakar)
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+leder\\s+till\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "leder_till", 0.55),
+        // v8: "X används för Y" / "X används inom Y" — usage
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+används\\s+(?:för|inom|till)\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,3})", "används_för", 0.55),
+        // v8: "X definieras som Y" — definition
+        ("([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+)?)\\s+definieras\\s+som\\s+([\\wåäöÅÄÖ]+(?:\\s+[\\wåäöÅÄÖ]+){0,4})", "definieras_som", 0.65),
     ]
 
     func enrich(text: String, entities: [ExtractedEntity], memory: PersistentMemoryStore) async {
@@ -1169,15 +1287,25 @@ actor GraphEnricher {
 
 actor MetacognitiveReviser {
     func revise(original: String, confidence: Double, neuralEngine: NeuralEngineOrchestrator) async -> String {
+        // v8: More specific revision instructions based on confidence level
+        let specificInstruction: String
+        if confidence < 0.40 {
+            specificInstruction = "Svaret verkar helt irrelevant eller oförståeligt. Skriv ett nytt, kortfattat svar som direkt adresserar frågan."
+        } else if confidence < 0.50 {
+            specificInstruction = "Svaret saknar substans eller är för generiskt. Lägg till konkreta fakta, exempel eller resonemang."
+        } else {
+            specificInstruction = "Svaret kan förbättras — skärp formuleringen, erkänn osäkerhet explicit och lägg till en insikt."
+        }
+
         let revisionPrompt = """
-        Ditt tidigare svar hade låg konfidens (\(String(format: "%.0f%%", confidence * 100))).
-        Ursprungligt svar: \(original)
-        
-        Förbättra svaret: var mer precis, erkänn osäkerhet explicit, och ge ett mer genomtänkt svar.
-        Reviderat svar:
+        REVISION: Konfidens \(String(format: "%.0f%%", confidence * 100)).
+        Tidigare svar: \(String(original.prefix(400)))
+
+        \(specificInstruction)
+        Reviderat svar (på svenska):
         """
 
-        let revised = await neuralEngine.generate(prompt: revisionPrompt, maxTokens: 200, temperature: 0.6)
+        let revised = await neuralEngine.generate(prompt: revisionPrompt, maxTokens: 250, temperature: 0.58)
         return revised.isEmpty ? original : revised
     }
 }
