@@ -425,8 +425,12 @@ struct EonPulseHomeView: View {
 
     func startEyeAnimation() {
         eyeLookTimer?.invalidate()
-        // Ögat tittar runt slumpmässigt
-        eyeLookTimer = Timer.scheduledTimer(withTimeInterval: Double.random(in: 0.8...2.2), repeats: true) { _ in
+        // v8: Thermal-aware eye animation — slower during thermal stress
+        let thermalState = ProcessInfo.processInfo.thermalState
+        let baseInterval: ClosedRange<Double> = thermalState == .serious || thermalState == .critical
+            ? 3.0...6.0  // Much slower under thermal stress
+            : thermalState == .fair ? 1.5...3.5 : 0.8...2.2
+        eyeLookTimer = Timer.scheduledTimer(withTimeInterval: Double.random(in: baseInterval), repeats: true) { _ in
             let maxOffset: CGFloat = 8
             let newOffset = CGSize(
                 width: CGFloat.random(in: -maxOffset...maxOffset),
