@@ -58,6 +58,22 @@ actor ReasoningEngine {
         graph.addRelation(cause: "Komplexitet",     effect: "Emergens",       strength: 0.75)
         graph.addRelation(cause: "Sömn",            effect: "Konsolidering",  strength: 0.88)
         graph.addRelation(cause: "Konsolidering",   effect: "Minne",          strength: 0.85)
+        // v9: Domain-specific causal relations — education, society, biology, technology
+        graph.addRelation(cause: "Utbildning",      effect: "Kompetens",      strength: 0.85)
+        graph.addRelation(cause: "Läsning",         effect: "Vokabulär",      strength: 0.80)
+        graph.addRelation(cause: "Vokabulär",       effect: "Kommunikation",  strength: 0.75)
+        graph.addRelation(cause: "Kommunikation",   effect: "Förståelse",     strength: 0.78)
+        graph.addRelation(cause: "Självdisciplin",  effect: "Prestation",     strength: 0.72)
+        graph.addRelation(cause: "Kreativitet",     effect: "Problemlösning", strength: 0.68)
+        graph.addRelation(cause: "Meditation",      effect: "Uppmärksamhet",  strength: 0.70)
+        graph.addRelation(cause: "Ångest",          effect: "Kognition",      strength: -0.55)
+        graph.addRelation(cause: "Gemenskap",       effect: "Empati",         strength: 0.72)
+        graph.addRelation(cause: "Autonomi",        effect: "Motivation",     strength: 0.78)
+        graph.addRelation(cause: "Anpassning",      effect: "Överlevnad",     strength: 0.90)
+        graph.addRelation(cause: "Emergens",        effect: "Medvetande",     strength: 0.65)
+        graph.addRelation(cause: "Prediktionsfel",  effect: "Inlärning",      strength: 0.82)
+        graph.addRelation(cause: "Surprise",        effect: "Nyfikenhet",     strength: 0.70)
+        graph.addRelation(cause: "Oscillationer",   effect: "Integration",    strength: 0.75)
     }
 
     // MARK: - Primär resonemangsfunktion
@@ -391,12 +407,27 @@ actor ReasoningEngine {
         // For complex multi-sentence inputs, use Tree-of-Thought
         if wordCount > 15 { return .treeOfThought }
 
-        // --- Phase 3: Diversity-based selection ---
+        // --- Phase 3: v9 — Consciousness-informed strategy bias ---
+        let inference = ActiveInferenceEngine.shared
+        let crit = CriticalityController.shared
+
+        // High curiosity → abductive (generate best explanations)
+        if inference.epistemicValue > 0.7 { return .abductive }
+
+        // Surprise → causal (find why prediction was wrong)
+        if inference.isSurprised && inference.surpriseStrength > 0.4 { return .causal }
+
+        // Subcritical → analogical (rigid thinking needs cross-domain connections)
+        if crit.regime == .subcritical { return .analogical }
+
+        // Supercritical → deductive (chaotic thinking needs structure)
+        if crit.regime == .supercritical { return .deductive }
+
+        // --- Phase 4: Diversity-based selection ---
         // Ensure we don't over-use any single strategy
         let recentStrategies = reasoningHistory.suffix(10).map { $0.strategy }
         let strategyCounts = Dictionary(recentStrategies.map { ($0, 1) }, uniquingKeysWith: +)
         let allStrategies: [ReasoningStrategy] = [.analogical, .counterfactual, .inductive, .causal, .abductive, .deductive]
-        // Pick the least-used strategy
         let leastUsed = allStrategies.min(by: { (strategyCounts[$0] ?? 0) < (strategyCounts[$1] ?? 0) })
         return leastUsed ?? .treeOfThought
     }

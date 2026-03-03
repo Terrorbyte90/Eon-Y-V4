@@ -197,11 +197,21 @@ final class ActiveInferenceEngine: ObservableObject {
         // Generell prediktionsriktning baserad på trender
         let predictedIIDelta = cogState.growthVelocity * 60.0
 
+        // v9: Language activity prediction — active conversation → high language activity
+        let predictedLangActivity = cogState.isConversationActive
+            ? 0.5 + cogState.languageDimension * 0.4
+            : 0.1 + cogState.languageDimension * 0.2
+
+        // v9: Emotional shift prediction — learning → positive, high load → negative
+        let predictedEmoShift = cogState.learningMomentum * 0.3 - cogState.cognitiveLoad * 0.2
+
         return Prediction(
             predictedThermalChange: predictedThermalDelta,
             predictedMemoryActivity: predictedMemoryActivity,
             predictedLearningGain: predictedLearningDelta,
             predictedIIChange: predictedIIDelta,
+            predictedLanguageActivity: predictedLangActivity,
+            predictedEmotionalShift: predictedEmoShift,
             confidence: forwardModelAccuracy,
             timestamp: Date()
         )
@@ -209,7 +219,8 @@ final class ActiveInferenceEngine: ObservableObject {
 
     // MARK: - Beräkna prediktionsfel
 
-    /// v7: Returns both overall error and per-channel errors for adaptive learning
+    /// v9: Returns both overall error and per-channel errors for adaptive learning
+    /// Now uses all 5 precision channels including language and emotional
     private func computePredictionError(predicted: Prediction, actual: SensorSnapshot) -> (Double, [Double]) {
         var totalError: Double = 0
         var totalPrecision: Double = 0
@@ -229,12 +240,26 @@ final class ActiveInferenceEngine: ObservableObject {
         totalPrecision += cogPrecision
         channelErrors[PrecisionChannel.cognitive.rawValue] = cogError
 
-        // Inlärningskanal
+        // Minneskanal
         let learnError = abs(predicted.predictedLearningGain - actual.learningActivity)
         let learnPrecision = precisionWeights[PrecisionChannel.memory.rawValue]
         totalError += learnError * learnPrecision
         totalPrecision += learnPrecision
         channelErrors[PrecisionChannel.memory.rawValue] = learnError
+
+        // v9: Språkkanal — predikterar språklig aktivitet
+        let langError = abs(predicted.predictedLanguageActivity - actual.languageActivity)
+        let langPrecision = precisionWeights[PrecisionChannel.language.rawValue]
+        totalError += langError * langPrecision
+        totalPrecision += langPrecision
+        channelErrors[PrecisionChannel.language.rawValue] = langError
+
+        // v9: Emotionell kanal — predikterar valensförändring
+        let emoError = abs(predicted.predictedEmotionalShift - actual.emotionalShift)
+        let emoPrecision = precisionWeights[PrecisionChannel.emotional.rawValue]
+        totalError += emoError * emoPrecision
+        totalPrecision += emoPrecision
+        channelErrors[PrecisionChannel.emotional.rawValue] = emoError
 
         // Normalisera
         let normalizedError = totalPrecision > 0 ? min(1.0, totalError / totalPrecision) : 0.5
@@ -396,6 +421,9 @@ struct Prediction: Identifiable {
     let predictedMemoryActivity: Double
     let predictedLearningGain: Double
     let predictedIIChange: Double
+    // v9: Language and emotional prediction channels
+    let predictedLanguageActivity: Double
+    let predictedEmotionalShift: Double
     let confidence: Double
     let timestamp: Date
 }
@@ -413,6 +441,9 @@ struct SensorSnapshot {
     let memoryActivity: Double   // Minnesaktivitet (0-1)
     let learningActivity: Double // Inlärningsaktivitet (0-1)
     let cognitiveLoad: Double    // Kognitiv belastning (0-1)
+    // v9: Language and emotional sensor channels
+    var languageActivity: Double = 0.3   // Språkprocesseringsaktivitet (0-1)
+    var emotionalShift: Double = 0.0     // Emotionell valensförändring (-1 till 1)
 }
 
 /// Snapshot av kognitivt tillstånd (för att generera prediktioner)
@@ -422,4 +453,7 @@ struct CognitiveSnapshot {
     let learningMomentum: Double
     let growthVelocity: Double
     let knowledgeCount: Int
+    // v9: Additional cognitive state
+    var languageDimension: Double = 0.5    // Språkdimension nivå
+    var emotionalValence: Double = 0.0     // Aktuell emotionell valens
 }

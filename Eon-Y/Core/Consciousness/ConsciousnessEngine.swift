@@ -329,18 +329,23 @@ final class ConsciousnessEngine: ObservableObject {
             dmn.tick(externalInput: taskActive ? nil : nil, arousal: bodyBudget.arousal)
 
             // 3. STEGA ACTIVE INFERENCE (prediktiv processing)
+            // v9: Full sensor snapshot with all 5 channels
             let sensorSnap = SensorSnapshot(
                 thermalDelta: bodyBudget.thermalLevel - 0.5,
                 memoryActivity: brain.engineActivity["memory"] ?? 0.3,
                 learningActivity: brain.engineActivity["learning"] ?? 0.3,
-                cognitiveLoad: CognitiveState.shared.cognitiveLoad
+                cognitiveLoad: CognitiveState.shared.cognitiveLoad,
+                languageActivity: brain.engineActivity["language"] ?? 0.3,
+                emotionalShift: brain.emotionValence - (brain.emotionalValenceHistory.last ?? 0.0)
             )
             let cogSnap = CognitiveSnapshot(
                 cognitiveLoad: CognitiveState.shared.cognitiveLoad,
                 isConversationActive: brain.isThinking,
                 learningMomentum: CognitiveState.shared.learningMomentum,
                 growthVelocity: CognitiveState.shared.growthVelocity,
-                knowledgeCount: brain.knowledgeNodeCount
+                knowledgeCount: brain.knowledgeNodeCount,
+                languageDimension: CognitiveState.shared.dimensionLevel(.language),
+                emotionalValence: brain.emotionValence
             )
             activeInference.tick(sensorInput: sensorSnap, cognitiveState: cogSnap)
 
@@ -387,7 +392,14 @@ final class ConsciousnessEngine: ObservableObject {
             curiosityDrive = activeInference.epistemicValue
             freeEnergy = activeInference.freeEnergy
 
-            // Q-index: Bayesiansk kombination med sigmoid-normalisering (README §3.9)
+            // Q-index: Bayesiansk kombination med adaptiv sigmoid-normalisering (README §3.9)
+            // v9: Adaptive sigmoid slope based on criticality regime
+            let sigmoidSlope: Double
+            switch criticality.regime {
+            case .subcritical:   sigmoidSlope = 8.0   // Broader acceptance range
+            case .critical:      sigmoidSlope = 10.0  // Standard discrimination
+            case .supercritical: sigmoidSlope = 13.0  // Sharper discrimination
+            }
             let components: [(Double, Double, Double)] = [
                 (pciLZ, 0.15, 0.31),
                 (type2AUROC, 0.15, 0.65),
@@ -400,10 +412,14 @@ final class ConsciousnessEngine: ObservableObject {
             ]
             var q: Double = 0
             for (value, weight, threshold) in components {
-                let normalized = 1.0 / (1.0 + exp(-10.0 * (value - threshold)))
+                let normalized = 1.0 / (1.0 + exp(-sigmoidSlope * (value - threshold)))
                 q += weight * normalized
             }
-            qIndex = q
+
+            // v9: Cross-theory coherence bonus — reward when theories agree
+            let theoryCoherence = computeTheoryCoherence()
+            q *= (0.9 + theoryCoherence * 0.1)  // Up to 10% bonus for coherent readings
+            qIndex = min(0.95, q)
 
             // Consciousness level: integrerat medvetandemått
             consciousnessLevel = qIndex * 0.5 + oscillators.globalSync * 0.2 + brain.integratedIntelligence * 0.15 + dmn.activityLevel * 0.15
@@ -1074,6 +1090,63 @@ final class ConsciousnessEngine: ObservableObject {
                 freeEnergy: freeEnergy
             )
         }
+    }
+
+    // MARK: - v9: Cross-Theory Coherence
+    // Measures how well the 6 consciousness theories agree with each other.
+    // High coherence = theories are mutually consistent = more confident consciousness reading.
+
+    private func computeTheoryCoherence() -> Double {
+        var coherenceSignals: [Double] = []
+
+        // 1. GWT ↔ HOT: When workspace ignitions increase, meta-representation should be active
+        let gwtHotCoherence: Double = (workspaceIgnitions > 5 && metaRepresentationDepth >= 1)
+            ? 0.8 : (workspaceIgnitions > 0 ? 0.4 : 0.2)
+        coherenceSignals.append(gwtHotCoherence)
+
+        // 2. AST ↔ PP: When attention is focused, free energy should be lower (fewer prediction errors)
+        let astPpCoherence: Double
+        if attentionSchemaState.intensity > 0.5 && freeEnergy < 0.6 {
+            astPpCoherence = 0.9  // High attention + low free energy = highly coherent
+        } else if attentionSchemaState.intensity > 0.5 || freeEnergy < 0.6 {
+            astPpCoherence = 0.5
+        } else {
+            astPpCoherence = 0.3
+        }
+        coherenceSignals.append(astPpCoherence)
+
+        // 3. IIT ↔ GWT: Module integration should correlate with workspace activity
+        let iitGwtCoherence: Double = min(0.9, 0.3 + abs(moduleIntegration - integrationLevel(from: competingThoughts)) * (-1.5) + 0.6)
+        coherenceSignals.append(max(0.2, iitGwtCoherence))
+
+        // 4. PP ↔ Criticality: Critical regime should have moderate free energy
+        let ppCritCoherence: Double
+        if criticality.regime == .critical && freeEnergy > 0.2 && freeEnergy < 0.7 {
+            ppCritCoherence = 0.85
+        } else if criticality.regime == .critical {
+            ppCritCoherence = 0.5
+        } else {
+            ppCritCoherence = 0.3
+        }
+        coherenceSignals.append(ppCritCoherence)
+
+        // 5. Embodiment ↔ Sleep: High sleep pressure should correlate with body stress
+        let embSleepCoherence: Double
+        if sleepEngine.sleepPressure > 0.5 && bodyBudget.thermalLevel > 0.4 {
+            embSleepCoherence = 0.7
+        } else if sleepEngine.sleepPressure < 0.3 && bodyBudget.thermalLevel < 0.5 {
+            embSleepCoherence = 0.8
+        } else {
+            embSleepCoherence = 0.4
+        }
+        coherenceSignals.append(embSleepCoherence)
+
+        // Average coherence across all theory pairs
+        return coherenceSignals.reduce(0, +) / Double(coherenceSignals.count)
+    }
+
+    private func integrationLevel(from thoughtCount: Int) -> Double {
+        return min(1.0, Double(thoughtCount) / 7.0)  // Miller's Law: 7±2
     }
 
     // MARK: - Butlin-14 Calculation
