@@ -79,6 +79,20 @@ final class EonBrain: ObservableObject {
     @Published var bertLoaded: Bool = false
     @Published var gptLoaded: Bool = false
 
+    // MARK: - Språkutveckling (v15: Language development metrics for LanguageView)
+    @Published var vocabularySize: Int = 0
+    @Published var morphologyMastery: Double = 0.05
+    @Published var syntaxMastery: Double = 0.05
+    @Published var semanticMastery: Double = 0.05
+    @Published var pragmaticMastery: Double = 0.05
+    @Published var overallLanguageLevel: Double = 0.05
+    @Published var recentLearnedWords: [String] = []
+    @Published var languageGrowthRate: Double = 0.0
+    @Published var sentenceComplexity: Double = 0.2
+    @Published var idiomKnowledge: Int = 0
+    @Published var languagePhaseActive: Bool = false
+    @Published var languageLog: [String] = []
+
     // MARK: - Subsystems (lazy init to avoid startup lag)
     lazy var memory = PersistentMemoryStore.shared
     lazy var neuralEngine = NeuralEngineOrchestrator.shared
@@ -281,8 +295,49 @@ final class EonBrain: ObservableObject {
                     self.bertLoaded = await neuralEngine.bertLoaded
                     self.gptLoaded = await neuralEngine.gptLoaded
                 }
+
+                // v15: Språkutveckling — synka från LearningEngine var 3:e tick (~30s)
+                if masterTickCount % 3 == 0 {
+                    await self.syncLanguageMetrics()
+                }
             }
         }
+    }
+
+    // v15: Sync language development metrics from LearningEngine
+    private func syncLanguageMetrics() async {
+        let learning = LearningEngine.shared
+        let snapshot = await learning.competencySnapshot()
+        for comp in snapshot {
+            switch comp.domain {
+            case "Morfologi": self.morphologyMastery = comp.level
+            case "Syntax": self.syntaxMastery = comp.level
+            case "Semantik": self.semanticMastery = comp.level
+            case "Pragmatik": self.pragmaticMastery = comp.level
+            default: break
+            }
+        }
+        self.overallLanguageLevel = await learning.overallCompetencyLevel()
+        self.vocabularySize = await self.memory.knowledgeNodeCount()
+
+        // Language growth rate — based on recent competency changes
+        let langDomains = snapshot.filter { ["Morfologi", "Syntax", "Semantik", "Pragmatik", "Diskurs"].contains($0.domain) }
+        let avgLevel = langDomains.isEmpty ? 0.0 : langDomains.reduce(0.0) { $0 + $1.level } / Double(langDomains.count)
+        let prevLevel = self.overallLanguageLevel
+        self.languageGrowthRate = max(0, (avgLevel - prevLevel) * 100)
+
+        // Update language phase from EonLiveAutonomy
+        self.languagePhaseActive = EonLiveAutonomy.shared.currentPhase == .language
+
+        // Idiom count from SwedishLanguageCore
+        self.idiomKnowledge = 50 // SwedishLanguageCore has ~50 idioms hardcoded
+    }
+
+    // v15: Append to language log (called from engines)
+    func appendLanguageLog(_ entry: String) {
+        let ts = Date().formatted(.dateTime.hour().minute().second())
+        languageLog.append("[\(ts)] \(entry)")
+        if languageLog.count > 200 { languageLog.removeFirst(50) }
     }
 
     // Alias för bakåtkompatibilitet
@@ -485,6 +540,16 @@ final class EonBrain: ObservableObject {
             return MonologueLine(
                 text: "Sömnbehov \(String(format: "%.0f%%", sleep.sleepPressure * 100)) — synaptisk konsolidering rekommenderas",
                 type: .thought
+            )
+        }
+
+        // v15: Language development thoughts
+        if EonLiveAutonomy.shared.currentPhase == .language {
+            let langLevel = String(format: "%.0f%%", self.overallLanguageLevel * 100)
+            let morphLevel = String(format: "%.0f%%", self.morphologyMastery * 100)
+            return MonologueLine(
+                text: "Språkutveckling aktiv — morfologi \(morphLevel), total språknivå \(langLevel), \(self.vocabularySize) kunskapsnoder",
+                type: .insight
             )
         }
 

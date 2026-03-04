@@ -325,6 +325,9 @@ actor CognitiveCycleEngine {
         onToken: @escaping (String) async -> Void
     ) async throws -> CognitiveCycleResult {
 
+        // v15: Start deadline clock — 5 second budget
+        let deadline = ContinuousClock.now + .seconds(5)
+
         var context = CognitiveCycleContext(userInput: input, sessionId: sessionId)
 
         // Steg 0 (v11): InputAnalyzer — deep question understanding BEFORE anything else
@@ -537,9 +540,10 @@ actor CognitiveCycleEngine {
         }
         await onStepUpdate(.validation, .completed)
 
-        // v11: BERT Question-Answer Relevance Check
+        // v11: BERT Question-Answer Relevance Check (v15: skip if near deadline)
         // Verify the response actually addresses the user's question
-        if bertAvailable && !context.generatedText.isEmpty && context.generatedText.count > 20 {
+        let timeForBERT = (deadline - .now) > .seconds(1.5)
+        if timeForBERT && bertAvailable && !context.generatedText.isEmpty && context.generatedText.count > 20 {
             let questionEmb = await neuralEngine.embed(input)
             let answerEmb = await neuralEngine.embed(String(context.generatedText.prefix(400)))
             let qaRelevance = Double(await neuralEngine.cosineSimilarity(questionEmb, answerEmb))
@@ -568,11 +572,17 @@ actor CognitiveCycleEngine {
             }
         }
 
-        // Steg 9: Loop 2 — Grafberikning (hoppas vid enkla frågor)
+        // v15: Check deadline before post-processing
+        let timeRemaining = deadline - .now
+        let hasTime = timeRemaining > .seconds(0.5)
+
+        // Steg 9: Loop 2 — Grafberikning (hoppas vid enkla frågor eller deadline)
         await onStepUpdate(.enrichment, .active)
-        if !complexity.skipEnrichment && !context.generatedText.isEmpty {
+        if hasTime && !complexity.skipEnrichment && !context.generatedText.isEmpty {
             await enricher.enrich(text: context.generatedText, entities: context.entities, memory: memory)
             await onMonologue(MonologueLine(text: "Kunskapsgrafen berikas med nya fakta från svaret", type: .thought))
+        } else if !hasTime {
+            await onMonologue(MonologueLine(text: "Deadline nära — grafberikning hoppas", type: .thought))
         }
         await onStepUpdate(.enrichment, .completed)
 
@@ -581,7 +591,8 @@ actor CognitiveCycleEngine {
         let aggregatedConfidence = computeAggregatedConfidence(context: context)
         context.finalConfidence = aggregatedConfidence
 
-        if aggregatedConfidence < 0.60 {
+        let timeForRevision = (deadline - .now) > .seconds(0.8)
+        if aggregatedConfidence < 0.60 && timeForRevision {
             await onMonologue(MonologueLine(text: "Loop 3: Konfidens \(String(format: "%.2f", aggregatedConfidence)) < 0.60 — Eon reviderar svaret...", type: .revision))
             let revisedText = await reviser.revise(
                 original: context.generatedText,
@@ -589,6 +600,8 @@ actor CognitiveCycleEngine {
                 neuralEngine: neuralEngine
             )
             context.generatedText = revisedText
+        } else if aggregatedConfidence < 0.60 {
+            await onMonologue(MonologueLine(text: "Konfidens \(String(format: "%.0f%%", aggregatedConfidence * 100)) — deadline, skickar ändå", type: .thought))
         } else {
             await onMonologue(MonologueLine(text: "Konfidens: \(String(format: "%.0f%%", aggregatedConfidence * 100)) — svar godkänt", type: .thought))
         }

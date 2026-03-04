@@ -508,15 +508,97 @@ final class EonLiveAutonomy: ObservableObject {
         let workDone = phaseWorkDone[.language] ?? 0
         phaseWorkDone[.language] = workDone + 1
 
-        switch workDone % 3 {
+        // v15: Log language phase activity to brain
+        brain.appendLanguageLog("Språkfas cykel \(workDone + 1) startar")
+
+        switch workDone % 5 {
         case 0:
-            if isLanguageExpEnabled && !brain.isThinking { await runLanguageExperiment(brain: brain) }
+            if isLanguageExpEnabled && !brain.isThinking {
+                await runLanguageExperiment(brain: brain)
+                brain.appendLanguageLog("Språkexperiment utfört")
+            }
         case 1:
-            if isSprakbankenEnabled { await fetchFromSprakbanken() }
+            if isSprakbankenEnabled {
+                await fetchFromSprakbanken()
+                brain.appendLanguageLog("Språkbanken-hämtning: \(sprakbankenFetchCount) ord totalt")
+            }
         case 2:
             await runLanguageIntegration(brain: brain)
+            brain.appendLanguageLog("Språkintegration: morfologi + syntax analys")
+        case 3:
+            // v15: Swedish morphology training — analyze recent conversation words
+            await runMorphologyTraining(brain: brain)
+        case 4:
+            // v15: Sentence complexity assessment
+            await runSentenceComplexityCheck(brain: brain)
         default:
             break
+        }
+
+        // Always sync competencies during language phase
+        await LearningEngine.shared.syncCompetenciesFromDatabase()
+        brain.appendLanguageLog("Kompetenser synkroniserade från databas")
+
+        // Log a language thought to inner monologue
+        let langLine = MonologueLine(
+            text: "Språkutveckling: morfologi \(String(format: "%.0f%%", brain.morphologyMastery * 100)), syntax \(String(format: "%.0f%%", brain.syntaxMastery * 100)), semantik \(String(format: "%.0f%%", brain.semanticMastery * 100))",
+            type: .insight
+        )
+        brain.innerMonologue.append(langLine)
+        CognitionLogger.shared.append(text: langLine.text, type: "SPRÅK")
+    }
+
+    // v15: Morphology training — practice Swedish word forms
+    private func runMorphologyTraining(brain: EonBrain) async {
+        let swedish = SwedishLanguageCore.shared
+
+        // Pick words from recent conversations to analyze morphologically
+        let recentFacts = await PersistentMemoryStore.shared.searchFacts(query: "", limit: 10)
+        var analyzedCount = 0
+
+        for fact in recentFacts.prefix(5) {
+            let words = fact.subject.components(separatedBy: .whitespaces)
+            for word in words where word.count > 3 && !morphologyCacheSet.contains(word.lowercased()) {
+                let analysis = await swedish.analyze(word)
+                morphologyCacheSet.insert(word.lowercased())
+                analyzedCount += 1
+
+                if !analysis.morphemes.isEmpty {
+                    brain.appendLanguageLog("Morfologi: '\(word)' → \(analysis.morphemes.count) morfem, register: \(analysis.register.rawValue)")
+                }
+            }
+        }
+
+        if analyzedCount > 0 {
+            brain.appendLanguageLog("Morfologiträning: \(analyzedCount) nya ord analyserade")
+            let state = CognitiveState.shared
+            state.update(dimension: .language, delta: 0.002, source: "MorphologyTraining")
+        }
+    }
+
+    // v15: Assess sentence complexity from recent outputs
+    private func runSentenceComplexityCheck(brain: EonBrain) async {
+        let recentConversations = await PersistentMemoryStore.shared.searchFacts(query: "svar", limit: 5)
+        var totalComplexity: Double = 0
+        var count = 0
+
+        for fact in recentConversations {
+            let text = fact.object
+            let words = text.components(separatedBy: .whitespaces)
+            let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?"))
+            let avgWordsPerSentence = sentences.isEmpty ? 0.0 : Double(words.count) / Double(max(1, sentences.count))
+            let uniqueWords = Set(words.map { $0.lowercased() })
+            let lexicalDiversity = words.isEmpty ? 0.0 : Double(uniqueWords.count) / Double(words.count)
+
+            // Complexity = f(sentence length, lexical diversity)
+            let complexity = min(1.0, (avgWordsPerSentence / 20.0) * 0.5 + lexicalDiversity * 0.5)
+            totalComplexity += complexity
+            count += 1
+        }
+
+        if count > 0 {
+            brain.sentenceComplexity = totalComplexity / Double(count)
+            brain.appendLanguageLog("Meningskomplexitet uppdaterad: \(String(format: "%.0f%%", brain.sentenceComplexity * 100))")
         }
     }
 
