@@ -141,8 +141,9 @@ actor EonEvaluator {
         let recent = evalHistory.suffix(5).map { $0.overallScore }
         let older = evalHistory.prefix(max(1, evalHistory.count - 5)).map { $0.overallScore }
 
-        let recentAvg = recent.reduce(0, +) / Double(recent.count)
-        let olderAvg = older.reduce(0, +) / Double(older.count)
+        // v24: Guard against division by zero
+        let recentAvg = recent.isEmpty ? 0.0 : recent.reduce(0, +) / Double(recent.count)
+        let olderAvg = older.isEmpty ? 0.0 : older.reduce(0, +) / Double(older.count)
         let delta = recentAvg - olderAvg
 
         let direction: TrendDirection = delta > 0.02 ? .improving : delta < -0.02 ? .declining : .stable

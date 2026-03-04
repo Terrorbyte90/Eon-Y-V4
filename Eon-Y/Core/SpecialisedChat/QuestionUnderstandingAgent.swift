@@ -267,8 +267,11 @@ actor QuestionUnderstandingAgent {
 
     private func classifyQuestion(_ lower: String, wordCount: Int) -> QuestionProfile.QuestionType {
         // Hälsningar
+        // v24: Expanded 12→24
         let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "tjena", "morsning",
-                         "hejhej", "hej hej", "god natt", "god dag"]
+                         "hejhej", "hej hej", "god natt", "god dag",
+                         "tjenare", "yo", "tjo", "hejdå", "tjabba", "hej där", "hej på dig",
+                         "god förmiddag", "god eftermiddag", "halloj", "tjingeling", "hejsvansen"]
         if greetings.contains(where: { lower.hasPrefix($0) }) && wordCount <= 4 { return .greeting }
 
         // Självrefererande (v14: utökat)
@@ -281,13 +284,20 @@ actor QuestionUnderstandingAgent {
         if selfPatterns.contains(where: { lower.contains($0) }) { return .selfReference }
 
         // Definition (v14: fler mönster)
+        // v24: Expanded 9→18
         let defPatterns = ["vad är ", "vad betyder ", "vad innebär ", "vad menas med ", "definiera ",
-                           "vad kallas ", "vad heter ", "vad står ", "vad representerar "]
+                           "vad kallas ", "vad heter ", "vad står ", "vad representerar ",
+                           "förklara begreppet ", "vad syftar ", "vad åsyftas med ", "vad avses med ",
+                           "ge en definition av ", "beskriv vad ", "klargör vad ", "vad refererar ", "vad betecknar "]
         if defPatterns.contains(where: { lower.hasPrefix($0) }) { return .definition }
 
         // Jämförelse
+        // v24: Expanded 10→20
         let compPatterns = ["skillnaden mellan", "jämför ", "vad skiljer", "hur skiljer sig", "bättre än",
-                            "sämre än", "liknar ", "vs ", " eller ", "kontra "]
+                            "sämre än", "liknar ", "vs ", " eller ", "kontra ",
+                            "i förhållande till", "i jämförelse med", "gentemot ", "i motsats till",
+                            "vad är skillnaden", "hur förhåller sig", "vilken är bäst", "vad är likheten",
+                            "motsatsen till", "hur relaterar"]
         if compPatterns.contains(where: { lower.contains($0) }) && lower.contains("?") { return .comparison }
 
         // Hur-gör-man (v14: fler mönster)
@@ -338,10 +348,15 @@ actor QuestionUnderstandingAgent {
         if creativePatterns.contains(where: { lower.contains($0) }) { return .creative }
 
         // Personlig/emotionell (v14: fler mönster)
+        // v24: Expanded 13→26
         let personalPatterns = ["jag mår", "jag känner", "jag är ledsen", "jag är glad",
                                 "jag har det svårt", "jag är stressad", "jag behöver hjälp",
                                 "jag vet inte vad jag ska göra", "jag är orolig", "jag är trött",
-                                "jag är frustrerad", "jag är arg", "jag är ensam"]
+                                "jag är frustrerad", "jag är arg", "jag är ensam",
+                                "jag är deprimerad", "jag ångrar", "jag saknar", "jag längtar",
+                                "jag är rädd", "jag skäms", "jag är besviken", "jag orkar inte",
+                                "jag har ångest", "jag är förvirrad", "jag är nervös",
+                                "jag mår dåligt", "jag behöver prata"]
         if personalPatterns.contains(where: { lower.contains($0) }) { return .personal }
 
         // Kort uppföljning (v14: kräver ingen fråga + längre ord-gräns)
@@ -521,8 +536,11 @@ actor QuestionUnderstandingAgent {
         if history.isEmpty { return false }
         if wordCount <= 3 { return true }
         let lower = input.lowercased()
+        // v24: Expanded 11→22
         let followUps = ["ja", "nej", "okej", "varför", "hur då", "berätta mer", "fortsätt",
-                         "mer om", "utveckla", "ge exempel", "och sedan"]
+                         "mer om", "utveckla", "ge exempel", "och sedan",
+                         "javisst", "absolut", "just det", "exakt", "precis", "vadå",
+                         "kan du utveckla", "säg mer", "vad menar du", "fördjupa", "på vilket sätt"]
         return followUps.contains(where: { lower.hasPrefix($0) })
     }
 

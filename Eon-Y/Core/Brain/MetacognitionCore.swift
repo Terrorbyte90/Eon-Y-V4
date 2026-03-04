@@ -104,12 +104,20 @@ actor MetacognitionCore {
         let velocity = await state.growthVelocity
         let processes = await state.activeProcesses
 
-        // Identifiera stagnerade dimensioner (ingen tillväxt)
+        // v24: Predictive stagnation — detect stagnation BEFORE it fully sets in
+        // Tracks trend deceleration to anticipate stagnation 2+ cycles ahead
         var stagnated: [CognitiveDimension] = []
+        var atRiskOfStagnation: [CognitiveDimension] = []
         for dim in CognitiveDimension.allCases {
             let trend = await state.dimensionTrend(dim)
-            if trend < 0.001 && (dimensions[dim] ?? 0) < 0.7 {
+            let level = dimensions[dim] ?? 0
+            if trend < 0.001 && level < 0.7 {
                 stagnated.append(dim)
+            } else if trend > 0 && trend < 0.003 && level < 0.6 {
+                // v24: Decelerating — about to stagnate. Preemptive intervention
+                atRiskOfStagnation.append(dim)
+                let preemptiveDelta = 0.005 * max(0.1, 0.5 - level)
+                await state.update(dimension: dim, delta: preemptiveDelta, source: "predictive_stagnation_prevention")
             }
         }
 

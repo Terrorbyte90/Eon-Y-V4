@@ -212,10 +212,15 @@ final class UserProfileEngine: ObservableObject {
         let hasQuestion = message.contains("?")
 
         // Formality detection — expanded word lists
+        // v24: Expanded 11→22 formal, 13→26 informal
         let formalWords = ["emellertid", "således", "beträffande", "avseende", "vederbörande",
-                          "härav", "därtill", "emedan", "härmed", "dock", "icke"]
+                          "härav", "därtill", "emedan", "härmed", "dock", "icke",
+                          "vidare", "följaktligen", "desslikes", "oaktat", "ehuru",
+                          "tillförene", "angående", "förevarande", "allteftersom", "jämlikt", "tillika"]
         let informalWords = ["typ", "liksom", "asså", "va", "grejen", "kul", "gött", "nice",
-                           "fett", "soft", "skit", "lol", "haha"]
+                           "fett", "soft", "skit", "lol", "haha",
+                           "najs", "sicket", "orka", "pallar", "mannen", "bror", "skitsamma",
+                           "chilla", "vafan", "seriöst", "äckligt", "galet", "fattar", "vetja"]
 
         let formalHits = formalWords.filter { lower.contains($0) }.count
         let informalHits = informalWords.filter { lower.contains($0) }.count
@@ -239,7 +244,9 @@ final class UserProfileEngine: ObservableObject {
         }
 
         // Humor detection
-        let humorSignals = ["haha", "lol", "😂", "🤣", "xD", "skämt", "rolig"]
+        // v24: Expanded 7→14
+        let humorSignals = ["haha", "lol", "😂", "🤣", "xD", "skämt", "rolig",
+                           "hahaha", "kul", "lustigt", "humor", "ironi", "skojigt", "komiskt"]
         if humorSignals.contains(where: { lower.contains($0) }) {
             communicationStyle.humorAppreciation = min(1.0, communicationStyle.humorAppreciation + 0.04)
         }

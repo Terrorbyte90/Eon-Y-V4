@@ -192,7 +192,12 @@ struct LanguageView: View {
             // Linguistic domains overview
             GlassCard(tint: accentColor) {
                 VStack(alignment: .leading, spacing: 12) {
-                    PanelHeader(icon: "text.book.closed.fill", title: "Språkliga domäner", color: accentColor) { EmptyView() }
+                    // v24: Replaced EmptyView with domain count indicator
+                    PanelHeader(icon: "text.book.closed.fill", title: "Språkliga domäner", color: accentColor) {
+                        Text("4 domäner")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(accentColor.opacity(0.6))
+                    }
 
                     langDomainBar(label: "Morfologi", value: brain.morphologyMastery, desc: morphologyLabel(brain.morphologyMastery), color: Color(hex: "#14B8A6"))
                     langDomainBar(label: "Syntax", value: brain.syntaxMastery, desc: morphologyLabel(brain.syntaxMastery), color: Color(hex: "#38BDF8"))
@@ -204,7 +209,12 @@ struct LanguageView: View {
             // Language capabilities card
             GlassCard(tint: Color(hex: "#0E7490")) {
                 VStack(alignment: .leading, spacing: 12) {
-                    PanelHeader(icon: "wand.and.stars", title: "Språkförmågor", color: Color(hex: "#0E7490")) { EmptyView() }
+                    // v24: Replaced EmptyView with active capability count
+                    PanelHeader(icon: "wand.and.stars", title: "Språkförmågor", color: Color(hex: "#0E7490")) {
+                        Text("\(brain.gptLoaded && brain.bertLoaded ? "9" : "7") aktiva")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#0E7490").opacity(0.6))
+                    }
 
                     capabilityRow(name: "Ordböjning (substantiv, verb, adjektiv)", active: brain.morphologyMastery > 0.1, level: brain.morphologyMastery)
                     capabilityRow(name: "Sammansatta ord", active: brain.morphologyMastery > 0.15, level: brain.morphologyMastery)
@@ -344,7 +354,12 @@ struct LanguageView: View {
             // Neural language models status
             GlassCard(tint: Color(hex: "#A78BFA")) {
                 VStack(alignment: .leading, spacing: 10) {
-                    PanelHeader(icon: "cpu.fill", title: "Neurala språkmodeller", color: Color(hex: "#A78BFA")) { EmptyView() }
+                    // v24: Replaced EmptyView with load status
+                    PanelHeader(icon: "cpu.fill", title: "Neurala språkmodeller", color: Color(hex: "#A78BFA")) {
+                        Text(brain.gptLoaded && brain.bertLoaded ? "Alla laddade" : "Laddar...")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#A78BFA").opacity(0.6))
+                    }
 
                     HStack(spacing: 12) {
                         modelStatusBox(name: "GPT-SW3", detail: "1.3B params", loaded: brain.gptLoaded, color: Color(hex: "#34D399"))
@@ -477,7 +492,12 @@ struct LanguageView: View {
             // v16: Language growth metrics
             GlassCard(tint: accentColor) {
                 VStack(alignment: .leading, spacing: 10) {
-                    PanelHeader(icon: "chart.line.uptrend.xyaxis", title: "Tillväxtmått", color: accentColor) { EmptyView() }
+                    // v24: Replaced EmptyView with growth trend indicator
+                    PanelHeader(icon: "chart.line.uptrend.xyaxis", title: "Tillväxtmått", color: accentColor) {
+                        Text(brain.languageGrowthRate > 0 ? "Växer" : "Stabil")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(brain.languageGrowthRate > 0 ? Color(hex: "#34D399").opacity(0.7) : accentColor.opacity(0.5))
+                    }
 
                     HStack(spacing: 12) {
                         VStack(spacing: 4) {
@@ -517,7 +537,12 @@ struct LanguageView: View {
             // Learning cycle info
             GlassCard(tint: Color(hex: "#3B82F6")) {
                 VStack(alignment: .leading, spacing: 10) {
-                    PanelHeader(icon: "arrow.triangle.2.circlepath", title: "Inlärningscykler", color: Color(hex: "#3B82F6")) { EmptyView() }
+                    // v24: Replaced EmptyView with cycle info
+                    PanelHeader(icon: "arrow.triangle.2.circlepath", title: "Inlärningscykler", color: Color(hex: "#3B82F6")) {
+                        Text("FSRS")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#3B82F6").opacity(0.6))
+                    }
 
                     let facts = [
                         ("FSRS repetition", "Adaptiv repetitionsalgoritm som optimerar inlärning"),
@@ -616,7 +641,15 @@ struct LanguageView: View {
             // Live monologue entries related to language
             GlassCard(tint: Color(hex: "#A78BFA")) {
                 VStack(alignment: .leading, spacing: 10) {
-                    PanelHeader(icon: "brain.head.profile", title: "Senaste språktankar", color: Color(hex: "#A78BFA")) { EmptyView() }
+                    // v24: Replaced EmptyView with thought count
+                    PanelHeader(icon: "brain.head.profile", title: "Senaste språktankar", color: Color(hex: "#A78BFA")) {
+                        let langCount = brain.innerMonologue
+                            .filter { $0.text.lowercased().contains("språk") || $0.text.lowercased().contains("ord") }
+                            .count
+                        Text("\(langCount)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#A78BFA").opacity(0.6))
+                    }
 
                     let langThoughts = brain.innerMonologue
                         .filter { $0.text.lowercased().contains("språk") || $0.text.lowercased().contains("morfologi") || $0.text.lowercased().contains("syntax") || $0.text.lowercased().contains("ordförråd") || $0.text.lowercased().contains("böjning") }

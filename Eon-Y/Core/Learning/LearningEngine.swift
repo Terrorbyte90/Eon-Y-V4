@@ -939,10 +939,20 @@ actor LearningEngine {
 
     // MARK: - Meta-learning
 
+    // v24: Error pattern tracking for targeted learning
+    private var errorPatterns: [String: Int] = [:]  // topic → error count
+    private var domainErrorRate: [String: (errors: Int, total: Int)] = [:]  // domain → (errors, total)
+
     func metaLearnFromConversation(userMessage: String, eonResponse: String, feedback: Double) async {
         // Detect all relevant domains (not just the best one)
         let primaryDomain = detectDomain(from: userMessage + " " + eonResponse)
         let secondaryDomain = detectDomain(from: userMessage) // Sometimes user's question and response diverge
+
+        // v24: Track error rate per domain for meta-learning insights
+        var stats = domainErrorRate[primaryDomain] ?? (errors: 0, total: 0)
+        stats.total += 1
+        if feedback < 0.5 { stats.errors += 1 }
+        domainErrorRate[primaryDomain] = stats
 
         // Update competency with scaled feedback
         // Good feedback reinforces; bad feedback triggers active learning
@@ -972,6 +982,19 @@ actor LearningEngine {
             let difficulty = min(0.95, 0.5 + (0.5 - feedback)) // Worse feedback → harder item
             addFSRSItem(topic: topic, domain: primaryDomain, initialDifficulty: difficulty)
 
+            // v24: Track repeated error patterns — boost difficulty for chronic weak spots
+            errorPatterns[topic, default: 0] += 1
+            let errorCount = errorPatterns[topic] ?? 1
+            if errorCount >= 3 {
+                // Chronic error: boost all FSRS items in this topic's difficulty
+                for i in 0..<fsrsItems.count {
+                    if fsrsItems[i].topic.contains(topic.prefix(15)) {
+                        fsrsItems[i].difficulty = min(0.95, fsrsItems[i].difficulty + 0.05)
+                        fsrsItems[i].interval = max(1, fsrsItems[i].interval / 2)  // Review sooner
+                    }
+                }
+            }
+
             // Also save the gap as a fact for future reference
             await PersistentMemoryStore.shared.saveFact(
                 subject: primaryDomain,
@@ -980,6 +1003,18 @@ actor LearningEngine {
                 confidence: 1.0 - feedback,
                 source: "meta_learning"
             )
+
+            // v24: Cross-domain error propagation — if domain has high error rate, reduce transfer
+            if let rate = domainErrorRate[primaryDomain],
+               rate.total >= 5, Double(rate.errors) / Double(rate.total) > 0.5 {
+                // High error rate domain: boost its prerequisites
+                if let prereqs = prerequisites[primaryDomain] {
+                    for prereq in prereqs {
+                        addFSRSItem(topic: "Grundkunskap: \(prereq)", domain: prereq,
+                                    initialDifficulty: 0.4)
+                    }
+                }
+            }
         }
 
         // Strong positive feedback → mark topic as well-understood
@@ -988,6 +1023,15 @@ actor LearningEngine {
             var domainDepth = topicDepthTracker[primaryDomain] ?? [:]
             domainDepth[topic] = max(domainDepth[topic] ?? 0, 3) // Mark as intermediate+
             topicDepthTracker[primaryDomain] = domainDepth
+
+            // v24: Clear error pattern on strong success
+            errorPatterns.removeValue(forKey: topic)
+        }
+
+        // v24: Prune error patterns to prevent unbounded growth
+        if errorPatterns.count > 100 {
+            let sorted = errorPatterns.sorted { $0.value < $1.value }
+            errorPatterns = Dictionary(uniqueKeysWithValues: Array(sorted.suffix(50)))
         }
     }
 

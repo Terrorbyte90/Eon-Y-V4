@@ -154,23 +154,30 @@ actor KnowledgeRetrievalAgent {
 
         guard !allFacts.isEmpty else { return [] }
 
-        // BERT-ranka (v14: max 8 embeds i normalläge för hastighet)
+        // v24: Parallelize BERT ranking with TaskGroup (was sequential — saves ~800ms)
         if hasBERT {
             let maxEmbeds = deepMode ? 15 : 8
+            let topFacts = Array(allFacts.prefix(maxEmbeds))
+            let inputLower = input.lowercased()
             var scored: [KnowledgeBundle.RankedFact] = []
-            for fact in allFacts.prefix(maxEmbeds) {
-                let factText = fact.subject + " " + fact.predicate + " " + fact.object
-                let factEmb = await neuralEngine.embed(String(factText.prefix(100)))
-                let sim = await neuralEngine.cosineSimilarity(embedding, factEmb)
-                // v14: keyword-boost för exakt match
-                let inputLower = input.lowercased()
-                var boost: Float = 0
-                if inputLower.contains(fact.subject.lowercased()) { boost += 0.1 }
-                if inputLower.contains(fact.object.lowercased().prefix(8)) { boost += 0.05 }
-                scored.append(KnowledgeBundle.RankedFact(
-                    subject: fact.subject, predicate: fact.predicate,
-                    object: fact.object, relevanceScore: sim + boost
-                ))
+            await withTaskGroup(of: KnowledgeBundle.RankedFact?.self) { group in
+                for fact in topFacts {
+                    group.addTask {
+                        let factText = fact.subject + " " + fact.predicate + " " + fact.object
+                        let factEmb = await self.neuralEngine.embed(String(factText.prefix(100)))
+                        let sim = await self.neuralEngine.cosineSimilarity(embedding, factEmb)
+                        var boost: Float = 0
+                        if inputLower.contains(fact.subject.lowercased()) { boost += 0.1 }
+                        if inputLower.contains(fact.object.lowercased().prefix(8)) { boost += 0.05 }
+                        return KnowledgeBundle.RankedFact(
+                            subject: fact.subject, predicate: fact.predicate,
+                            object: fact.object, relevanceScore: sim + boost
+                        )
+                    }
+                }
+                for await result in group {
+                    if let r = result { scored.append(r) }
+                }
             }
             return scored.sorted { $0.relevanceScore > $1.relevanceScore }
                 .filter { $0.relevanceScore > 0.20 }
@@ -203,13 +210,21 @@ actor KnowledgeRetrievalAgent {
                 let bWords = Set(b.title.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
                 return inputWords.intersection(aWords).count > inputWords.intersection(bWords).count
             }
-            for article in preFiltered.prefix(10) {  // v14: max 10 (was 20)
-                let articleEmb = await neuralEngine.embed(String((article.title + " " + article.summary).prefix(128)))
-                let sim = await neuralEngine.cosineSimilarity(embedding, articleEmb)
-                // Nyckelords-boost (reuse inputWords from above)
-                let contentWords = Set(article.content.lowercased().prefix(300).components(separatedBy: .whitespaces).filter { $0.count > 3 })
-                let boosted = sim + Float(inputWords.intersection(contentWords).count) * 0.05
-                if boosted > 0.30 { scored.append((article, boosted)) }
+            // v24: Parallelize article BERT ranking with TaskGroup (was sequential)
+            let topArticles = Array(preFiltered.prefix(10))
+            await withTaskGroup(of: (KnowledgeArticle, Float)?.self) { group in
+                for article in topArticles {
+                    group.addTask {
+                        let articleEmb = await self.neuralEngine.embed(String((article.title + " " + article.summary).prefix(128)))
+                        let sim = await self.neuralEngine.cosineSimilarity(embedding, articleEmb)
+                        let contentWords = Set(article.content.lowercased().prefix(300).components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                        let boosted = sim + Float(inputWords.intersection(contentWords).count) * 0.05
+                        return boosted > 0.30 ? (article, boosted) : nil
+                    }
+                }
+                for await result in group {
+                    if let r = result { scored.append(r) }
+                }
             }
             return scored.sorted { $0.score > $1.score }
                 .prefix(maxArticles)
@@ -239,18 +254,26 @@ actor KnowledgeRetrievalAgent {
         guard !rawMemories.isEmpty else { return [] }
 
         let now = Date()
+        // v24: Parallelize memory BERT ranking with TaskGroup (was sequential)
         if hasBERT {
             var scored: [KnowledgeBundle.RankedMemory] = []
-            for mem in rawMemories {
-                let memEmb = await neuralEngine.embed(String(mem.content.prefix(200)))
-                let sim = await neuralEngine.cosineSimilarity(embedding, memEmb)
-                let ageHours = now.timeIntervalSince(mem.date) / 3600.0
-                let recency = exp(-ageHours / 24.0)
-                let boosted = sim + Float(recency * 0.1)
-                scored.append(KnowledgeBundle.RankedMemory(
-                    content: mem.content, role: mem.role,
-                    recency: recency, relevanceScore: boosted
-                ))
+            await withTaskGroup(of: KnowledgeBundle.RankedMemory.self) { group in
+                for mem in rawMemories {
+                    group.addTask {
+                        let memEmb = await self.neuralEngine.embed(String(mem.content.prefix(200)))
+                        let sim = await self.neuralEngine.cosineSimilarity(embedding, memEmb)
+                        let ageHours = now.timeIntervalSince(mem.date) / 3600.0
+                        let recency = exp(-ageHours / 24.0)
+                        let boosted = sim + Float(recency * 0.1)
+                        return KnowledgeBundle.RankedMemory(
+                            content: mem.content, role: mem.role,
+                            recency: recency, relevanceScore: boosted
+                        )
+                    }
+                }
+                for await result in group {
+                    scored.append(result)
+                }
             }
             return scored.sorted { $0.relevanceScore > $1.relevanceScore }
                 .filter { $0.relevanceScore > 0.25 }

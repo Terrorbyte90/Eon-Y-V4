@@ -3389,7 +3389,8 @@ final class CyclingModeEngine {
             accumulated += duration
             if elapsed < accumulated { return mode }
         }
-        return schedule[0].0
+        // v24: Guard against empty schedule array
+        return schedule.first?.0 ?? .autonomyOff
     }
 
     // Aktuell fas-beskrivning för UI

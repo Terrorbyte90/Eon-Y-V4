@@ -102,7 +102,7 @@ actor GptSw3Handler {
             if !word.trimmingCharacters(in: .whitespaces).isEmpty {
                 await onToken(word)
             }
-            try? await Task.sleep(nanoseconds: 2_000_000)  // v14: 2ms (was 20ms — saves ~1.1s)
+            // v24: Removed inter-token sleep entirely (was 2ms × ~300 tokens = 600ms wasted)
         }
 
         // Om GPT genererade tomma tokens, fall tillbaka

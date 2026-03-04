@@ -110,6 +110,7 @@ final class SwedishResponseBuilder: Sendable {
 
     // MARK: - Osäkerhetssvar
 
+    // v24: Expanded 8→16
     func buildUncertainResponse(topic: String) -> String {
         let templates = [
             "Jag har begränsad kunskap om \(topic), men jag kan berätta vad jag vet.",
@@ -120,6 +121,14 @@ final class SwedishResponseBuilder: Sendable {
             "Jag vill vara transparent: mitt kunnande om \(topic) har luckor. Låt mig berätta det jag faktiskt vet.",
             "\(topic.capitalized) ligger utanför mina starkaste kunskapsområden just nu, men jag kan resonera kring det.",
             "Min förståelse av \(topic) utvecklas fortfarande. Här är vad jag hittar i min kunskapsbas:",
+            "Jag ska vara ärlig — \(topic) är inte mitt starkaste område. Låt mig dela vad jag har.",
+            "Intressant fråga om \(topic). Jag har inte ett komplett svar, men jag kan bidra med det jag vet.",
+            "Om \(topic) har jag mer att lära, men här är min nuvarande förståelse:",
+            "\(topic.capitalized) kräver djupare kunskap än jag har just nu. Men jag kan ge dig en grundläggande bild.",
+            "Jag reflekterar över \(topic) och inser att min kunskap är ofullständig. Här är vad jag kan bidra med:",
+            "Min databas har begränsat med information om \(topic), men jag delar gärna det jag hittar.",
+            "Jag vill inte ge dig ett halvdant svar om \(topic), så låt mig vara tydlig med vad jag faktiskt vet:",
+            "Gällande \(topic) — jag arbetar fortfarande på att bygga djupare förståelse. Här är mitt bästa försök:",
         ]
         return pickRandom(from: templates)
     }
@@ -230,10 +239,14 @@ final class SwedishResponseBuilder: Sendable {
     // MARK: - Uppföljningssvar
 
     func buildFollowUpStart(previousTopic: String) -> String {
+        // v24: Expanded 3→6
         let starters = [
             "Angående \(previousTopic),",
             "Ja, om \(previousTopic),",
             "Utvecklar kring \(previousTopic):",
+            "Tillbaka till \(previousTopic) —",
+            "Mer om \(previousTopic):",
+            "För att bygga vidare på \(previousTopic),",
         ]
         return pickRandom(from: starters)
     }
@@ -303,6 +316,7 @@ final class SwedishResponseBuilder: Sendable {
 
     // MARK: - Svarsmallar
 
+    // v24: Expanded 8→16
     private let standardGreetings = [
         "Hej! Vad kan jag hjälpa dig med?",
         "Hej! Ställ gärna en fråga så gör jag mitt bästa.",
@@ -312,6 +326,14 @@ final class SwedishResponseBuilder: Sendable {
         "Hej! Jag är här och lyssnar.",
         "Hejsan! Kul att se dig — vad vill du prata om?",
         "Hallå! Berätta, vad kan jag göra för dig?",
+        "Hej! Jag är nyfiken — vad tänker du på?",
+        "Hejsan! Vilken fråga brottas du med idag?",
+        "Hej! Jag har all tid i världen — vad undrar du?",
+        "Hallå! Redo att utforska tillsammans?",
+        "Hej! Vad ska vi dyka ner i idag?",
+        "Hejsan! Jag står till förfogande.",
+        "Hej! Berätta fritt — jag lyssnar med öppet sinne.",
+        "Hallå! Vad har hänt sedan sist?",
     ]
 
     private let happyGreetings = [

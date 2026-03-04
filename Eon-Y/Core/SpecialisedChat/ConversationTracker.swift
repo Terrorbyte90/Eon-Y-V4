@@ -206,8 +206,9 @@ actor ConversationTracker {
             trend = .stable
         } else {
             let recent = Array(userMoods.suffix(3))
-            let positives = Set(["glad", "engagerad", "nyfiken"])
-            let negatives = Set(["ledsen", "irriterad", "trött"])
+            // v24: Expanded 3→12 per set for better mood trajectory detection
+            let positives = Set(["glad", "engagerad", "nyfiken", "lycklig", "nöjd", "tacksam", "exalterad", "motiverad", "inspirerad", "hoppfull", "stolt", "harmonisk"])
+            let negatives = Set(["ledsen", "irriterad", "trött", "arg", "frustrerad", "orolig", "stressad", "nedstämd", "besviken", "uppgiven", "ångestfylld", "apatisk"])
 
             let posCount = recent.filter { positives.contains($0) }.count
             let negCount = recent.filter { negatives.contains($0) }.count
@@ -226,13 +227,15 @@ actor ConversationTracker {
 
     // Enkla heuristiker för svenska namn
     private func isLikelyMaleName(_ name: String) -> Bool {
-        let maleEndings = ["an", "er", "on", "us", "ar", "el"]
+        // v24: Expanded 6→12
+        let maleEndings = ["an", "er", "on", "us", "ar", "el", "en", "ard", "rik", "olf", "mund", "ias"]
         let lower = name.lowercased()
         return maleEndings.contains(where: { lower.hasSuffix($0) })
     }
 
     private func isLikelyFemaleName(_ name: String) -> Bool {
-        let femaleEndings = ["a", "in", "ia", "ie", "ey"]
+        // v24: Expanded 5→10
+        let femaleEndings = ["a", "in", "ia", "ie", "ey", "sa", "na", "da", "ka", "tta"]
         let lower = name.lowercased()
         return femaleEndings.contains(where: { lower.hasSuffix($0) })
     }
