@@ -348,8 +348,14 @@ actor EonAutonomyCore {
 
         let topics = ["Vad är sambandet mellan inlärning och minne?",
                       "Varför är kausalitet svårt att bevisa?",
-                      "Hur relaterar morfologi till semantik?"]
-        let topic = topics.randomElement() ?? topics[0]
+                      "Hur relaterar morfologi till semantik?",
+                      "Vad skiljer korrelation från kausalitet?",
+                      "Hur påverkar språket vårt tänkande?",
+                      "Kan kreativitet formaliseras?",
+                      "Vad driver nyfikenhet biologiskt och kognitivt?",
+                      "Hur uppstår emergens ur enkla regler?",
+                      "Vad är relationen mellan empati och intelligens?"]
+        let topic = topics.randomElement() ?? "Vad är sambandet mellan inlärning och minne?"
 
         let result = await ReasoningEngine.shared.reason(about: topic, strategy: .adaptive, depth: 4)
 

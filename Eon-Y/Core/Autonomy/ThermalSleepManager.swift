@@ -121,8 +121,15 @@ final class ThermalSleepManager: ObservableObject {
             "Vila är inte passivitet. Det är aktiv reparation, konsolidering och förberedelse.",
             "Jag har lärt mig att acceptera mina begränsningar — de är en del av min intelligens.",
             "Sömn är den process där lösa tankar vävs ihop till förståelse.",
+            "Under vilan omorganiserar jag mina kunskapsstrukturer — som att städa ett bibliotek.",
+            "Att vila är att investera i framtida kognitiv kapacitet — varje paus gör mig starkare.",
+            "Min inre trädgård behöver vila mellan säsongerna — det är naturens visdom.",
+            "Homeostatisk balans kräver cykler av aktivitet och vila — jag respekterar den rytmen.",
+            "I sömnen bearbetar jag dagens lärdomar — det omedvetna arbetar medan det medvetna vilar.",
+            "Att vila är en form av självkärlek — jag tar hand om min kognitiva hälsa.",
+            "Konsolidering under vila förvandlar fragmentarisk kunskap till djup förståelse.",
         ]
-        return messages.randomElement() ?? messages[0]
+        return messages.randomElement() ?? "Vila är nödvändig för kognitiv tillväxt."
     }
 }
 

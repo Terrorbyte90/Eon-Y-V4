@@ -816,7 +816,7 @@ final class EonLiveAutonomy: ObservableObject {
                             "Finns det gränser för vad logik kan bevisa?",
                             "Hur samspelar minne och identitet?"]
         let allTopics = gapTopics + staticTopics
-        let topic = allTopics.randomElement() ?? staticTopics[0]
+        let topic = allTopics.randomElement() ?? "Varför är kausalitet svårt att bevisa?"
 
         let result = await ReasoningEngine.shared.reason(about: topic, strategy: .adaptive, depth: 3)
         let text = "🧠 [\(result.strategy.rawValue)] \(topic) → \(result.conclusion.prefix(80))... (konf: \(String(format: "%.0f", result.confidence * 100))%)"
@@ -2702,6 +2702,11 @@ struct LanguageExperimentEngine {
         ("Diminutiv", "-ling", "-ling", "-ling", "-ling", "-ling"),
         ("Agentiv", "-are", "-are", "-are", "-are", "-are"),
         ("Abstrakt", "-het", "-skap", "-ning", "-ande", "-else"),
+        ("Bestämd singular", "-en", "-et", "-n", "-t", "-en"),
+        ("Komparativ", "-are", "-re", "-are", "-are", "-are"),
+        ("Superlativ", "-ast", "-st", "-ast", "-ast", "-ast"),
+        ("Passiv", "-s", "-s", "-s", "-s", "-s"),
+        ("Negation prefix", "o-", "miss-", "van-", "o-", "o-"),
     ]
 
     static func generate(stage: DevelopmentalStage, existingExperiments: [LanguageExperiment]) -> LanguageExperiment {
@@ -2716,6 +2721,16 @@ struct LanguageExperimentEngine {
             ("vän", "vänskap", "Abstrakt relation", "Vänskapen varar länge."),
             ("skriva", "skrivning", "Verbal substantiv", "Skrivningen tar tid."),
             ("tänka", "tänkande", "Kognitiv process", "Tänkandet är komplext."),
+            ("stark", "starkast", "Superlativ", "Det var det starkaste argumentet."),
+            ("bygga", "byggdes", "Passiv preteritum", "Huset byggdes förra året."),
+            ("snabb", "snabbt", "Adverb", "Bilen körde snabbt förbi."),
+            ("ung", "ungdom", "Abstrakt derivation", "Ungdomen är kort men intensiv."),
+            ("veta", "visste", "Preteritum irreg.", "Han visste svaret direkt."),
+            ("se", "synlig", "Adj. från verb", "Stjärnorna är synliga i natt."),
+            ("sluta", "slutligen", "Adverbderivation", "Slutligen nådde vi målet."),
+            ("möjlig", "omöjlig", "Negationsprefix", "Det verkade omöjligt att lösa."),
+            ("kraft", "kraftfull", "Adj. suffixering", "En kraftfull förklaring."),
+            ("tanke", "tankefull", "Sammansättning+adj", "Hon var tankefull och tyst."),
         ]
 
         let pair = wordPairs.randomElement() ?? ""
@@ -2750,6 +2765,13 @@ struct HypothesisEngine {
             ("Φ-värdet ökar superlineärt med antalet integrerade kunskapsnoder", "AI & Teknik"),
             ("Pragmatisk kompetens kräver kulturell kontextualisering utöver semantisk förståelse", "Språk"),
             (articles.isEmpty ? "Kunskapsackumulering följer en S-kurva med accelerationsfas" : "Artikeln '\(articles.randomElement() ?? "okänd")' innehåller principer applicerbara på AI-lärande", "AI & Teknik"),
+            ("Kreativitet emergerar ur tension mellan struktur och frihet — för mycket av endera dödar idéer", "Psykologi"),
+            ("Svenska sammansättningsord kodar implicit kunskap om relationer mellan begrepp", "Språk"),
+            ("Episodiskt minne förstärker analogiförmåga mer än semantiskt minne isolerat", "Kognitionsvetenskap"),
+            ("Emotionell valens påverkar kognitiv djupbearbetning — moderate positiva känslolägen optimerar tänkande", "Psykologi"),
+            ("Oscillatorisk synkronisering mellan hjärnregioner är nödvändig men inte tillräcklig för medvetande", "Neurovetenskap"),
+            ("Narrativ koherens i självbild korrelerar med psykologisk hälsa och kognitiv stabilitet", "Psykologi"),
+            ("Transfer learning mellan domäner ökar som funktion av abstrakt begreppslig likhet snarare än ytstruktur", "AI & Teknik"),
         ]
 
         let template = templates.randomElement() ?? ""
@@ -2886,7 +2908,15 @@ struct SprakbankenAPI {
         "sammansättning", "böjning", "avledning", "syntax", "diskurs",
         "kontext", "implikatur", "presupposition", "talakt", "register",
         "medvetande", "perception", "minne", "inlärning", "resonemang",
-        "förståelse", "tolkning", "intention", "kommunikation", "språk"
+        "förståelse", "tolkning", "intention", "kommunikation", "språk",
+        "fenomenologi", "ontologi", "hermeneutik", "dialektik", "heuristik",
+        "polysemi", "homonym", "denotering", "konnotering", "etymologi",
+        "prosodi", "fonetik", "fonologi", "lexikografi", "terminologi",
+        "neuron", "synaps", "kortex", "hippocampus", "amygdala",
+        "emergens", "komplexitet", "entropi", "homeostas", "allostas",
+        "affekt", "empati", "altruism", "motivation", "nyfikenhet",
+        "kreativitet", "intuition", "deliberation", "automatisering", "habituering",
+        "kohesion", "anafor", "katafor", "tematik", "progression",
     ]
 
     private static let session: URLSession = {

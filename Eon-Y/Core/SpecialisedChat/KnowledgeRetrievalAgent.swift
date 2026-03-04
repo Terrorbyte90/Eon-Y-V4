@@ -275,9 +275,9 @@ actor KnowledgeRetrievalAgent {
         memories: [KnowledgeBundle.RankedMemory]
     ) -> KnowledgeBundle {
         // Beräkna kunskapstäckning
-        let hasRelevantFacts = !facts.isEmpty && facts[0].relevanceScore > 0.35
-        let hasRelevantArticles = !articles.isEmpty && articles[0].relevanceScore > 0.35
-        let hasRelevantMemories = !memories.isEmpty && memories[0].relevanceScore > 0.35
+        let hasRelevantFacts = facts.first.map { $0.relevanceScore > 0.35 } ?? false
+        let hasRelevantArticles = articles.first.map { $0.relevanceScore > 0.35 } ?? false
+        let hasRelevantMemories = memories.first.map { $0.relevanceScore > 0.35 } ?? false
 
         let hasStrong = hasRelevantFacts || hasRelevantArticles
         let coverage: Double

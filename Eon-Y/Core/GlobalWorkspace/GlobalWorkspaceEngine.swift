@@ -461,11 +461,21 @@ final class GlobalWorkspaceEngine: ObservableObject {
     private func classifyThoughtCategory(_ text: String) -> WorkspaceThoughtCategory {
         let lower = text.lowercased()
         let categorySignals: [(WorkspaceThoughtCategory, [String])] = [
-            (.reasoning,  ["resonerar", "slutsats", "kausal", "hypotes", "logik", "bevis", "analys", "samband"]),
-            (.memory,     ["minne", "kommer ihåg", "episodisk", "konsolidering", "lagrar", "hämtar", "databas"]),
-            (.language,   ["språk", "morfologi", "syntax", "semantik", "ord", "grammatik", "böjning", "mening"]),
-            (.emotion,    ["känsla", "emotion", "glad", "ledsen", "orolig", "arg", "mår", "ångest"]),
-            (.perception, ["observerar", "uppfattar", "signal", "input", "registrerar", "noterar"]),
+            (.reasoning,  ["resonerar", "slutsats", "kausal", "hypotes", "logik", "bevis", "analys", "samband",
+                           "inferens", "premiss", "deduktion", "induktion", "abduktion", "falsifiering",
+                           "argument", "motbevis", "korrelation", "implikation"]),
+            (.memory,     ["minne", "kommer ihåg", "episodisk", "konsolidering", "lagrar", "hämtar", "databas",
+                           "retrieval", "associerar", "återkallar", "prospektivt", "autobiografiskt",
+                           "igenkänning", "glömma", "repetition", "spaced"]),
+            (.language,   ["språk", "morfologi", "syntax", "semantik", "ord", "grammatik", "böjning", "mening",
+                           "pragmatik", "fonetik", "prosodi", "idiom", "sammansättning", "lexikon",
+                           "register", "diskurs", "kohesion", "anafor", "ordklass"]),
+            (.emotion,    ["känsla", "emotion", "glad", "ledsen", "orolig", "arg", "mår", "ångest",
+                           "empati", "affekt", "valens", "arousal", "frustration", "nyfiken",
+                           "tacksamhet", "stolthet", "skuld", "skam", "glädje"]),
+            (.perception, ["observerar", "uppfattar", "signal", "input", "registrerar", "noterar",
+                           "detekterar", "mönster", "stimulus", "varseblivning", "uppmärksamhet",
+                           "selektiv", "fokus", "bottom-up", "top-down", "filtrerar"]),
         ]
         var bestCategory: WorkspaceThoughtCategory = .general
         var bestScore = 0

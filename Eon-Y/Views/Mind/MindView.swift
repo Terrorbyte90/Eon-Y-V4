@@ -482,7 +482,7 @@ struct MindView: View {
             }.frame(height: 6)
             HStack(spacing: 0) {
                 ForEach(["0.3", "0.5", "0.7", "0.9"], id: \.self) { m in
-                    let val = Double(m)!
+                    let val = Double(m) ?? 0
                     HStack(spacing: 4) {
                         Circle().fill(brain.phiValue >= val ? Color(hex: "#A78BFA") : Color.white.opacity(0.1)).frame(width: 5, height: 5)
                         Text(m).font(.system(size: 9, design: .monospaced)).foregroundStyle(brain.phiValue >= val ? Color(hex: "#A78BFA") : .white.opacity(0.2))
