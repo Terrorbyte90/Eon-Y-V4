@@ -889,29 +889,110 @@ actor CognitiveCycleEngine {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Prompt builder (v12: Optimized for 512-token context window)
+    // MARK: - Prompt builder (v14: Token-budgeted for 512-token context window)
     // CRITICAL: GPT-SW3 has a 512-token sliding window. The model only sees the LAST ~512 tokens.
-    // We MUST keep the prompt SHORT and put the most important parts LAST (closest to generation).
-    // Structure: [System rules (compact)] [Relevant context (minimal)] [Question + anchoring (LAST)]
-    // Target: <350 tokens for prompt, leaving ~160 tokens for response generation.
+    // v14: Strict character budget (900 chars ≈ 350 tokens). Each section gets a budget.
+    // Sections are filled by PRIORITY — if we run out of budget, lower-priority sections are cut.
+    // Priority (highest=last, closest to generation): Question > Self-knowledge > Facts > Article > History
+    // Target: ≤900 chars for prompt, leaving ~160 tokens for response generation.
 
     private func buildPrompt(input: String, context: CognitiveCycleContext) async -> String {
-        var lines: [String] = []
+        // Token budget: ~350 tokens ≈ 900 Swedish chars
+        let totalBudget = 900
 
-        // --- Section 1: Compact system instruction (MUST be short — ~60 tokens) ---
+        // --- FIXED sections (always included) ---
+        // Section A: System instruction (~120 chars)
         let registerHint: String
         switch context.register {
-        case .formal:  registerHint = "Formellt tonläge."
-        case .informal:  registerHint = "Vardagligt tonläge."
+        case .formal:  registerHint = " Formellt."
+        case .informal:  registerHint = " Vardagligt."
         default:       registerHint = ""
         }
+        let sysLine = "Du är Eon, svenskt AI. Svara direkt. Upprepa aldrig. Koncist.\(registerHint)"
 
-        lines.append("Du är Eon, ett svenskt AI-system. Regler: Svara direkt på frågan. Upprepa aldrig. Svenska. Koncist (2-4 meningar). \(registerHint)")
+        // Section Z: Question anchoring (MUST be last — most visible to model)
+        var anchorLines: [String] = []
+        if let analysis = context.inputAnalysis {
+            anchorLines.append("[Svara om: \(analysis.coreTopic). \(analysis.questionSummary)]")
+            if !analysis.namedEntities.isEmpty {
+                anchorLines.append("[Namn: \(analysis.namedEntities.joined(separator: ", "))]")
+            }
+        }
+        anchorLines.append("Användare: \(input)")
+        anchorLines.append("Eon:")
+        let anchorText = anchorLines.joined(separator: "\n")
 
-        // --- Section 2: Most relevant knowledge ONLY (max ~80 tokens) ---
-        // v12: Only include the TOP 3 most relevant facts — not all of them
-        let relevantFacts = await memory.searchFacts(query: input, limit: 8)
-        var allFacts = relevantFacts
+        // Calculate remaining budget after fixed sections
+        var remaining = totalBudget - sysLine.count - anchorText.count - 10  // 10 for newlines
+
+        // --- DYNAMIC sections (filled by priority) ---
+        var dynamicLines: [String] = []
+
+        // Priority 1: Self-knowledge (when question is about Eon — CRITICAL for identity)
+        if let selfKnowledge = context.selfKnowledge, selfKnowledge.isRelevant, remaining > 60 {
+            let budget = min(remaining / 2, 280)  // Max half of remaining
+            let selfFacts = selfKnowledge.relevantFacts.prefix(3).joined(separator: " ")
+            let selfLine = "[Om mig: \(String(selfFacts.prefix(budget - 12)))]"
+            dynamicLines.append(selfLine)
+            remaining -= selfLine.count + 1
+            // Add state if space
+            if !selfKnowledge.currentState.isEmpty && selfKnowledge.currentState != "Jag fungerar normalt." && remaining > 50 {
+                let stateLine = "[Tillstånd: \(String(selfKnowledge.currentState.prefix(min(80, remaining - 14))))]"
+                dynamicLines.append(stateLine)
+                remaining -= stateLine.count + 1
+            }
+        }
+
+        // Priority 2: Facts (BERT-ranked)
+        if remaining > 60 {
+            let factBudget = min(remaining / 2, 200)
+            let factLine = await buildFactSection(input: input, context: context, maxChars: factBudget)
+            if !factLine.isEmpty {
+                dynamicLines.append(factLine)
+                remaining -= factLine.count + 1
+            }
+        }
+
+        // Priority 3: Best article
+        if remaining > 80 {
+            let articleBudget = min(remaining / 2, 180)
+            let articleLine = await buildArticleSection(input: input, context: context, maxChars: articleBudget)
+            if !articleLine.isEmpty {
+                dynamicLines.append(articleLine)
+                remaining -= articleLine.count + 1
+            }
+        }
+
+        // Priority 4: Conversation history (only if budget remains)
+        if remaining > 50 && !context.conversationHistory.isEmpty {
+            let historyBudget = min(remaining, 150)
+            let historyLines = buildHistorySection(context: context, maxChars: historyBudget)
+            for line in historyLines {
+                if remaining > line.count + 1 {
+                    dynamicLines.append(line)
+                    remaining -= line.count + 1
+                }
+            }
+        }
+
+        // Priority 5: Follow-up context (very short inputs only)
+        let inputWordCount = input.split(separator: " ").count
+        if inputWordCount <= 3 && remaining > 40,
+           let prevEon = context.conversationHistory.last(where: { $0.role == "assistant" }) {
+            let followUp = "[Uppföljning: \(String(prevEon.content.prefix(min(60, remaining - 16))))]"
+            dynamicLines.append(followUp)
+            remaining -= followUp.count + 1
+        }
+
+        // --- ASSEMBLE: System + Dynamic + Anchor ---
+        var allLines = [sysLine] + dynamicLines
+        allLines.append(contentsOf: anchorLines)
+        return allLines.joined(separator: "\n")
+    }
+
+    /// BERT-ranked facts section builder with strict budget
+    private func buildFactSection(input: String, context: CognitiveCycleContext, maxChars: Int) async -> String {
+        var allFacts = await memory.searchFacts(query: input, limit: 8)
         if let analysis = context.inputAnalysis, analysis.coreTopic.count > 2 {
             let topicFacts = await memory.searchFacts(query: analysis.coreTopic, limit: 5)
             for fact in topicFacts where !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate }) {
@@ -930,96 +1011,78 @@ actor CognitiveCycleEngine {
                 allFacts.append(fact)
             }
         }
-        // BERT-rank and take only top 3 facts
-        if !allFacts.isEmpty {
-            var rankedFacts = allFacts
-            if !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
-                var scored: [(fact: (subject: String, predicate: String, object: String), score: Float)] = []
-                for fact in allFacts.prefix(15) {  // Limit embedding calls
-                    let factText = "\(fact.subject) \(fact.predicate) \(fact.object)"
-                    let factEmb = await neuralEngine.embed(factText)
-                    let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, factEmb)
-                    scored.append((fact: fact, score: sim))
-                }
-                rankedFacts = scored.sorted { $0.score > $1.score }
-                    .filter { $0.score > 0.30 }
-                    .prefix(3).map { $0.fact }
-            } else {
-                rankedFacts = Array(allFacts.prefix(3))
-            }
-            if !rankedFacts.isEmpty {
-                let factStr = rankedFacts.map { "\($0.subject) \($0.predicate) \($0.object)" }.joined(separator: ". ")
-                lines.append("[Fakta: \(String(factStr.prefix(200)))]")
-            }
-        }
+        guard !allFacts.isEmpty else { return "" }
 
-        // --- Section 3: Best matching article (max 1, max ~80 tokens of content) ---
+        // BERT-rank
+        var rankedFacts = allFacts
+        if !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
+            var scored: [(fact: (subject: String, predicate: String, object: String), score: Float)] = []
+            for fact in allFacts.prefix(15) {
+                let factText = "\(fact.subject) \(fact.predicate) \(fact.object)"
+                let factEmb = await neuralEngine.embed(factText)
+                let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, factEmb)
+                scored.append((fact: fact, score: sim))
+            }
+            rankedFacts = scored.sorted { $0.score > $1.score }
+                .filter { $0.score > 0.30 }
+                .prefix(3).map { $0.fact }
+        } else {
+            rankedFacts = Array(allFacts.prefix(3))
+        }
+        guard !rankedFacts.isEmpty else { return "" }
+
+        let factStr = rankedFacts.map { "\($0.subject) \($0.predicate) \($0.object)" }.joined(separator: ". ")
+        return "[Fakta: \(String(factStr.prefix(maxChars - 9)))]"
+    }
+
+    /// Best article section builder with strict budget
+    private func buildArticleSection(input: String, context: CognitiveCycleContext, maxChars: Int) async -> String {
         let articles = await memory.loadAllArticles()
-        if !articles.isEmpty {
-            var bestArticle: KnowledgeArticle?
-            var bestScore: Float = 0
-            let hasEmbedding = !context.inputEmbedding.allSatisfy({ $0 == 0 })
-            for article in articles.prefix(20) {
-                if hasEmbedding {
-                    let articleEmb = await neuralEngine.embed(article.title + " " + article.summary)
-                    let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, articleEmb)
-                    let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
-                    let contentWords = Set(article.content.lowercased().prefix(300).components(separatedBy: .whitespaces).filter { $0.count > 3 })
-                    let boosted = sim + Float(inputWords.intersection(contentWords).count) * 0.05
-                    if boosted > bestScore && boosted > 0.35 {
-                        bestScore = boosted
-                        bestArticle = article
-                    }
-                } else {
-                    let lower = input.lowercased()
-                    if article.title.lowercased().contains(lower.prefix(15)) {
-                        bestArticle = article
-                        break
-                    }
+        guard !articles.isEmpty else { return "" }
+
+        var bestArticle: KnowledgeArticle?
+        var bestScore: Float = 0
+        let hasEmbedding = !context.inputEmbedding.allSatisfy({ $0 == 0 })
+
+        for article in articles.prefix(20) {
+            if hasEmbedding {
+                let articleEmb = await neuralEngine.embed(article.title + " " + article.summary)
+                let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, articleEmb)
+                let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                let contentWords = Set(article.content.lowercased().prefix(300).components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                let boosted = sim + Float(inputWords.intersection(contentWords).count) * 0.05
+                if boosted > bestScore && boosted > 0.35 {
+                    bestScore = boosted
+                    bestArticle = article
+                }
+            } else {
+                let lower = input.lowercased()
+                if article.title.lowercased().contains(lower.prefix(15)) {
+                    bestArticle = article
+                    break
                 }
             }
-            if let article = bestArticle {
-                // v12: Only include first 150 chars of article content to save tokens
-                lines.append("[Källa: \(article.title) — \(String(article.content.prefix(150)))]")
-            }
         }
 
-        // --- Section 4: Conversation context (max ~80 tokens — only last 2-3 turns) ---
-        if !context.conversationHistory.isEmpty {
-            // v12: Only include last 3 turns, truncated
-            let recent = context.conversationHistory.suffix(3)
-            for turn in recent {
-                let role = turn.role == "user" ? "U" : "E"
-                lines.append("\(role): \(String(turn.content.prefix(80)))")
-            }
-        }
+        guard let article = bestArticle else { return "" }
+        let contentBudget = maxChars - article.title.count - 12
+        guard contentBudget > 20 else { return "" }
+        return "[Källa: \(article.title) — \(String(article.content.prefix(contentBudget)))]"
+    }
 
-        // v12: Follow-up context (only for very short inputs)
-        let inputWordCount = input.split(separator: " ").count
-        if inputWordCount <= 3, let prevEon = context.conversationHistory.last(where: { $0.role == "assistant" }) {
-            lines.append("[Uppföljning — senaste ämne: \(String(prevEon.content.prefix(80)))]")
+    /// History section builder with strict budget
+    private func buildHistorySection(context: CognitiveCycleContext, maxChars: Int) -> [String] {
+        var lines: [String] = []
+        var used = 0
+        for turn in context.conversationHistory.suffix(3) {
+            let role = turn.role == "user" ? "U" : "E"
+            let maxContent = min(60, maxChars - used - 4)
+            guard maxContent > 10 else { break }
+            let line = "\(role): \(String(turn.content.prefix(maxContent)))"
+            lines.append(line)
+            used += line.count + 1
         }
-
-        // --- Section 5: v13 Self-knowledge (when question is about Eon) ---
-        if let selfKnowledge = context.selfKnowledge, selfKnowledge.isRelevant {
-            let selfFacts = selfKnowledge.relevantFacts.prefix(3).joined(separator: " ")
-            lines.append("[Om mig: \(String(selfFacts.prefix(250)))]")
-            if !selfKnowledge.currentState.isEmpty && selfKnowledge.currentState != "Jag fungerar normalt." {
-                lines.append("[Mitt tillstånd: \(String(selfKnowledge.currentState.prefix(100)))]")
-            }
-        }
-
-        // --- Section 6: Question + anchoring (MUST be LAST — this is what the model sees most clearly) ---
-        if let analysis = context.inputAnalysis {
-            lines.append("[Svara om: \(analysis.coreTopic). \(analysis.questionSummary)]")
-            if !analysis.namedEntities.isEmpty {
-                lines.append("[Namn: \(analysis.namedEntities.joined(separator: ", "))]")
-            }
-        }
-        lines.append("Användare: \(input)")
-        lines.append("Eon:")
-
-        return lines.joined(separator: "\n")
+        return lines
     }
 
     private func buildBERTContext(input: String, entities: [ExtractedEntity]) -> String {

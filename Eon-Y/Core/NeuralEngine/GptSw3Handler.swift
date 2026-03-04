@@ -91,14 +91,18 @@ actor GptSw3Handler {
                 if failCount > 3 { break }
                 continue
             }
-            if tokenizer.isEOS(next) { break }
+            // v14: Require minimum 8 tokens before allowing EOS (prevents near-empty responses)
+            if tokenizer.isEOS(next) {
+                if generated.count >= 8 { break }
+                continue  // Skip EOS if we haven't generated enough
+            }
             generated.append(next)
             inputIds.append(next)
             let word = tokenizer.decode([next])
             if !word.trimmingCharacters(in: .whitespaces).isEmpty {
                 await onToken(word)
             }
-            try? await Task.sleep(nanoseconds: 20_000_000)
+            try? await Task.sleep(nanoseconds: 2_000_000)  // v14: 2ms (was 20ms — saves ~1.1s)
         }
 
         // Om GPT genererade tomma tokens, fall tillbaka
@@ -141,24 +145,46 @@ actor GptSw3Handler {
         }
     }
 
-    // v12: Advanced sampling with top-k, top-p, and repetition penalty
+    // v14: Swedish function word tokens that MUST be allowed to repeat (articles, conjunctions, pronouns)
+    // These are tokenizer IDs we must NOT penalize — built lazily from the tokenizer.
+    private static var _functionWordTokens: Set<Int>?
+    private var functionWordTokens: Set<Int> {
+        if let cached = Self._functionWordTokens { return cached }
+        let functionWords = ["och", "att", "en", "ett", "det", "den", "de", "i", "på", "av",
+                             "för", "med", "som", "är", "var", "har", "inte", "om", "till",
+                             "kan", "men", "så", "jag", "du", "vi", "man", "sig", "sin",
+                             "sitt", "sina", "min", "mitt", "mina", "alla", "från", "vid",
+                             "när", "hur", "vad", "ut", "in", "upp", "ner", "efter", "under",
+                             "mellan", "genom", "utan", "mot", "hos", "sedan", "bara"]
+        var tokens = Set<Int>()
+        for word in functionWords {
+            let ids = tokenizer.encode(word)
+            tokens.formUnion(ids)
+            let capIds = tokenizer.encode(word.capitalized)
+            tokens.formUnion(capIds)
+        }
+        Self._functionWordTokens = tokens
+        return tokens
+    }
+
+    // v14: Advanced sampling with top-k, top-p, repetition penalty (function-word aware)
     private func sampleFromLogits(_ logits: [Float], temperature: Float, generated: [Int] = []) -> Int {
         var la = logits
+        let exempt = functionWordTokens
 
-        // --- Step 1: Repetition penalty ---
-        // Penalize tokens that have already been generated (reduces repetition loops)
-        let repetitionPenalty: Float = 1.3  // >1.0 = penalize, 1.0 = no penalty
-        let recentTokens = Set(generated.suffix(100))  // Look at last 100 generated tokens
+        // --- Step 1: Repetition penalty (skip Swedish function words) ---
+        let repetitionPenalty: Float = 1.3
+        let recentTokens = Set(generated.suffix(100)).subtracting(exempt)
         for tokenId in recentTokens {
             guard tokenId >= 0 && tokenId < la.count else { continue }
             if la[tokenId] > 0 {
-                la[tokenId] /= repetitionPenalty  // Reduce probability of repeated tokens
+                la[tokenId] /= repetitionPenalty
             } else {
-                la[tokenId] *= repetitionPenalty  // Make negative logits more negative
+                la[tokenId] *= repetitionPenalty
             }
         }
-        // Extra penalty for very recently generated tokens (last 20)
-        let veryRecentTokens = Set(generated.suffix(20))
+        // Extra penalty for very recently generated content words (last 20)
+        let veryRecentTokens = Set(generated.suffix(20)).subtracting(exempt)
         for tokenId in veryRecentTokens {
             guard tokenId >= 0 && tokenId < la.count else { continue }
             if la[tokenId] > 0 {
@@ -172,8 +198,8 @@ actor GptSw3Handler {
         let temp = max(temperature, 0.01)
         la = la.map { $0 / temp }
 
-        // --- Step 3: Top-k filtering (keep only top 40 tokens) ---
-        let topK = 40
+        // --- Step 3: Top-k filtering (adaptive: lower temp → lower k) ---
+        let topK = temp < 0.5 ? 30 : (temp < 0.7 ? 50 : 80)  // v14: adaptive top-k
         // Find the top-k threshold
         var sorted = la
         sorted.sort(by: >)
@@ -226,7 +252,7 @@ actor GptSw3Handler {
         let words = response.split(separator: " ", omittingEmptySubsequences: false)
         for word in words {
             await onToken(String(word) + " ")
-            try? await Task.sleep(nanoseconds: 45_000_000)
+            try? await Task.sleep(nanoseconds: 5_000_000)  // v14: 5ms (was 45ms)
         }
     }
 }
