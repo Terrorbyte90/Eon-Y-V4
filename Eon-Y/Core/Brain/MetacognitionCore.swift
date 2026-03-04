@@ -54,22 +54,30 @@ actor MetacognitionCore {
         await state.update(dimension: .metacognition, delta: 0.004, source: "metacognition_core") // Reduced from 0.008
         await state.update(dimension: .selfAwareness, delta: 0.003, source: "metacognition_core") // Reduced from 0.005
 
-        // v23: Enhanced stagnation intervention — stronger, strategy-aware
-        // When many dimensions are stagnating, force a cognitive pivot
+        // v27: Enhanced stagnation intervention — genuine strategy switching
+        // When many dimensions are stagnating, don't just nudge numbers — switch strategies.
         if audit.stagnatedDimensions.count > 3 {
             for dim in audit.stagnatedDimensions.prefix(4) {
                 let level = await state.dimensionLevel(dim)
-                // v23: Doubled intervention strength + adaptive scaling based on how far behind
                 let gap = max(0.1, 0.7 - level)
-                let interventionDelta = 0.015 * gap  // Stronger than before (was 0.008)
+                let interventionDelta = 0.015 * gap
                 await state.update(dimension: dim, delta: max(0.004, interventionDelta), source: "stagnation_intervention")
             }
-            // v23: Force diversity — if stagnation is widespread, boost the weakest dimension extra
+            // Force diversity — boost weakest dimension extra
             if let weakest = audit.stagnatedDimensions.first {
                 let weakestLevel = await state.dimensionLevel(weakest)
                 if weakestLevel < 0.3 {
                     await state.update(dimension: weakest, delta: 0.01, source: "forced_pivot")
                 }
+            }
+            // v27: Genuine strategy switch — find the worst-performing strategy and deprioritize it
+            let worstStrategy = strategyEval.worstStrategies.first
+            let bestStrategy = strategyEval.bestStrategies.first
+            if let worst = worstStrategy, let best = bestStrategy, worst != best {
+                // Decay the failing strategy, amplify the working one
+                strategyEffectiveness[worst] = max(0.1, (strategyEffectiveness[worst] ?? 0.5) * 0.85)
+                strategyEffectiveness[best] = min(0.95, (strategyEffectiveness[best] ?? 0.5) * 1.1)
+                selfModelVersion += 1  // Mark that our strategy model changed
             }
         }
 

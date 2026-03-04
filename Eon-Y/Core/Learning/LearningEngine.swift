@@ -470,10 +470,15 @@ actor LearningEngine {
             }
         }
 
-        // Boost syntax competency based on V2 pattern recognition
-        if let v2Count = grammarPatterns["V2_huvudsats"], v2Count > 5 {
+        // v27: Boost syntax competency based on ALL detected grammar patterns (not just V2)
+        let syntaxPatternCount = grammarPatterns.filter { key, count in
+            (key.hasPrefix("V2_") || key.hasPrefix("bisats_") || key.hasPrefix("passiv") ||
+             key.hasPrefix("topik") || key.hasPrefix("adverb_")) && count > 3
+        }.count
+        if syntaxPatternCount > 0 {
+            let boost = min(0.003, Double(syntaxPatternCount) * 0.0005)
             if var comp = competencyBook["Syntax"] {
-                comp.level = min(0.95, comp.level + 0.001)
+                comp.level = min(0.95, comp.level + boost)
                 competencyBook["Syntax"] = comp
             }
         }
@@ -640,13 +645,16 @@ actor LearningEngine {
         let gaps = identifyKnowledgeGaps()
         knowledgeGaps = gaps
 
-        // 2. Välj vad som ska studeras (FSRS-baserat)
-        let dueItems = getDueItems()
+        // 2. v27: Use optimal study queue (forgetting curve) instead of simple due-date filter
+        let optimalQueue = optimalStudyQueue()
+        let dueItems = optimalQueue.isEmpty ? getDueItems() : optimalQueue
 
-        // 3. Studera och uppdatera kompetens (adaptive batch size based on gap urgency)
+        // 3. v27: Interleaved scheduling — mix domains for better retention
+        // Research shows interleaving domains during practice improves learning efficiency
         let batchSize = gaps.first.map { $0.urgency > 1.5 ? 7 : 5 } ?? 5
+        let interleaved = interleaveDomains(items: Array(dueItems.prefix(batchSize * 2)), maxItems: batchSize)
         var studiedItems: [String] = []
-        for item in dueItems.prefix(batchSize) {
+        for item in interleaved {
             await studyItem(item)
             studiedItems.append(item.topic)
         }
@@ -691,6 +699,35 @@ actor LearningEngine {
 
     // MARK: - FSRS (Free Spaced Repetition Scheduler)
 
+    // v27: Ebbinghaus forgetting curve — predicts retention probability for an item
+    func predictedRetention(for item: FSRSItem) -> Double {
+        let now = Date()
+        guard let lastReview = item.lastReview else { return 0.5 }
+        let daysSince = now.timeIntervalSince(lastReview) / 86400.0
+        guard daysSince > 0, item.stability > 0 else { return 0.9 }
+        // R(t) = exp(-t / S) — exponential decay from stability
+        return max(0.01, exp(-daysSince / max(0.1, item.stability)))
+    }
+
+    /// v27: Items sorted by learning efficiency — prioritize items about to be forgotten
+    func optimalStudyQueue() -> [FSRSItem] {
+        let now = Date()
+        return fsrsItems
+            .map { item -> (FSRSItem, Double) in
+                let retention = predictedRetention(for: item)
+                // Sweet spot: items at 60-80% retention benefit most from review
+                // (too early = waste, too late = fully forgotten)
+                let efficiency = retention > 0.9 ? 0.1 :           // Not due yet
+                                 retention > 0.6 ? (0.9 - retention) * 3.0 : // Optimal zone
+                                 retention > 0.3 ? 0.7 :           // Getting late but still useful
+                                 0.3                                // Nearly forgotten
+                let urgency = now > item.dueDate ? 0.3 : 0.0      // Bonus for overdue
+                return (item, efficiency + urgency)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map { $0.0 }
+    }
+
     private func getDueItems() -> [FSRSItem] {
         let now = Date()
         return fsrsItems.filter { $0.dueDate <= now }.sorted { $0.priority > $1.priority }
@@ -703,15 +740,21 @@ actor LearningEngine {
         let lastReview = fsrsItems[idx].lastReview
         let daysSinceLast = lastReview.map { Date().timeIntervalSince($0) / 86400 } ?? 1.0
 
-        // Rating based on timeliness of review
-        let scheduledInterval = fsrsItems[idx].dueDate.timeIntervalSince(lastReview ?? Date()) / 86400
-        let actualInterval = daysSinceLast
+        // v27: Fix rating calculation — handle first review (no lastReview) correctly
         let rating: Double
-        if scheduledInterval <= 0 {
-            rating = 0.9
+        if lastReview == nil {
+            // First ever review: base rating on how soon after creation we reviewed
+            let daysSinceCreation = Date().timeIntervalSince(fsrsItems[idx].dueDate) / 86400
+            rating = daysSinceCreation <= 1.0 ? 0.9 : daysSinceCreation <= 3.0 ? 0.7 : 0.5
         } else {
-            let ratio = actualInterval / max(scheduledInterval, 1.0)
-            rating = ratio <= 1.2 ? 0.9 : ratio <= 2.0 ? 0.7 : ratio <= 3.0 ? 0.4 : 0.2
+            let scheduledInterval = fsrsItems[idx].dueDate.timeIntervalSince(lastReview!) / 86400
+            let actualInterval = daysSinceLast
+            if scheduledInterval <= 0 {
+                rating = 0.9
+            } else {
+                let ratio = actualInterval / max(scheduledInterval, 1.0)
+                rating = ratio <= 1.2 ? 0.9 : ratio <= 2.0 ? 0.7 : ratio <= 3.0 ? 0.4 : 0.2
+            }
         }
 
         // FSRS-4.5 stability update
@@ -742,10 +785,17 @@ actor LearningEngine {
             topicDepthTracker[domain] = domainDepth
         }
 
-        // Update competency based on rating, review count, and mastery trajectory
+        // v27: Active recall bonus — harder retrievals (lower retention at review time) give bigger boost
+        // This models the "desirable difficulty" effect from learning science
+        let retentionAtReview = predictedRetention(for: fsrsItems[idx])
+        let activeRecallBonus: Double = retentionAtReview < 0.5 ? 1.5 :  // Hard recall = 50% bonus
+                                        retentionAtReview < 0.7 ? 1.2 :  // Medium recall = 20% bonus
+                                        1.0                               // Easy recall = no bonus
+
+        // Update competency based on rating, review count, mastery trajectory, and recall difficulty
         if let domain = fsrsItems[idx].domain {
             let masteryFactor = min(1.0, Double(reviewCount + 1) / 5.0) // Full mastery after 5 reviews
-            let learningBoost = 0.005 * rating * masteryFactor * (1.0 - (competencyBook[domain]?.level ?? 0.3))
+            let learningBoost = 0.005 * rating * masteryFactor * activeRecallBonus * (1.0 - (competencyBook[domain]?.level ?? 0.3))
             competencyBook[domain]?.level = min(0.99, (competencyBook[domain]?.level ?? 0.05) + learningBoost)
             competencyBook[domain]?.lastStudied = Date()
             if let level = competencyBook[domain]?.level {
@@ -1054,6 +1104,43 @@ actor LearningEngine {
             let sorted = errorPatterns.sorted { $0.value < $1.value }
             errorPatterns = Dictionary(uniqueKeysWithValues: Array(sorted.suffix(50)))
         }
+    }
+
+    // MARK: - v27: Interleaved Scheduling
+    // Alternate between domains for better retention (avoid same-domain blocks).
+
+    private func interleaveDomains(items: [FSRSItem], maxItems: Int) -> [FSRSItem] {
+        guard items.count > 1 else { return Array(items.prefix(maxItems)) }
+
+        // Group by domain
+        var domainBuckets: [String: [FSRSItem]] = [:]
+        for item in items {
+            domainBuckets[item.domain ?? "Okänt", default: []].append(item)
+        }
+
+        // Round-robin pick from each domain
+        var result: [FSRSItem] = []
+        var lastDomain: String?
+        let domainKeys = Array(domainBuckets.keys.shuffled())
+        var domainIdx = 0
+
+        while result.count < maxItems {
+            var found = false
+            for offset in 0..<domainKeys.count {
+                let key = domainKeys[(domainIdx + offset) % domainKeys.count]
+                if key == lastDomain && domainKeys.count > 1 { continue }
+                if let item = domainBuckets[key]?.first {
+                    result.append(item)
+                    domainBuckets[key]?.removeFirst()
+                    lastDomain = key
+                    domainIdx = (domainIdx + offset + 1) % domainKeys.count
+                    found = true
+                    break
+                }
+            }
+            if !found { break }
+        }
+        return result
     }
 
     // MARK: - v25: Adaptive Learning Velocity

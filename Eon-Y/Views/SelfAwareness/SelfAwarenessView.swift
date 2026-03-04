@@ -255,6 +255,8 @@ struct SelfAwarenessView: View {
                             miniMetric("Q-index", String(format: "%.3f", consciousness.qIndex), Color(hex: "#EC4899"))
                             miniMetric("Kvalia", String(format: "%.3f", consciousness.qualiaEmergenceIndex), Color(hex: "#F59E0B"))
                             miniMetric("Butlin", "\(consciousness.butlin14Score)/14", Color(hex: "#34D399"))
+                            // v27: Self-model accuracy — how well Eon predicts its own state
+                            miniMetric("Självmod.", String(format: "%.0f%%", brain.selfModelAccuracy * 100), Color(hex: "#38BDF8"))
                         }
                     }
                 }

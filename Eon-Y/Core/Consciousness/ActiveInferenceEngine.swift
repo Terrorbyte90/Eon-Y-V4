@@ -396,6 +396,13 @@ final class ActiveInferenceEngine: ObservableObject {
         return min(1.0, max(0, (lastError - 0.3) * 2.5))
     }
 
+    // MARK: - v27: Prediction-driven behavioral adaptation
+
+    /// Boost epistemic drive from external signal (e.g., poor self-predictions → explore more)
+    func boostEpistemicDrive(by delta: Double) {
+        epistemicValue = min(1.0, epistemicValue + delta)
+    }
+
     // MARK: - Export prediktionsstatus
 
     var predictionSummary: String {

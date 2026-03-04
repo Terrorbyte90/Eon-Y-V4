@@ -1482,12 +1482,26 @@ final class ConsciousnessEngine: ObservableObject {
             let predictionBonus = max(0, rollingAccuracy - 0.5) * 0.1
             consciousnessLevel = min(0.95, consciousnessLevel + predictionBonus)
 
-            // v24: Closed feedback loop — when predictions are poor, adjust internal model weights
+            // v27: Genuine prediction-driven behavioral adaptation
+            // When self-predictions are poor, DON'T just nudge numbers — actually change behavior.
             if rollingAccuracy < 0.4 && predictionAccuracyHistory.count >= 5 {
-                // Poor predictions indicate self-model is stale — force recalibration
+                // Poor predictions → self-model is wrong → force exploratory mode
                 CognitiveState.shared.updateDimension(.selfAwareness, delta: -0.001, source: "prediction_recalibration")
-                // Widen prediction variance to be more exploratory
-                curiosityDrive = min(1.0, curiosityDrive + 0.02)
+                curiosityDrive = min(1.0, curiosityDrive + 0.05)  // Stronger exploration drive
+
+                // Switch cognitive strategy: if current strategy isn't working, try opposite
+                let currentlyAnalytical = freeEnergy < 0.4
+                if currentlyAnalytical {
+                    // Was analytical (low free energy) but predictions wrong → go exploratory
+                    activeInference.boostEpistemicDrive(by: 0.1)
+                }
+            } else if rollingAccuracy > 0.7 && predictionAccuracyHistory.count >= 5 {
+                // v27: High accuracy → self-model is accurate → trust predictions to guide behavior
+                // Use predicted curiosity to pre-allocate attention
+                if let predCuriosity = predictedNextCuriosity, predCuriosity > 0.7 {
+                    // Prediction says curiosity will spike → proactively prepare exploration
+                    activeInference.boostEpistemicDrive(by: 0.03)
+                }
             }
 
             // v25: Prediction variance → self-knowledge confidence
