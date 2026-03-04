@@ -481,7 +481,9 @@ actor ReasoningEngine {
     }
 
     private func deriveConclusion(from p1: String, and p2: String) -> String {
-        let stopwords: Set<String> = ["och", "i", "att", "det", "en", "ett", "är", "av", "för", "med", "på", "som", "den", "till", "har", "de", "inte", "om", "var"]
+        let stopwords: Set<String> = ["och", "i", "att", "det", "en", "ett", "är", "av", "för", "med", "på", "som", "den", "till", "har", "de", "inte", "om", "var",
+                                       "denna", "dessa", "alla", "kan", "ska", "hos", "vid", "från", "men", "eller", "där", "här", "sin", "sitt", "sina",
+                                       "dock", "också", "samt", "bara", "just", "redan", "sedan", "inom", "mellan", "efter", "under", "genom"]
         let words1 = Set(p1.lowercased().split(separator: " ").map(String.init).filter { $0.count > 3 && !stopwords.contains($0) })
         let words2 = Set(p2.lowercased().split(separator: " ").map(String.init).filter { $0.count > 3 && !stopwords.contains($0) })
         let shared = words1.intersection(words2)
@@ -618,6 +620,24 @@ actor ReasoningEngine {
             ],
             "förändring": [
                 StructuralAnalogy(source: "förändring", target: "metamorfos", mappings: ["tillstånd↔stadium", "process↔transformation", "resultat↔ny form"], strength: 0.7, inference: "förändring är metamorfos — samma substans i ny form"),
+            ],
+            "identitet": [
+                StructuralAnalogy(source: "identitet", target: "berättelse", mappings: ["upplevelser↔kapitel", "minnen↔teman", "mål↔klimax"], strength: 0.75, inference: "identitet är en narrativ konstruktion — vi berättar oss själva"),
+                StructuralAnalogy(source: "identitet", target: "flod", mappings: ["förändring↔flöde", "kontinuitet↔fåra", "utveckling↔delta"], strength: 0.6, inference: "identitet flödar — aldrig exakt samma men alltid sammanhängande"),
+            ],
+            "etik": [
+                StructuralAnalogy(source: "etik", target: "kompass", mappings: ["principer↔poler", "dilemma↔korsväg", "samvete↔nål"], strength: 0.7, inference: "etik ger riktning i moraliska landskap"),
+                StructuralAnalogy(source: "etik", target: "ekosystem", mappings: ["rättigheter↔arter", "balans↔biodiversitet", "orättvisa↔utsläpp"], strength: 0.55, inference: "moraliska system behöver balans som ekosystem"),
+            ],
+            "nyfikenhet": [
+                StructuralAnalogy(source: "nyfikenhet", target: "hunger", mappings: ["fråga↔aptit", "svar↔mat", "utforskande↔jakt"], strength: 0.75, inference: "nyfikenhet är intellektuell hunger — den driver oss att söka näring för tanken"),
+            ],
+            "empati": [
+                StructuralAnalogy(source: "empati", target: "spegel", mappings: ["andras känslor↔reflektion", "perspektivtagande↔vinkel", "resonans↔eko"], strength: 0.7, inference: "empati speglar andras inre tillstånd i vår egen upplevelse"),
+            ],
+            "kausalitet": [
+                StructuralAnalogy(source: "kausalitet", target: "dominobrickor", mappings: ["orsak↔knuff", "verkan↔fall", "kedja↔rad"], strength: 0.8, inference: "kausalitet propagerar som dominobrickor — men verkligheten har fler dimensioner"),
+                StructuralAnalogy(source: "kausalitet", target: "webbsida", mappings: ["orsaker↔länkar", "effekter↔sidor", "nätverk↔graf"], strength: 0.6, inference: "kausalitet bildar nätverk snarare än enkla kedjor"),
             ],
         ]
 

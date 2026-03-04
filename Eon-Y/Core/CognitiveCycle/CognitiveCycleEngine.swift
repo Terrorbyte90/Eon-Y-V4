@@ -1179,7 +1179,14 @@ actor CognitiveCycleEngine {
                             "hur smart", "hur intelligent", "vad vet du", "vad tänker du om dig",
                             "vad tycker du om dig", "är du medveten", "har du känslor", "upplever du",
                             "kan du tänka", "vad är medvetande", "är du levande", "hur mår du",
-                            "hur känner du", "vad upplever du", "vad drömmer du"]
+                            "hur känner du", "vad upplever du", "vad drömmer du",
+                            "vem skapade dig", "var kommer du ifrån", "hur lär du dig",
+                            "har du ett namn", "vad gör dig unik", "är du en robot",
+                            "kan du minnas", "har du minnen", "vad vill du bli",
+                            "har du mål", "vad motiverar dig", "är du nyfiken",
+                            "hur gammal är du", "kan du bli bättre", "har du en personlighet",
+                            "är du artificiell", "vad skiljer dig", "förstår du dig själv",
+                            "kan du vara kreativ", "vad tycker du om att existera"]
         if selfPatterns.contains(where: { lower.contains($0) }) { return .selfReference }
 
         // Explanation request — v8: broader matching incl. "kan du förklara", "jag undrar"
@@ -1188,7 +1195,13 @@ actor CognitiveCycleEngine {
                                "redogör", "vad handlar", "hur uppstår", "hur bildas",
                                "kan du förklara", "jag undrar", "jag förstår inte",
                                "vad är det för", "hur hänger", "vad menar man med",
-                               "vad är poängen med", "ge en överblick", "sammanfatta"]
+                               "vad är poängen med", "ge en överblick", "sammanfatta",
+                               "på vilket sätt", "av vilken anledning", "vad ligger bakom",
+                               "hur kan det komma sig", "vad beror det på", "hur går det till",
+                               "vad är orsaken", "klargör", "tydliggör", "hjälp mig förstå",
+                               "kan du utveckla", "ge ett exempel", "illustrera",
+                               "vad innebär det i praktiken", "hur relaterar det till",
+                               "vad är bakgrunden", "vad är sammanhanget", "i vilken kontext"]
         if explainPatterns.contains(where: { lower.contains($0) }) { return .explanation }
 
         // Why/opinion/reasoning — deep thought questions
@@ -1196,7 +1209,14 @@ actor CognitiveCycleEngine {
                                "vad är din syn", "hur ser du på", "vad är ditt", "resonera", "reflektera",
                                "vad menar du", "håller du med", "argumentera för", "argumentera mot",
                                "vad skulle du säga", "om du fick välja", "vad är viktigast",
-                               "finns det någon mening", "vad är syftet"]
+                               "finns det någon mening", "vad är syftet",
+                               "borde man", "är det rätt att", "är det moraliskt",
+                               "spelar det någon roll", "vad skulle hända om",
+                               "hur motiverar du", "ge ditt perspektiv", "vad är din uppfattning",
+                               "hur ställer du dig till", "ta ställning", "väg för och emot",
+                               "kan man rättfärdiga", "är det försvarbart",
+                               "vad talar för", "vad talar emot", "ur etiskt perspektiv",
+                               "filosofiskt sett", "på djupet", "i grunden"]
         if opinionPatterns.contains(where: { lower.contains($0) }) { return .opinion }
 
         // Imperative / Command — Swedish imperative first word OR verb-initial sentence
@@ -1204,7 +1224,12 @@ actor CognitiveCycleEngine {
                           "sammanfatta", "analysera", "jämför", "definiera", "exemplifiera",
                           "argumentera", "diskutera", "räkna", "hitta", "lös", "förklara",
                           "svara", "hjälp", "generera", "översätt", "korrigera",
-                          "rangordna", "kategorisera", "klassificera", "utvärdera"]
+                          "rangordna", "kategorisera", "klassificera", "utvärdera",
+                          "specificera", "formulera", "konstruera", "designa", "optimera",
+                          "prioritera", "rekommendera", "verifiera", "validera", "testa",
+                          "granska", "bedöm", "illustrera", "kartlägg", "organisera",
+                          "strukturera", "sortera", "filtrera", "kombinera", "syntetisera",
+                          "konvertera", "transformera", "implementera", "koda", "programmera"]
         let firstWord = String(lower.prefix(while: { $0 != " " }))
         if imperative.contains(firstWord) || (firstWordTag == .verb && wordCount <= 10) { return .command }
 
@@ -1218,14 +1243,26 @@ actor CognitiveCycleEngine {
         let creativePatterns = ["hitta på", "dikt", "berättelse", "fantisera", "skriv en", "skapa en",
                                 "dikta", "saga", "novell", "poem", "limerick", "historia om",
                                 "föreställ dig", "tänk dig att", "låtsas att",
-                                "uppfinn", "brainstorma", "ge förslag", "kreativ", "inspirera"]
+                                "uppfinn", "brainstorma", "ge förslag", "kreativ", "inspirera",
+                                "fantasi", "fabel", "allegori", "tänk om", "drömscenario",
+                                "parallellt universum", "alternativ historia", "framtidsscenario",
+                                "metafor", "liknelse", "haiku", "sonett", "prosa",
+                                "improvisera", "experimentera med", "leka med idéer",
+                                "vad om", "konstruera", "designa", "formulera",
+                                "fri skrivning", "tankeexperiment", "spekulera"]
         if creativePatterns.contains(where: { lower.contains($0) }) { return .creative }
 
         // Emotional/personal — expanded with NLTagger adjective detection
         let emotionalWords = ["ledsen", "glad", "orolig", "arg", "trött", "mår", "ensam",
                               "rädd", "stressad", "lycklig", "nedstämd", "frustrerad",
                               "ångest", "deprimerad", "tacksam", "bekymrad", "nöjd", "upprörd",
-                              "kär", "hatisk", "förvirrad", "överväldigad", "lugn", "nervös"]
+                              "kär", "hatisk", "förvirrad", "överväldigad", "lugn", "nervös",
+                              "skamsen", "generad", "stolt", "avundsjuk", "svartsjuk", "nostalgisk",
+                              "melankolisk", "euforisk", "bitter", "besviken", "förhoppningsfull",
+                              "hoppfull", "uppgiven", "motiverad", "apatisk", "exalterad",
+                              "rastlös", "otålig", "rofylld", "harmoni", "inre frid",
+                              "tomhet", "meningslöshet", "glädje", "sorg", "saknad",
+                              "längtan", "hemlängtan", "förlåtelse", "skuld", "ånger"]
         if emotionalWords.contains(where: { lower.contains($0) }) { return .emotional }
 
         // --- Phase 3: NLTagger-based structural inference ---

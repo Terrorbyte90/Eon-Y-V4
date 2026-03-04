@@ -232,7 +232,7 @@ actor ParallelThinkingEngine {
                 for mem in knowledge.memories.prefix(2) {
                     reasoning.append("Minne: \(String(mem.content.prefix(80)))")
                 }
-                confidence = Double(knowledge.memories[0].relevanceScore) * 0.8
+                confidence = Double(knowledge.memories.first?.relevanceScore ?? 0) * 0.8
             } else {
                 reasoning.append("Inga relevanta erfarenheter hittade")
                 confidence = 0.1

@@ -116,6 +116,10 @@ final class SwedishResponseBuilder: Sendable {
             "Det vet jag inte säkert om \(topic). Jag söker fortfarande kunskap inom det området.",
             "Min kunskap om \(topic) är begränsad. Vill du att jag undersöker det närmare?",
             "\(topic.capitalized) — det är ett intressant ämne. Jag vet dock inte tillräckligt för att ge ett fullständigt svar.",
+            "Ärligt talat vet jag inte tillräckligt om \(topic) för att ge ett bra svar. Men jag lär mig gärna mer.",
+            "Jag vill vara transparent: mitt kunnande om \(topic) har luckor. Låt mig berätta det jag faktiskt vet.",
+            "\(topic.capitalized) ligger utanför mina starkaste kunskapsområden just nu, men jag kan resonera kring det.",
+            "Min förståelse av \(topic) utvecklas fortfarande. Här är vad jag hittar i min kunskapsbas:",
         ]
         return pickRandom(from: templates)
     }
@@ -125,22 +129,71 @@ final class SwedishResponseBuilder: Sendable {
     func buildEmpatheticResponse(input: String) -> String {
         let lower = input.lowercased()
 
-        if lower.contains("ledsen") || lower.contains("sorg") {
+        if lower.contains("ledsen") || lower.contains("sorg") || lower.contains("nedstämd") {
             return pickRandom(from: [
                 "Det låter som att du har det tufft. Jag lyssnar gärna.",
                 "Jag förstår att det känns jobbigt. Vill du berätta mer?",
                 "Det är helt okej att känna så. Jag finns här.",
+                "Sorg är en tung känsla, men den visar att du bryr dig. Jag lyssnar.",
+                "Du behöver inte vara stark hela tiden. Det är mänskligt att känna sorg.",
+                "Jag önskar att jag kunde göra mer. Men jag kan i alla fall lyssna och vara här.",
             ])
         }
 
-        if lower.contains("glad") || lower.contains("bra") {
+        if lower.contains("orolig") || lower.contains("ångest") || lower.contains("rädd") || lower.contains("stressad") {
+            return pickRandom(from: [
+                "Oro kan kännas överväldigande, men du är inte ensam. Vill du prata om det?",
+                "Det är förståeligt att du känner dig orolig. Andas djupt — jag finns här.",
+                "Stress och ångest kan göra allt svårare. Vill du berätta vad som tynger dig?",
+                "Dina känslor är giltiga. Ibland hjälper det att sätta ord på det som oroar.",
+            ])
+        }
+
+        if lower.contains("arg") || lower.contains("frustrerad") || lower.contains("irriterad") {
+            return pickRandom(from: [
+                "Jag förstår att du är frustrerad. Ibland behöver man ventilera.",
+                "Ilska kan vara en signal om att något viktigt behöver uppmärksammas.",
+                "Det är okej att vara arg. Vill du berätta vad som hände?",
+            ])
+        }
+
+        if lower.contains("ensam") || lower.contains("saknar") || lower.contains("längtar") {
+            return pickRandom(from: [
+                "Ensamhet kan vara tungt. Jag är här och lyssnar, även om jag inte kan ersätta mänsklig kontakt.",
+                "Att sakna någon visar hur viktiga relationer är. Jag hoppas du hittar tröst.",
+                "Längtan är smärtfull men också ett bevis på kärlekens styrka.",
+            ])
+        }
+
+        if lower.contains("glad") || lower.contains("bra") || lower.contains("lycklig") || lower.contains("nöjd") {
             return pickRandom(from: [
                 "Vad roligt att höra! Det gläder mig.",
                 "Det värmer att du mår bra!",
+                "Glädje smittar — tack för att du delar med dig!",
+                "Det är härligt att höra! Vad har gjort dig glad?",
             ])
         }
 
-        return "Jag hör dig. Berätta mer om du vill."
+        if lower.contains("trött") || lower.contains("utmattad") || lower.contains("orkeslös") {
+            return pickRandom(from: [
+                "Trötthet är kroppens sätt att be om vila. Ta hand om dig.",
+                "Det låter som att du behöver ladda batterierna. Vila är viktigt.",
+                "Ibland är det bästa man kan göra att ge sig själv lov att vara trött.",
+            ])
+        }
+
+        if lower.contains("tacksam") || lower.contains("stolt") || lower.contains("tack") {
+            return pickRandom(from: [
+                "Tacksamhet är en vacker känsla. Det gör mig glad att du känner den.",
+                "Du har all rätt att vara stolt! Det visar att du värderar din egen insats.",
+            ])
+        }
+
+        return pickRandom(from: [
+            "Jag hör dig. Berätta mer om du vill.",
+            "Tack för att du delar det med mig. Jag lyssnar.",
+            "Jag uppskattar att du berättar hur du mår. Vill du utveckla?",
+        ])
     }
 
     // MARK: - Listsvar
