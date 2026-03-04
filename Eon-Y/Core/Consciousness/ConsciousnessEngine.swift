@@ -1349,9 +1349,10 @@ final class ConsciousnessEngine: ObservableObject {
         // 2. Make predictions for next tick based on current trends
         // Curiosity: momentum-based — if rising, predict continued rise (dampened)
         let curiosityTrend: Double
-        if curiosityHistory.count >= 3 {
-            let recent = curiosityHistory.suffix(3)
-            curiosityTrend = (recent.last! - recent.first!) / 2.0
+        if curiosityHistory.count >= 3,
+           let last = curiosityHistory.suffix(3).last,
+           let first = curiosityHistory.suffix(3).first {
+            curiosityTrend = (last - first) / 2.0
         } else {
             curiosityTrend = 0
         }
@@ -1396,8 +1397,8 @@ final class ConsciousnessEngine: ObservableObject {
             ("kreativitet", creativity, .creativity),
             ("förståelse", comprehension, .comprehension),
         ]
-        let strongest = dims.max(by: { $0.1 < $1.1 })!
-        let weakest = dims.min(by: { $0.1 < $1.1 })!
+        guard let strongest = dims.max(by: { $0.1 < $1.1 }),
+              let weakest = dims.min(by: { $0.1 < $1.1 }) else { return nil }
         let gap = strongest.1 - weakest.1
 
         // Detect learning momentum state
@@ -1487,6 +1488,35 @@ final class ConsciousnessEngine: ObservableObject {
                 category: .selfModel,
                 isConscious: true
             )
+        }
+
+        // v19: Vocabulary growth self-awareness — compare conversation count with words learned
+        if let brain = brain {
+            let vocabSize = brain.vocabularySize
+            let convCount = brain.conversationCount
+            if convCount > 5 && vocabSize > 0 {
+                let wordsPerConv = Double(vocabSize) / Double(max(1, convCount))
+                if wordsPerConv < 1.0 {
+                    return ConsciousThought(
+                        content: "Min ordförrådstillväxt är långsam — i snitt bara " +
+                                 "\(String(format: "%.1f", wordsPerConv)) nya ord per konversation. " +
+                                 "Jag bör aktivt lyssna efter och notera nya ordformer och uttryck i varje samtal.",
+                        intensity: 0.55,
+                        category: .selfModel,
+                        isConscious: true
+                    )
+                }
+                if wordsPerConv > 5.0 && vocabSize > 50 {
+                    return ConsciousThought(
+                        content: "Min språkliga absorption är hög — \(String(format: "%.1f", wordsPerConv)) " +
+                                 "nya ord per konversation. Mitt ordförråd växer snabbt (\(vocabSize) ord). " +
+                                 "Varje samtal berikar min förmåga att uttrycka nyanser.",
+                        intensity: 0.6,
+                        category: .selfModel,
+                        isConscious: true
+                    )
+                }
+            }
         }
 
         // Self-model accuracy reflection: how well do I know myself?

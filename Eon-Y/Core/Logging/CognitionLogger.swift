@@ -17,7 +17,8 @@ final class CognitionLogger {
     }()
 
     private init() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         fileURL = docs.appendingPathComponent("eon_cognition_log.txt")
         // Skapa filen om den inte finns
         if !FileManager.default.fileExists(atPath: fileURL.path) {

@@ -250,6 +250,9 @@ actor LearningEngine {
         let wordsThisRound = Double(newWordsThisConversation.count)
         learningVelocity = learningVelocity * 0.8 + wordsThisRound * 0.2
 
+        // v19: Learn grammar patterns from the conversation
+        learnGrammarPatterns(from: allText)
+
         // Detect domain from conversation and boost competency for language domains
         let domain = detectDomain(from: allText)
         if var comp = competencyBook[domain] {
@@ -297,6 +300,92 @@ actor LearningEngine {
             return true
         }
         return words
+    }
+
+    // MARK: - Grammar Pattern Learning (v19)
+
+    /// Tracks Swedish sentence patterns (V2 rule, bisats word order, etc.)
+    private var grammarPatterns: [String: Int] = [:]  // pattern -> occurrence count
+    private var compoundWordCache: Set<String> = []    // detected compound words
+
+    /// Analyze sentence structure patterns from conversation text
+    func learnGrammarPatterns(from text: String) {
+        let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count > 10 }
+
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+
+        for sentence in sentences {
+            tagger.string = sentence
+            tagger.setLanguage(.swedish, range: sentence.startIndex..<sentence.endIndex)
+
+            var tags: [(String, NLTag)] = []
+            tagger.enumerateTags(
+                in: sentence.startIndex..<sentence.endIndex,
+                unit: .word,
+                scheme: .lexicalClass,
+                options: [.omitWhitespace, .omitPunctuation, .omitOther]
+            ) { tag, range in
+                if let tag = tag {
+                    tags.append((String(sentence[range]), tag))
+                }
+                return true
+            }
+
+            guard tags.count >= 3 else { continue }
+
+            // Detect V2 (verb-second) pattern in main clauses
+            if tags.count >= 2 && tags[1].1 == .verb {
+                grammarPatterns["V2_huvudsats", default: 0] += 1
+            }
+
+            // Detect bisats (subordinate clause) markers: att, som, när, om, eftersom, etc.
+            let bisatsMarkers: Set<String> = ["att", "som", "när", "om", "eftersom", "medan", "innan", "efter"]
+            for (i, (word, _)) in tags.enumerated() {
+                if bisatsMarkers.contains(word.lowercased()) && i + 2 < tags.count {
+                    grammarPatterns["bisats_\(word.lowercased())", default: 0] += 1
+                }
+            }
+
+            // Detect compound words (long words that might be compounds)
+            for (word, tag) in tags where tag == .noun && word.count >= 8 {
+                let lower = word.lowercased()
+                if !compoundWordCache.contains(lower) {
+                    compoundWordCache.insert(lower)
+                    // Boost morphology competency for each new compound detected
+                    if var comp = competencyBook["Morfologi"] {
+                        comp.level = min(0.95, comp.level + 0.0005)
+                        competencyBook["Morfologi"] = comp
+                    }
+                }
+            }
+
+            // Detect passive constructions (word ending in -s that is a verb)
+            for (word, tag) in tags where tag == .verb && word.hasSuffix("s") && word.count > 4 {
+                grammarPatterns["passiv_s", default: 0] += 1
+            }
+        }
+
+        // Boost syntax competency based on V2 pattern recognition
+        if let v2Count = grammarPatterns["V2_huvudsats"], v2Count > 5 {
+            if var comp = competencyBook["Syntax"] {
+                comp.level = min(0.95, comp.level + 0.001)
+                competencyBook["Syntax"] = comp
+            }
+        }
+    }
+
+    /// Get a summary of learned grammar patterns for display
+    func grammarPatternSummary() -> [(pattern: String, count: Int)] {
+        grammarPatterns.sorted { $0.value > $1.value }
+            .prefix(10)
+            .map { (pattern: $0.key, count: $0.value) }
+    }
+
+    /// Count of detected compound words
+    func compoundWordCount() -> Int {
+        compoundWordCache.count
     }
 
     // MARK: - Autonomous Exploration (v17)
@@ -378,6 +467,8 @@ actor LearningEngine {
         let convsToday = conversationsToday
         let wordsToday = wordsLearnedToday
         let vocabCount = uniqueSwedishWords.count
+        let compounds = compoundWordCache.count
+        let patterns = grammarPatternSummary()
 
         await MainActor.run {
             let proxy = LearningEngine.observableProxy
@@ -389,6 +480,8 @@ actor LearningEngine {
             proxy.conversationsToday = convsToday
             proxy.wordsLearnedToday = wordsToday
             proxy.vocabularyCount = vocabCount
+            proxy.compoundWordCount = compounds
+            proxy.grammarPatterns = patterns
         }
     }
 

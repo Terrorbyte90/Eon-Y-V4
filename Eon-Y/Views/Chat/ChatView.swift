@@ -1,11 +1,42 @@
 import SwiftUI
 import Combine
 
-// MARK: - ChatView v6 — Consciousness-aware UI with genuine engine signals
+// MARK: - KeyboardObserver — Tracks keyboard height for manual layout
+
+final class KeyboardObserver: ObservableObject {
+    @Published var keyboardHeight: CGFloat = 0
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
+            .compactMap { notification -> CGFloat? in
+                (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect)?.height
+            }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] height in
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                    self?.keyboardHeight = height
+                }
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                    self?.keyboardHeight = 0
+                }
+            }
+            .store(in: &cancellables)
+    }
+}
+
+// MARK: - ChatView v7 — Keyboard-aware UI with correct input bar positioning
 
 struct ChatView: View {
     @EnvironmentObject var brain: EonBrain
     @StateObject private var viewModel = ChatViewModel()
+    @StateObject private var keyboard = KeyboardObserver()
     @State private var inputText = ""
     @FocusState private var inputFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -41,10 +72,10 @@ struct ChatView: View {
             ZStack {
                 chatBackground
                 VStack(spacing: 0) {
-                    // Top bar stays pinned — ignores keyboard
+                    // Top bar stays pinned — keyboard does NOT push it up
                     topBar
                         .zIndex(1)
-                    messageList
+                    messageList(safeBottom: geo.safeAreaInsets.bottom)
                 }
                 // Sidebar overlay
                 if showSidebar {
@@ -345,8 +376,12 @@ struct ChatView: View {
 
     // MARK: - Message List
 
-    var messageList: some View {
-        ScrollViewReader { proxy in
+    func messageList(safeBottom: CGFloat) -> some View {
+        // Calculate the bottom offset: when keyboard is visible, push inputBar up by keyboard height
+        // minus the safe area (keyboard height includes safe area on devices with home indicator)
+        let keyboardOffset = max(0, keyboard.keyboardHeight - safeBottom)
+
+        return ScrollViewReader { proxy in
             VStack(spacing: 0) {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 2) {
@@ -372,8 +407,9 @@ struct ChatView: View {
                 .scrollDismissesKeyboard(.interactively)
                 .onTapGesture { inputFocused = false }
 
-                // Input bar sits flush against keyboard (outside ScrollView)
+                // Input bar sits flush against keyboard — manually offset by keyboard height
                 inputBar
+                    .padding(.bottom, keyboardOffset)
             }
             .onChange(of: viewModel.messages.count) { _, _ in
                 withAnimation(.spring(response: 0.4)) { proxy.scrollTo("bottom") }
@@ -383,6 +419,10 @@ struct ChatView: View {
             }
             .onChange(of: brain.innerMonologue.count) { _, _ in
                 if brain.isThinking { withAnimation { proxy.scrollTo("bottom") } }
+            }
+            .onChange(of: keyboard.keyboardHeight) { _, _ in
+                // Auto-scroll to bottom when keyboard appears
+                withAnimation(.spring(response: 0.3)) { proxy.scrollTo("bottom") }
             }
         }
     }
@@ -453,7 +493,7 @@ struct ChatView: View {
 
                 sendButton
             }
-            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, inputFocused ? 4 : 10)
+            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 10)
             .background(
                 Color(hex: "#06030F").opacity(0.95)
                     .background(.ultraThinMaterial.opacity(0.4))
@@ -467,7 +507,6 @@ struct ChatView: View {
             )
         }
         .animation(.spring(response: 0.3), value: brain.isThinking)
-        .animation(.spring(response: 0.25, dampingFraction: 0.9), value: inputFocused)
     }
 
     var sendButton: some View {
