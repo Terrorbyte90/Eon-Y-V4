@@ -381,7 +381,8 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
                 return (pillar, dim, work, priority)
             }
             let sorted = scored.sorted { $0.3 > $1.3 }
-            let (pillar, _, work, _) = sorted.first!
+            guard let first = sorted.first else { continue }
+            let (pillar, _, work, _) = first
 
             // Uppdatera Language-timestamp om vi kör Language-pelaren
             if pillar == .language { lastLanguagePillarDate = Date() }
@@ -664,9 +665,9 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         await state.update(dimension: .communication, delta: 0.002, source: "language_pillar")
 
         // If idioms were detected, boost comprehension further
-        if !analysis.detectedIdioms.isEmpty {
+        if let firstIdiom = analysis.detectedIdioms.first {
             brain.innerMonologue.append(MonologueLine(
-                text: "🗣 Idiom: '\(analysis.detectedIdioms.first!.phrase)' = \(analysis.detectedIdioms.first!.meaning)",
+                text: "🗣 Idiom: '\(firstIdiom.phrase)' = \(firstIdiom.meaning)",
                 type: .insight
             ))
             await state.update(dimension: .comprehension, delta: 0.003, source: "idiom_detection")

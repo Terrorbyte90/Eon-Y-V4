@@ -5,8 +5,8 @@ import SwiftUI
 // Only accessible when Eon-läge is active.
 
 struct MotorRoomView: View {
-    @StateObject private var motorController = EonMotorController.shared
-    @StateObject private var consciousness = ConsciousnessEngine.shared
+    @ObservedObject private var motorController = EonMotorController.shared
+    @ObservedObject private var consciousness = ConsciousnessEngine.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showLogSheet = false
     @State private var pulsePhase: CGFloat = 1.0
@@ -394,7 +394,7 @@ struct MotorRoomView: View {
 // MARK: - Motor Log Sheet
 
 struct MotorLogSheet: View {
-    @StateObject private var motorController = EonMotorController.shared
+    @ObservedObject private var motorController = EonMotorController.shared
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
 

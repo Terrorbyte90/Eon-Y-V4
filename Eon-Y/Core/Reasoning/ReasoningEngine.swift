@@ -493,12 +493,14 @@ actor ReasoningEngine {
             let effects1 = causalGraph.findEffects(of: concept1)
             let causes2 = causalGraph.findCauses(of: concept2)
             let bridge = Set(effects1).intersection(Set(causes2))
-            if !bridge.isEmpty {
-                return "Indirekt koppling via \(bridge.first!): \(concept1) → \(bridge.first!) → \(concept2)"
+            if let bridgeElement = bridge.first {
+                return "Indirekt koppling via \(bridgeElement): \(concept1) → \(bridgeElement) → \(concept2)"
             }
             return "Premisserna berör olika aspekter som kan komplettera varandra"
         }
-        let key = shared.sorted { $0.count > $1.count }.first ?? shared.first!
+        guard let key = shared.sorted(by: { $0.count > $1.count }).first else {
+            return "Premisserna berör olika aspekter som kan komplettera varandra"
+        }
         return "Genom \(key): \(String(p1.prefix(40))) kopplas till \(String(p2.prefix(40)))"
     }
 

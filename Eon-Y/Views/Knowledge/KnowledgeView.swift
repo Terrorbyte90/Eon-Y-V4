@@ -7,7 +7,7 @@ struct KnowledgeView: View {
     @EnvironmentObject var brain: EonBrain
     @Environment(\.tabBarVisible) private var tabBarVisible
     @StateObject private var viewModel = KnowledgeViewModel()
-    @StateObject private var gemini = GeminiArticleService.shared
+    @ObservedObject private var gemini = GeminiArticleService.shared
     @State private var searchText = ""
     @State private var selectedCategory: KnowledgeCategory? = nil
     @State private var showAddArticle = false

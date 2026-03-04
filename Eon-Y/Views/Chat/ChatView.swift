@@ -42,7 +42,6 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 topBar
                 messageList
-                inputBar
             }
             // Sidebar overlay
             if showSidebar {
@@ -365,6 +364,10 @@ struct ChatView: View {
                 .padding(.top, 8)
             }
             .scrollDismissesKeyboard(.interactively)
+            .onTapGesture { inputFocused = false }
+            .safeAreaInset(edge: .bottom) {
+                inputBar
+            }
             .onChange(of: viewModel.messages.count) { _, _ in
                 withAnimation(.spring(response: 0.4)) { proxy.scrollTo("bottom") }
             }

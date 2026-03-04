@@ -67,8 +67,8 @@ final class CriticalityController: ObservableObject {
         if activationHistory.count > 200 { activationHistory.removeFirst() }
 
         // v9: Adaptive branching ratio with faster response near regime transitions
-        if activationHistory.count >= 2 {
-            let current = activationHistory.last!
+        if activationHistory.count >= 2,
+           let current = activationHistory.last {
             let previous = activationHistory[activationHistory.count - 2]
             if previous > 0.01 {
                 let instantBR = current / previous

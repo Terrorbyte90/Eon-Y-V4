@@ -1266,8 +1266,8 @@ struct ResponseComposer {
                 if !cc.activeHypothesis.isEmpty {
                     parts.append("Min hypotes är att \(cc.activeHypothesis).")
                 }
-                if allVerbs.count > 0 {
-                    parts.append("Handlingen '\(allVerbs.first!)' är troligen driven av underliggande strukturer som förstärker varandra.")
+                if let firstVerb = allVerbs.first {
+                    parts.append("Handlingen '\(firstVerb)' är troligen driven av underliggande strukturer som förstärker varandra.")
                 }
                 parts.append("Vilket perspektiv — biologiskt, socialt, eller filosofiskt — är du mest intresserad av?")
 

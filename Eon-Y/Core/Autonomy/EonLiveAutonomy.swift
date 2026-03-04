@@ -373,8 +373,7 @@ final class EonLiveAutonomy: ObservableObject {
         let creative = CreativeEngine.shared
 
         // Update monologue with insights
-        if !comprehension.crossDomainLinks.isEmpty {
-            let link = comprehension.crossDomainLinks.first!
+        if let link = comprehension.crossDomainLinks.first {
             let line = MonologueLine(
                 text: "Artikel '\(targetArticle.title)': fann koppling till '\(link.toArticle)' via begreppen \(link.sharedConcepts.prefix(3).joined(separator: ", "))",
                 type: .insight
@@ -397,8 +396,7 @@ final class EonLiveAutonomy: ObservableObject {
             }
         }
 
-        if !comprehension.causalRelations.isEmpty {
-            let causal = comprehension.causalRelations.first!
+        if let causal = comprehension.causalRelations.first {
             let line = MonologueLine(
                 text: "Kausalitet i '\(targetArticle.title)': \(causal.cause) → \(causal.effect)",
                 type: .thought
@@ -2569,7 +2567,7 @@ struct HypothesisEngine {
             ("Metakognitiv förmåga är den starkaste prediktorn för inlärningshastighet", "Psykologi"),
             ("Φ-värdet ökar superlineärt med antalet integrerade kunskapsnoder", "AI & Teknik"),
             ("Pragmatisk kompetens kräver kulturell kontextualisering utöver semantisk förståelse", "Språk"),
-            (articles.isEmpty ? "Kunskapsackumulering följer en S-kurva med accelerationsfas" : "Artikeln '\(articles.randomElement()!)' innehåller principer applicerbara på AI-lärande", "AI & Teknik"),
+            (articles.isEmpty ? "Kunskapsackumulering följer en S-kurva med accelerationsfas" : "Artikeln '\(articles.randomElement() ?? "okänd")' innehåller principer applicerbara på AI-lärande", "AI & Teknik"),
         ]
 
         let template = templates.randomElement()!
