@@ -420,7 +420,7 @@ actor CognitiveCycleEngine {
         }
         await onStepUpdate(.causalGraph, .completed)
 
-        // Steg 5: Global Workspace + Medvetandetillstånd
+        // Steg 5: Global Workspace + Medvetandetillstånd + SelfKnowledge
         await onStepUpdate(.globalWorkspace, .active)
         await onMonologue(MonologueLine(text: "Global Workspace aktiveras — koalition bildas...", type: .thought))
 
@@ -435,6 +435,24 @@ actor CognitiveCycleEngine {
         if let narration = consciousnessNarration(consciousness) {
             await onMonologue(narration)
         }
+
+        // v13: SpecialisedChat — SelfKnowledge + QuestionProfile + ConversationTracker
+        let selfKnowledge = await SelfKnowledgeBase.shared.queryRelevant(input: input, consciousness: consciousness)
+        context.selfKnowledge = selfKnowledge
+        if selfKnowledge.isRelevant {
+            await onMonologue(MonologueLine(text: "Självkunskap aktiverad: \(selfKnowledge.relevantFacts.count) fakta om mig själv", type: .insight))
+        }
+        // QuestionProfile for richer understanding
+        let questionProfile = await QuestionUnderstandingAgent().analyze(
+            input: input,
+            conversationHistory: context.conversationHistory
+        )
+        context.questionProfile = questionProfile
+        // ConversationTracker — resolve context
+        let _ = await ConversationTracker.shared.resolveContext(
+            input: input,
+            history: context.conversationHistory
+        )
 
         let prompt = await buildPrompt(input: input, context: context)
         context.prompt = prompt
@@ -580,6 +598,16 @@ actor CognitiveCycleEngine {
         await memory.saveMessage(role: "user", content: input, sessionId: context.sessionId)
         await memory.saveMessage(role: "assistant", content: context.generatedText, sessionId: context.sessionId, confidence: aggregatedConfidence)
 
+        // v13: Registrera tur i ConversationTracker
+        let topic = context.questionProfile?.coreTopic ?? context.inputAnalysis?.coreTopic ?? ""
+        let namedEntities = context.questionProfile?.namedEntities ?? context.inputAnalysis?.namedEntities ?? []
+        await ConversationTracker.shared.recordTurn(
+            userInput: input,
+            eonResponse: context.generatedText,
+            topic: topic,
+            entities: namedEntities
+        )
+
         return CognitiveCycleResult(
             response: context.generatedText,
             confidence: aggregatedConfidence,
@@ -657,6 +685,18 @@ actor CognitiveCycleEngine {
         // Samla medvetandetillstånd för djupläge
         let consciousness = await gatherConsciousnessContext()
         context.consciousness = consciousness
+
+        // v13: SpecialisedChat — SelfKnowledge + QuestionProfile (deep)
+        let selfKnowledge = await SelfKnowledgeBase.shared.queryRelevant(input: input, consciousness: consciousness)
+        context.selfKnowledge = selfKnowledge
+        let questionProfile = await QuestionUnderstandingAgent().analyzeDeep(
+            input: input,
+            conversationHistory: context.conversationHistory
+        )
+        context.questionProfile = questionProfile
+        if selfKnowledge.isRelevant {
+            await onMonologue(MonologueLine(text: "Självkunskap: \(selfKnowledge.relevantFacts.count) relevanta fakta om mig", type: .insight))
+        }
 
         // Semantic article retrieval — rank ALL articles by BERT similarity, not substring match
         await onStepUpdate(.globalWorkspace, .active)
@@ -751,6 +791,16 @@ actor CognitiveCycleEngine {
         await memory.saveMessage(role: "user", content: input, sessionId: context.sessionId)
         await memory.saveMessage(role: "assistant", content: context.generatedText, sessionId: context.sessionId, confidence: aggregatedConfidence)
 
+        // v13: Registrera tur i ConversationTracker
+        let deepTopic = context.questionProfile?.coreTopic ?? context.inputAnalysis?.coreTopic ?? ""
+        let deepNamedEntities = context.questionProfile?.namedEntities ?? context.inputAnalysis?.namedEntities ?? []
+        await ConversationTracker.shared.recordTurn(
+            userInput: input,
+            eonResponse: context.generatedText,
+            topic: deepTopic,
+            entities: deepNamedEntities
+        )
+
         return CognitiveCycleResult(
             response: context.generatedText,
             confidence: aggregatedConfidence,
@@ -814,6 +864,15 @@ actor CognitiveCycleEngine {
             for turn in context.conversationHistory.suffix(4) {
                 let role = turn.role == "user" ? "U" : "E"
                 lines.append("\(role): \(String(turn.content.prefix(100)))")
+            }
+        }
+
+        // v13: Self-knowledge for deep prompt
+        if let selfKnowledge = context.selfKnowledge, selfKnowledge.isRelevant {
+            let selfFacts = selfKnowledge.relevantFacts.prefix(4).joined(separator: " ")
+            lines.append("[Om mig: \(String(selfFacts.prefix(350)))]")
+            if !selfKnowledge.currentState.isEmpty && selfKnowledge.currentState != "Jag fungerar normalt." {
+                lines.append("[Mitt tillstånd: \(String(selfKnowledge.currentState.prefix(150)))]")
             }
         }
 
@@ -941,7 +1000,16 @@ actor CognitiveCycleEngine {
             lines.append("[Uppföljning — senaste ämne: \(String(prevEon.content.prefix(80)))]")
         }
 
-        // --- Section 5: Question + anchoring (MUST be LAST — this is what the model sees most clearly) ---
+        // --- Section 5: v13 Self-knowledge (when question is about Eon) ---
+        if let selfKnowledge = context.selfKnowledge, selfKnowledge.isRelevant {
+            let selfFacts = selfKnowledge.relevantFacts.prefix(3).joined(separator: " ")
+            lines.append("[Om mig: \(String(selfFacts.prefix(250)))]")
+            if !selfKnowledge.currentState.isEmpty && selfKnowledge.currentState != "Jag fungerar normalt." {
+                lines.append("[Mitt tillstånd: \(String(selfKnowledge.currentState.prefix(100)))]")
+            }
+        }
+
+        // --- Section 6: Question + anchoring (MUST be LAST — this is what the model sees most clearly) ---
         if let analysis = context.inputAnalysis {
             lines.append("[Svara om: \(analysis.coreTopic). \(analysis.questionSummary)]")
             if !analysis.namedEntities.isEmpty {
@@ -1517,6 +1585,8 @@ struct CognitiveCycleContext {
     var consciousness: ConsciousnessContext? = nil
     var inputAnalysis: InputAnalysis? = nil  // v11: deep question understanding
     var relevanceScore: Double = 0.0        // v11: BERT question-answer relevance
+    var selfKnowledge: SelfKnowledge? = nil // v13: SpecialisedChat self-knowledge
+    var questionProfile: QuestionProfile? = nil // v13: deep question profile
 }
 
 struct ValidationResult {

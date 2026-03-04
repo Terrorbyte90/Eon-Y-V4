@@ -63,11 +63,30 @@ final class SleepConsolidationEngine: ObservableObject {
 
     private init() {}
 
+    // MARK: - Paus/återuppta (används av ChatOrchestrator för att frigöra CPU)
+
+    private var isPaused: Bool = false
+    private var savedSleepPressure: Double = 0
+    private var savedSynapticLoad: Double = 0
+
+    /// Pausar sömnmotorn — sparar tillståndet så att det återupptas exakt
+    func setPaused(_ paused: Bool) {
+        if paused && !isPaused {
+            savedSleepPressure = sleepPressure
+            savedSynapticLoad = synapticLoad
+            isPaused = true
+        } else if !paused && isPaused {
+            sleepPressure = savedSleepPressure
+            synapticLoad = savedSynapticLoad
+            isPaused = false
+        }
+    }
+
     // MARK: - Vakenhetstick: ackumulera sömnbehov
 
     /// Kallas varje tick under vakenhet. Ökar sömnbehovet gradvis.
     func wakeTick(cognitiveActivity: Double) {
-        guard !isAsleep else { return }
+        guard !isAsleep, !isPaused else { return }
         totalAwakeTicks += 1
 
         // Sömnbehov ökar med tid och kognitiv aktivitet
