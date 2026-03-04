@@ -48,6 +48,11 @@ struct LanguageView: View {
                 orbPulse = 1.06
             }
             loadCompetencies()
+            learning.refresh()
+        }
+        .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in
+            learning.refresh()
+            loadCompetencies()
         }
     }
 
@@ -210,6 +215,98 @@ struct LanguageView: View {
                     capabilityRow(name: "Ordbetydelsedisambiguering (WSD)", active: brain.semanticMastery > 0.15, level: brain.semanticMastery)
                     capabilityRow(name: "GPT-SW3 textgenerering", active: brain.gptLoaded, level: brain.gptLoaded ? 0.7 : 0.0)
                     capabilityRow(name: "KB-BERT semantisk embedding", active: brain.bertLoaded, level: brain.bertLoaded ? 0.8 : 0.0)
+                }
+            }
+
+            // v18: Live learning insights — real-time updates from the learning engine
+            GlassCard(tint: Color(hex: "#34D399")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    PanelHeader(icon: "lightbulb.fill", title: "Aktiv inlärning", color: Color(hex: "#34D399")) {
+                        if brain.languagePhaseActive {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(Color(hex: "#34D399"))
+                                    .frame(width: 5, height: 5)
+                                    .shadow(color: Color(hex: "#34D399").opacity(0.8), radius: 3)
+                                Text("LIVE")
+                                    .font(.system(size: 8, weight: .black, design: .monospaced))
+                                    .foregroundStyle(Color(hex: "#34D399"))
+                            }
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill(Color(hex: "#34D399").opacity(0.15)))
+                        } else {
+                            EmptyView()
+                        }
+                    }
+
+                    // Recent learned words
+                    if !brain.recentLearnedWords.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Senast inlärda ord")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.5))
+
+                            FlowLayout(spacing: 6) {
+                                ForEach(brain.recentLearnedWords.suffix(12), id: \.self) { word in
+                                    Text(word)
+                                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                                        .foregroundStyle(accentColor)
+                                        .padding(.horizontal, 8).padding(.vertical, 4)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(accentColor.opacity(0.08))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .strokeBorder(accentColor.opacity(0.15), lineWidth: 0.5)
+                                                )
+                                        )
+                                }
+                            }
+                        }
+                    }
+
+                    // Learning velocity
+                    HStack(spacing: 16) {
+                        VStack(spacing: 2) {
+                            Text(brain.languageGrowthRate > 0 ? "+" + String(format: "%.1f%%", brain.languageGrowthRate) : "—")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(brain.languageGrowthRate > 0 ? Color(hex: "#34D399") : .white.opacity(0.3))
+                            Text("Tillväxt/cykel")
+                                .font(.system(size: 8, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                        VStack(spacing: 2) {
+                            Text("\(brain.vocabularySize)")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#38BDF8"))
+                            Text("Unika ord")
+                                .font(.system(size: 8, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                        VStack(spacing: 2) {
+                            Text("\(brain.conversationCount)")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#EC4899"))
+                            Text("Samtal")
+                                .font(.system(size: 8, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+
+                    // Current focus from language log
+                    if let lastLog = brain.languageLog.last {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.right.circle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color(hex: "#34D399").opacity(0.6))
+                            Text(lastLog)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
+                                .lineLimit(2)
+                        }
+                    }
                 }
             }
 
@@ -615,14 +712,72 @@ extension LearningEngine {
         @Published var competencies: [DomainCompetency] = []
         @Published var overallLevel: Double = 0.0
 
+        // v17: Real-time learning events
+        @Published var latestLearnedWords: [String] = []
+        @Published var activeTopics: [String] = []
+        @Published var velocity: Double = 0.0                // Words per conversation (rolling avg)
+        @Published var conversationsToday: Int = 0
+        @Published var wordsLearnedToday: Int = 0
+        @Published var vocabularyCount: Int = 0
+
         func refresh() {
             Task {
                 let snapshot = await LearningEngine.shared.competencySnapshot()
                 let level = await LearningEngine.shared.overallCompetencyLevel()
-                self.competencies = snapshot
-                self.overallLevel = level
+                let metrics = await LearningEngine.shared.dailyMetrics()
+                await MainActor.run {
+                    self.competencies = snapshot
+                    self.overallLevel = level
+                    self.conversationsToday = metrics.conversationsToday
+                    self.wordsLearnedToday = metrics.wordsLearnedToday
+                    self.vocabularyCount = metrics.totalVocabulary
+                    self.velocity = metrics.learningVelocity
+                    self.activeTopics = metrics.activeStudyTopics
+                    self.latestLearnedWords = metrics.recentWords
+                }
             }
         }
+    }
+}
+
+// MARK: - FlowLayout (horizontal wrapping)
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrangeSubviews(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+        }
+    }
+
+    private func arrangeSubviews(proposal: ProposedViewSize, subviews: Subviews) -> (positions: [CGPoint], size: CGSize) {
+        let maxWidth = proposal.width ?? .infinity
+        var positions: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var maxX: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth && x > 0 {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            positions.append(CGPoint(x: x, y: y))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+            maxX = max(maxX, x)
+        }
+
+        return (positions, CGSize(width: maxX, height: y + rowHeight))
     }
 }
 

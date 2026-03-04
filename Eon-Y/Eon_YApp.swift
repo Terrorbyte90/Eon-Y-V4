@@ -15,8 +15,8 @@ private let isRunningInPreview: Bool = ProcessInfo.processInfo.environment["XCOD
 
 @main
 struct Eon_YApp: App {
-    @StateObject private var brain = EonBrain.shared
-    @StateObject private var userProfile = UserProfileEngine.shared
+    @ObservedObject private var brain = EonBrain.shared
+    @ObservedObject private var userProfile = UserProfileEngine.shared
 
     init() {
         // BGTask-registrering kraschar i Preview-sandboxen — skydda med guard

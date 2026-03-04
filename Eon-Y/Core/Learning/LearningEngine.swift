@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import NaturalLanguage
 
 // MARK: - LearningEngine
@@ -41,6 +42,58 @@ actor LearningEngine {
                 competencyBook[domain]?.level = saved
             }
         }
+
+        // v17: Restore persisted vocabulary and morphology counts
+        loadPersistedState()
+    }
+
+    // MARK: - Persistence (v17)
+
+    private static let vocabKey = "le_uniqueSwedishWords"
+    private static let correctMorphKey = "le_correctMorphologyTests"
+    private static let totalMorphKey = "le_totalMorphologyTests"
+    private static let lastActiveDateKey = "le_lastActiveDate"
+    private static let conversationsTodayKey = "le_conversationsToday"
+    private static let wordsLearnedTodayKey = "le_wordsLearnedToday"
+
+    private func loadPersistedState() {
+        let ud = UserDefaults.standard
+        if let savedWords = ud.array(forKey: Self.vocabKey) as? [String] {
+            uniqueSwedishWords = Set(savedWords)
+        }
+        correctMorphologyTests = ud.integer(forKey: Self.correctMorphKey)
+        totalMorphologyTests = ud.integer(forKey: Self.totalMorphKey)
+
+        if let savedDate = ud.object(forKey: Self.lastActiveDateKey) as? Date {
+            lastActiveDate = savedDate
+        }
+        // Reset daily counters if the stored date is not today
+        if Calendar.current.isDateInToday(lastActiveDate) {
+            conversationsToday = ud.integer(forKey: Self.conversationsTodayKey)
+            wordsLearnedToday = ud.integer(forKey: Self.wordsLearnedTodayKey)
+        } else {
+            conversationsToday = 0
+            wordsLearnedToday = 0
+        }
+    }
+
+    private func persistState() {
+        let ud = UserDefaults.standard
+        ud.set(Array(uniqueSwedishWords), forKey: Self.vocabKey)
+        ud.set(correctMorphologyTests, forKey: Self.correctMorphKey)
+        ud.set(totalMorphologyTests, forKey: Self.totalMorphKey)
+        ud.set(lastActiveDate, forKey: Self.lastActiveDateKey)
+        ud.set(conversationsToday, forKey: Self.conversationsTodayKey)
+        ud.set(wordsLearnedToday, forKey: Self.wordsLearnedTodayKey)
+    }
+
+    /// Ensure daily counters are reset when the date rolls over
+    private func ensureDailyReset() {
+        if !Calendar.current.isDateInToday(lastActiveDate) {
+            conversationsToday = 0
+            wordsLearnedToday = 0
+        }
+        lastActiveDate = Date()
     }
 
     // v16: Real competency measurement — combines fact knowledge, FSRS mastery,
@@ -51,6 +104,14 @@ actor LearningEngine {
     private var successfulConversations: Int = 0          // Conversations with confidence > 0.6
     private var totalConversations: Int = 0
     private var uniqueSwedishWords: Set<String> = []      // Actual Swedish vocabulary
+
+    // v17: Conversation-driven competency tracking
+    private var conversationsToday: Int = 0
+    private var wordsLearnedToday: Int = 0
+    private var lastActiveDate: Date = Date(timeIntervalSince1970: 0)
+    private var recentlyLearnedWords: [String] = []       // Rolling window of last N learned words
+    private var activeStudyTopics: [String] = []          // Currently active FSRS topics
+    private var learningVelocity: Double = 0.0            // Words per conversation (rolling avg)
 
     func syncCompetenciesFromDatabase() async {
         let memory = PersistentMemoryStore.shared
@@ -135,16 +196,215 @@ actor LearningEngine {
         totalMorphologyTests += 1
         if passed { correctMorphologyTests += 1 }
         wordsAnalyzed.insert(word.lowercased())
+        persistState()
     }
 
     // v16: Record a Swedish word in actual vocabulary
     func recordSwedishWord(_ word: String) {
-        uniqueSwedishWords.insert(word.lowercased())
+        let lower = word.lowercased()
+        let isNew = uniqueSwedishWords.insert(lower).inserted
+        if isNew {
+            ensureDailyReset()
+            wordsLearnedToday += 1
+            recentlyLearnedWords.append(lower)
+            if recentlyLearnedWords.count > 50 {
+                recentlyLearnedWords = Array(recentlyLearnedWords.suffix(50))
+            }
+            persistState()
+        }
     }
 
     // v16: Get actual Swedish vocabulary count (not knowledge node count)
     func swedishVocabularyCount() -> Int {
         uniqueSwedishWords.count
+    }
+
+    // MARK: - Conversation-Driven Learning (v17)
+
+    /// Extract Swedish words from both user and Eon messages, identify new vocabulary,
+    /// and record them for competency tracking and FSRS scheduling.
+    func learnFromConversation(userMessage: String, eonResponse: String) async {
+        ensureDailyReset()
+        conversationsToday += 1
+
+        let allText = userMessage + " " + eonResponse
+        let extractedWords = extractSwedishWords(from: allText)
+
+        var newWordsThisConversation: [String] = []
+        for word in extractedWords {
+            let lower = word.lowercased()
+            if !uniqueSwedishWords.contains(lower) {
+                uniqueSwedishWords.insert(lower)
+                newWordsThisConversation.append(lower)
+                wordsLearnedToday += 1
+            }
+        }
+
+        // Update recently learned words (rolling window of 50)
+        recentlyLearnedWords.append(contentsOf: newWordsThisConversation)
+        if recentlyLearnedWords.count > 50 {
+            recentlyLearnedWords = Array(recentlyLearnedWords.suffix(50))
+        }
+
+        // Update learning velocity (exponential moving average)
+        let wordsThisRound = Double(newWordsThisConversation.count)
+        learningVelocity = learningVelocity * 0.8 + wordsThisRound * 0.2
+
+        // Detect domain from conversation and boost competency for language domains
+        let domain = detectDomain(from: allText)
+        if var comp = competencyBook[domain] {
+            let vocabBoost = min(0.005, Double(newWordsThisConversation.count) * 0.001)
+            comp.level = min(0.95, comp.level + vocabBoost)
+            comp.lastStudied = Date()
+            competencyBook[domain] = comp
+            UserDefaults.standard.set(comp.level, forKey: "competency_\(domain)")
+        }
+
+        // Create FSRS items for new words in language-related domains
+        for word in newWordsThisConversation.prefix(5) {
+            addFSRSItem(topic: "Ordförråd: \(word)", domain: domain, initialDifficulty: 0.3)
+        }
+
+        // Update active study topics from current FSRS due items
+        let dueItems = getDueItems()
+        activeStudyTopics = Array(dueItems.prefix(10).map { $0.topic })
+
+        // Persist and notify proxy
+        persistState()
+        await notifyProxy()
+    }
+
+    /// Extract Swedish words from text using NLTagger for proper linguistic tokenization
+    private func extractSwedishWords(from text: String) -> [String] {
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = text
+        tagger.setLanguage(.swedish, range: text.startIndex..<text.endIndex)
+
+        var words: [String] = []
+        tagger.enumerateTags(
+            in: text.startIndex..<text.endIndex,
+            unit: .word,
+            scheme: .lexicalClass,
+            options: [.omitWhitespace, .omitPunctuation, .omitOther]
+        ) { tag, range in
+            let word = String(text[range])
+            // Keep nouns, verbs, adjectives, adverbs with length > 2 (skip particles/articles)
+            if let tag = tag,
+               [.noun, .verb, .adjective, .adverb].contains(tag),
+               word.count > 2 {
+                words.append(word)
+            }
+            return true
+        }
+        return words
+    }
+
+    // MARK: - Autonomous Exploration (v17)
+
+    /// Identify the weakest domain, generate study goals, and create FSRS items
+    /// for suggested topics automatically. Returns a summary of the exploration.
+    func autonomousExplore() async -> AutonomousExploreResult {
+        ensureDailyReset()
+
+        // 1. Identify the weakest domain
+        let sorted = competencyBook.values.sorted { $0.level < $1.level }
+        guard let weakest = sorted.first else {
+            return AutonomousExploreResult(domain: "Okänd", studyGoals: [], createdItems: 0)
+        }
+
+        // 2. Check prerequisites — if prerequisites are unmet, target those instead
+        var targetDomain = weakest.domain
+        if let prereqs = prerequisites[weakest.domain] {
+            let unmet = prereqs.filter { (competencyBook[$0]?.level ?? 0) < 0.3 }
+            if let firstUnmet = unmet.first {
+                targetDomain = firstUnmet
+            }
+        }
+
+        let targetComp = competencyBook[targetDomain] ?? weakest
+
+        // 3. Generate study goals based on current level
+        let topics = suggestTopics(for: targetDomain, level: targetComp.level)
+
+        // 4. Filter out topics we already have active FSRS items for
+        let existingTopics = Set(fsrsItems.filter { $0.domain == targetDomain }.map { $0.topic })
+        let newTopics = topics.filter { !existingTopics.contains($0) }
+
+        // 5. Create FSRS items for new study goals
+        var createdCount = 0
+        for topic in newTopics {
+            let difficulty = max(0.2, 1.0 - targetComp.level)
+            addFSRSItem(topic: topic, domain: targetDomain, initialDifficulty: difficulty)
+            createdCount += 1
+        }
+
+        // 6. Update active study topics
+        activeStudyTopics = Array(getDueItems().prefix(10).map { $0.topic })
+
+        // 7. Mark domain as recently studied
+        if var comp = competencyBook[targetDomain] {
+            comp.lastStudied = Date()
+            competencyBook[targetDomain] = comp
+        }
+
+        // 8. Record exploration as a fact
+        await PersistentMemoryStore.shared.saveFact(
+            subject: targetDomain,
+            predicate: "autonom_utforskning",
+            object: newTopics.joined(separator: ", "),
+            confidence: 0.8,
+            source: "autonomous_explore"
+        )
+
+        persistState()
+        await notifyProxy()
+
+        return AutonomousExploreResult(
+            domain: targetDomain,
+            studyGoals: newTopics,
+            createdItems: createdCount
+        )
+    }
+
+    // MARK: - Proxy Notification (v17)
+
+    /// Push latest state to the MainActor observable proxy
+    private func notifyProxy() async {
+        let snapshot = competencySnapshot()
+        let level = overallCompetencyLevel()
+        let recentWords = Array(recentlyLearnedWords.suffix(10))
+        let topics = activeStudyTopics
+        let velocity = learningVelocity
+        let convsToday = conversationsToday
+        let wordsToday = wordsLearnedToday
+        let vocabCount = uniqueSwedishWords.count
+
+        await MainActor.run {
+            let proxy = LearningEngine.observableProxy
+            proxy.competencies = snapshot
+            proxy.overallLevel = level
+            proxy.latestLearnedWords = recentWords
+            proxy.activeTopics = topics
+            proxy.velocity = velocity
+            proxy.conversationsToday = convsToday
+            proxy.wordsLearnedToday = wordsToday
+            proxy.vocabularyCount = vocabCount
+        }
+    }
+
+    // MARK: - Daily Metrics (v17)
+
+    /// Get conversation-driven metrics for today
+    func dailyMetrics() -> DailyLearningMetrics {
+        DailyLearningMetrics(
+            conversationsToday: conversationsToday,
+            wordsLearnedToday: wordsLearnedToday,
+            lastActiveDate: lastActiveDate,
+            totalVocabulary: uniqueSwedishWords.count,
+            learningVelocity: learningVelocity,
+            activeStudyTopics: activeStudyTopics,
+            recentWords: Array(recentlyLearnedWords.suffix(12))
+        )
     }
 
     // MARK: - Domain Interaction Matrix
@@ -684,6 +944,22 @@ struct LearningCycleResult {
     let newKnowledge: [String]
     let gapsIdentified: Int
     let loraVersion: Int
+}
+
+struct AutonomousExploreResult {
+    let domain: String
+    let studyGoals: [String]
+    let createdItems: Int
+}
+
+struct DailyLearningMetrics {
+    let conversationsToday: Int
+    let wordsLearnedToday: Int
+    let lastActiveDate: Date
+    let totalVocabulary: Int
+    let learningVelocity: Double
+    let activeStudyTopics: [String]
+    let recentWords: [String]
 }
 
 // MARK: - Array safe subscript

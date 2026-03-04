@@ -37,26 +37,31 @@ struct ChatView: View {
     }
 
     var body: some View {
-        ZStack {
-            chatBackground
-            VStack(spacing: 0) {
-                topBar
-                messageList
-            }
-            // Sidebar overlay
-            if showSidebar {
-                Color.black.opacity(0.45)
-                    .ignoresSafeArea()
-                    .onTapGesture { withAnimation(.spring(response: 0.35)) { showSidebar = false } }
-                    .transition(.opacity)
-                ConversationHistorySidebar(
-                    isShowing: $showSidebar,
-                    viewModel: viewModel,
-                    brain: brain
-                )
-                .transition(.move(edge: .leading))
+        GeometryReader { geo in
+            ZStack {
+                chatBackground
+                VStack(spacing: 0) {
+                    // Top bar stays pinned — ignores keyboard
+                    topBar
+                        .zIndex(1)
+                    messageList
+                }
+                // Sidebar overlay
+                if showSidebar {
+                    Color.black.opacity(0.45)
+                        .ignoresSafeArea()
+                        .onTapGesture { withAnimation(.spring(response: 0.35)) { showSidebar = false } }
+                        .transition(.opacity)
+                    ConversationHistorySidebar(
+                        isShowing: $showSidebar,
+                        viewModel: viewModel,
+                        brain: brain
+                    )
+                    .transition(.move(edge: .leading))
+                }
             }
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .task { await brain.neuralEngine.loadModels() }
         .onAppear { startAnimations() }
         .onChange(of: scenePhase) { _, phase in
@@ -342,30 +347,32 @@ struct ChatView: View {
 
     var messageList: some View {
         ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 2) {
-                    dateSeparator
-                    ForEach(viewModel.messages) { msg in
-                        ChatBubble(message: msg)
-                            .id(msg.id)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 3)
+            VStack(spacing: 0) {
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(spacing: 2) {
+                        dateSeparator
+                        ForEach(viewModel.messages) { msg in
+                            ChatBubble(message: msg)
+                                .id(msg.id)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 3)
+                        }
+                        if brain.isThinking {
+                            LiveThinkingBubble(steps: brain.thinkingSteps, brain: brain)
+                                .padding(.horizontal, 16).padding(.vertical, 3)
+                                .transition(.asymmetric(
+                                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                                    removal: .opacity
+                                ))
+                        }
+                        Color.clear.frame(height: 12).id("bottom")
                     }
-                    if brain.isThinking {
-                        LiveThinkingBubble(steps: brain.thinkingSteps, brain: brain)
-                            .padding(.horizontal, 16).padding(.vertical, 3)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .bottom).combined(with: .opacity),
-                                removal: .opacity
-                            ))
-                    }
-                    Color.clear.frame(height: 12).id("bottom")
+                    .padding(.top, 8)
                 }
-                .padding(.top, 8)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .onTapGesture { inputFocused = false }
-            .safeAreaInset(edge: .bottom) {
+                .scrollDismissesKeyboard(.interactively)
+                .onTapGesture { inputFocused = false }
+
+                // Input bar sits flush against keyboard (outside ScrollView)
                 inputBar
             }
             .onChange(of: viewModel.messages.count) { _, _ in
@@ -446,7 +453,7 @@ struct ChatView: View {
 
                 sendButton
             }
-            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 10)
+            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, inputFocused ? 4 : 10)
             .background(
                 Color(hex: "#06030F").opacity(0.95)
                     .background(.ultraThinMaterial.opacity(0.4))
@@ -456,9 +463,11 @@ struct ChatView: View {
                             .frame(height: 0.5),
                         alignment: .top
                     )
+                    .ignoresSafeArea(edges: .bottom)
             )
         }
         .animation(.spring(response: 0.3), value: brain.isThinking)
+        .animation(.spring(response: 0.25, dampingFraction: 0.9), value: inputFocused)
     }
 
     var sendButton: some View {
@@ -619,6 +628,12 @@ class ChatViewModel: ObservableObject {
         messages[idx].wasSurprised = brain.isSurprised
         messages[idx].criticalityRegime = brain.criticalityRegime
         messages[idx].globalSync = brain.globalSync
+
+        // v18: Feed conversation to LearningEngine for autonomous word acquisition
+        let eonResponse = messages[idx].content
+        Task.detached(priority: .utility) {
+            await LearningEngine.shared.learnFromConversation(userMessage: text, eonResponse: eonResponse)
+        }
     }
 
     func startNewConversation() {

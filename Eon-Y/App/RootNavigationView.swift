@@ -84,6 +84,7 @@ struct RootNavigationView: View {
                     }
 
                 // Tab bar — pinned to bottom, slides off-screen when hidden
+                // Keyboard must not push the tab bar up
                 EonTabBar(selectedTab: $selectedTab, safeBottom: geo.safeAreaInsets.bottom)
                     .frame(maxWidth: .infinity)
                     .offset(y: tabBarVisible ? 0 : tabBarHeight + 2)
@@ -91,6 +92,7 @@ struct RootNavigationView: View {
             }
             .ignoresSafeArea(edges: .bottom)
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .preferredColorScheme(.dark)
         .onAppear {
             brain.launchIfNeeded()

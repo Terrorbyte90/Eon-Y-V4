@@ -335,6 +335,10 @@ final class EonBrain: ObservableObject {
         // Idiom count from SwedishLanguageCore
         self.idiomKnowledge = 50
 
+        // v18: Sync recently learned words from LearningEngine
+        let dailyMetrics = await learning.dailyMetrics()
+        self.recentLearnedWords = dailyMetrics.recentWords
+
         // v16: Compute real phiValue from oscillator metrics instead of hardcoded
         let osc = OscillatorBank.shared
         let plv = osc.phaseLockingValue(module1: 0, module2: 1, band: 4)  // gamma PLV between modules
