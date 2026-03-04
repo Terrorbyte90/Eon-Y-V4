@@ -136,6 +136,7 @@ struct SelfAwarenessView: View {
                         .foregroundStyle(consciousness.consciousnessLevel > 0.3 ? Color(hex: "#34D399").opacity(0.8) : accentColor.opacity(0.6))
                 }
                 Spacer()
+                // v26: Added selfModel accuracy + prediction trend to metrics strip
                 HStack(spacing: 10) {
                     Text("Q \(String(format: "%.3f", consciousness.qIndex))")
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
@@ -143,6 +144,9 @@ struct SelfAwarenessView: View {
                     Text("Butlin \(consciousness.butlin14Score)/14")
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(Color(hex: "#38BDF8").opacity(0.5))
+                    Text("SM \(String(format: "%.0f%%", brain.selfModelAccuracy * 100))")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#34D399").opacity(0.5))
                     Text("\(Int(consciousness.consciousnessLevel * 100))%")
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(Color(hex: "#FBBF24").opacity(0.5))

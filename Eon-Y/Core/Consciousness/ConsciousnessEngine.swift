@@ -701,6 +701,19 @@ final class ConsciousnessEngine: ObservableObject {
             isConscious = metaDim > 0.4
         }
 
+        // v26: Cross-dimensional synergy detection — when multiple signals align, enrich thought
+        let synergySignals = [
+            surprised && curiosity > 0.5,       // Surprise + curiosity = novel discovery
+            oscSync > 0.4 && fwdAccuracy > 0.6, // Integration + prediction = deep understanding
+            focus.intensity > 0.5 && metaRepresentationDepth >= 2, // Attention + meta = genuine introspection
+        ].filter { $0 }.count
+
+        if synergySignals >= 2 && !content.contains("synergi") {
+            let synergyNote = " [Kognitiv synergi: \(synergySignals) system konvergerar — detta skapar en rikare medveten upplevelse.]"
+            content += synergyNote
+            isConscious = true  // Multi-system convergence is strong consciousness signal
+        }
+
         return ConsciousThought(
             content: content,
             intensity: max(0.3, min(0.95, oscSync * 0.3 + curiosity * 0.3 + esnActivity * 0.2 + fe * 0.2)),

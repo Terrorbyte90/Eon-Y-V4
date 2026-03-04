@@ -268,10 +268,16 @@ final class SwedishResponseBuilder: Sendable {
         if sentences.count == 1 { return sentences[0] }
 
         var result: [String] = [sentences[0]]
+        // v26: Expanded transitions (12→24) for richer sentence joining
         let transitions = ["Dessutom", "Vidare", "Det innebär att", "Utöver det",
                            "Mer specifikt", "Med andra ord", "Å andra sidan", "I samma anda",
                            "Det är värt att notera", "Parallellt med detta", "Sammanfattningsvis",
-                           "En intressant aspekt är"]
+                           "En intressant aspekt är", "Samtidigt", "Följaktligen",
+                           "I förlängningen", "Sett ur ett bredare perspektiv",
+                           "Det leder oss till", "I kontrast till detta",
+                           "Kort sagt", "I ljuset av detta", "Faktum är att",
+                           "Det bör understrykas att", "I praktiken innebär det",
+                           "Avslutningsvis"]
         var transitionIndex = 0
 
         for sentence in sentences.dropFirst() {
@@ -384,6 +390,7 @@ final class SwedishResponseBuilder: Sendable {
         "Hej. Du är på rätt plats. Låt oss börja när det känns bra.",
     ]
 
+    // v26: Expanded follow-up greetings (8→16)
     private let followUpGreetings = [
         "Visst, vad vill du veta?",
         "Ja, jag lyssnar — fortsätt gärna.",
@@ -393,6 +400,14 @@ final class SwedishResponseBuilder: Sendable {
         "Jag är med dig, säg till.",
         "Naturligtvis, vad undrar du över?",
         "Klart! Låt oss dyka djupare.",
+        "Givetvis, jag är redo att utforska vidare.",
+        "Precis, utveckla gärna det.",
+        "Ja! Det vill jag veta mer om.",
+        "Just det — jag följer med i resonemanget.",
+        "Alldeles! Vad vill du fördjupa?",
+        "Absolut, jag hänger på varje ord.",
+        "Klart som korvspad — vad tänker du på?",
+        "Ja! Fortsätt gärna, jag lyssnar aktivt.",
     ]
 
     // MARK: - Hjälpmetod

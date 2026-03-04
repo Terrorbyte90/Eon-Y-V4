@@ -231,9 +231,12 @@ actor CrossDomainAnalyzer {
                 if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
                    let match = regex.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)),
                    match.numberOfRanges >= 3 {
-                    let cause = String(sentence[Range(match.range(at: 1), in: sentence)!])
+                    // v26: Fix force unwrap — guard Range conversion
+                    guard let causeRange = Range(match.range(at: 1), in: sentence),
+                          let effectRange = Range(match.range(at: 2), in: sentence) else { continue }
+                    let cause = String(sentence[causeRange])
                         .trimmingCharacters(in: .whitespaces)
-                    let effect = String(sentence[Range(match.range(at: 2), in: sentence)!])
+                    let effect = String(sentence[effectRange])
                         .trimmingCharacters(in: .whitespaces)
 
                     if cause.count > 3 && effect.count > 3 && cause.count < 100 && effect.count < 100 {

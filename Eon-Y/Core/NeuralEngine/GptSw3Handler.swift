@@ -678,7 +678,10 @@ struct SemanticAnalysis {
         let questionWord = tokens.first.map { $0.word.lowercased() }.flatMap { isQuestionWord($0) ? $0 : nil }
 
         // Negation — leta efter negationsmarkörer via lexikal klass
-        let negationWords = Set(["inte", "ej", "aldrig", "ingen", "inget", "inga", "knappast", "sällan"])
+        // v26: Expanded negation words (8→16)
+        let negationWords = Set(["inte", "ej", "aldrig", "ingen", "inget", "inga", "knappast", "sällan",
+                                 "ingenting", "ingenstans", "varken", "icke", "föga", "knappt",
+                                 "näppeligen", "ingalunda"])
         let hasNegation = tokens.contains { negationWords.contains($0.word.lowercased()) }
 
         // Informationstäthet = (substantiv + verb + adjektiv) / totala tokens
@@ -1234,7 +1237,10 @@ struct ResponseComposer {
         var parts: [String] = []
 
         // Extrahera kärnan i frågan via semantisk analys
-        let stopWords = Set(["det", "den", "ett", "och", "men", "som", "för", "med", "om", "att", "är", "var", "hur", "vad", "när", "vem"])
+        // v26: Expanded stop words (16→32) for better concept extraction
+        let stopWords = Set(["det", "den", "ett", "och", "men", "som", "för", "med", "om", "att", "är", "var",
+                             "hur", "vad", "när", "vem", "en", "av", "till", "från", "har", "kan", "ska",
+                             "sin", "sin", "sina", "sitt", "alla", "inte", "eller", "efter", "just"])
         let allNouns = a.nouns.filter { $0.count > 3 && !stopWords.contains($0.lowercased()) }
         let allVerbs = a.verbs.filter { $0.count > 3 && !stopWords.contains($0.lowercased()) }
         let rawConcept = a.namedEntities.first?.text ?? allNouns.first ?? topic
