@@ -382,21 +382,21 @@ extension CognitiveState {
     func generateActions(for dimension: CognitiveDimension, level: Double) -> [String] {
         switch dimension {
         case .reasoning:
-            return ["Kör Tree-of-Thought på ett komplext problem", "Öva deduktiv kedja med 4+ steg", "Analysera ett kausalt scenario"]
+            return ["Kör Tree-of-Thought på ett komplext problem", "Öva deduktiv kedja med 4+ steg", "Analysera ett kausalt scenario", "Testa abduktiv slutledning", "Utvärdera argumentstyrka i senaste resonemang"]
         case .metacognition:
-            return ["Reflektera över senaste 5 resonemang", "Identifiera kognitiva biaser i senaste svar", "Uppdatera självmodell"]
+            return ["Reflektera över senaste 5 resonemang", "Identifiera kognitiva biaser i senaste svar", "Uppdatera självmodell", "Analysera kvaliteten på egen introspektion", "Jämför förväntad vs faktisk prestanda"]
         case .causality:
-            return ["Bygg kausalkedja för ett historiskt fenomen", "Testa kontrafaktisk analys", "Utöka kausalgrafen"]
+            return ["Bygg kausalkedja för ett historiskt fenomen", "Testa kontrafaktisk analys", "Utöka kausalgrafen", "Identifiera dolda mellanvariabler", "Analysera kausala slingor och feedback"]
         case .learning:
-            return ["Kör FSRS-repetition av svaga ämnen", "Generera artikel om kunskapslucka", "Läs och extrahera fakta från kunskapsbasen"]
+            return ["Kör FSRS-repetition av svaga ämnen", "Generera artikel om kunskapslucka", "Läs och extrahera fakta från kunskapsbasen", "Identifiera mönster i inlärningskurvan", "Testa transferlärande mellan domäner"]
         case .knowledge:
-            return ["Generera 3 nya artiklar", "Hämta data från Språkbanken", "Konsolidera episodiska minnen"]
+            return ["Generera 3 nya artiklar", "Hämta data från Språkbanken", "Konsolidera episodiska minnen", "Korskoppla kunskapsnoder från olika domäner", "Validera befintlig kunskap mot nya källor"]
         case .creativity:
-            return ["Generera en oväntad analogi", "Kombinera två orelaterade domäner", "Testa bisociation"]
+            return ["Generera en oväntad analogi", "Kombinera två orelaterade domäner", "Testa bisociation", "Utforska gränsfall och paradoxer", "Skapa metaforer för abstrakta koncept"]
         case .selfAwareness:
-            return ["Kör djup självreflektion", "Uppdatera styrkor/svagheter", "Analysera konversationshistorik"]
+            return ["Kör djup självreflektion", "Uppdatera styrkor/svagheter", "Analysera konversationshistorik", "Utvärdera emotionell kalibrering", "Testa metarekursiv medvetenhet", "Granska egna antaganden kritiskt"]
         default:
-            return ["Fokusera resurser på \(dimension.rawValue)", "Kör riktad övning"]
+            return ["Fokusera resurser på \(dimension.rawValue)", "Kör riktad övning", "Utvärdera nuvarande nivå och identifiera nästa steg"]
         }
     }
 }

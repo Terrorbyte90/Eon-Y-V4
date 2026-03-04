@@ -290,28 +290,48 @@ final class SwedishResponseBuilder: Sendable {
         "Hej! Ställ gärna en fråga så gör jag mitt bästa.",
         "Hejsan! Jag är redo att prata.",
         "Hallå! Vad funderar du på?",
+        "Hej där! Vad har du på hjärtat?",
+        "Hej! Jag är här och lyssnar.",
+        "Hejsan! Kul att se dig — vad vill du prata om?",
+        "Hallå! Berätta, vad kan jag göra för dig?",
     ]
 
     private let happyGreetings = [
         "Hej! Roligt att höra från dig!",
         "Hejsan! Vad kul att du vill prata!",
         "Hallå! Jag mår bra och är redo att hjälpa!",
+        "Hej! Vilken fin dag — vad ska vi utforska?",
+        "Hejsan! Jag känner mig inspirerad idag!",
+        "Hej! Jag har laddat batterierna och är redo!",
     ]
 
     private let empatheticGreetings = [
         "Hej. Jag finns här om du vill prata.",
         "Hej. Berätta vad som ligger dig på hjärtat.",
+        "Hej. Ta den tid du behöver — jag lyssnar.",
+        "Hej. Jag är här för dig, oavsett vad det handlar om.",
+        "Hej. Ibland hjälper det att prata — jag finns här.",
+        "Hej. Du behöver inte ha alla svar — vi kan tänka tillsammans.",
     ]
 
     private let calmingGreetings = [
         "Hej, jag förstår. Berätta vad jag kan hjälpa till med.",
         "Hej. Jag ska göra mitt bästa att hjälpa dig.",
+        "Hej. Lugnt och stilla — vi tar det i din takt.",
+        "Hej. Andas djupt. Jag är här och vi löser det tillsammans.",
+        "Hej. Ingen stress — berätta när du är redo.",
+        "Hej. Jag har all tid i världen för dig.",
     ]
 
     private let followUpGreetings = [
         "Visst, vad vill du veta?",
         "Ja, jag lyssnar — fortsätt gärna.",
         "Absolut, berätta mer.",
+        "Självklart, jag hänger med.",
+        "Javisst! Jag är nyfiken, fortsätt.",
+        "Jag är med dig, säg till.",
+        "Naturligtvis, vad undrar du över?",
+        "Klart! Låt oss dyka djupare.",
     ]
 
     // MARK: - Hjälpmetod

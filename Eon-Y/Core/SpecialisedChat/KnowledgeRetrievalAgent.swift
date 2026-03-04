@@ -206,8 +206,7 @@ actor KnowledgeRetrievalAgent {
             for article in preFiltered.prefix(10) {  // v14: max 10 (was 20)
                 let articleEmb = await neuralEngine.embed(String((article.title + " " + article.summary).prefix(128)))
                 let sim = await neuralEngine.cosineSimilarity(embedding, articleEmb)
-                // Nyckelords-boost
-                let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                // Nyckelords-boost (reuse inputWords from above)
                 let contentWords = Set(article.content.lowercased().prefix(300).components(separatedBy: .whitespaces).filter { $0.count > 3 })
                 let boosted = sim + Float(inputWords.intersection(contentWords).count) * 0.05
                 if boosted > 0.30 { scored.append((article, boosted)) }

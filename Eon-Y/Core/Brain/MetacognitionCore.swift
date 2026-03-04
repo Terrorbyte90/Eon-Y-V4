@@ -114,6 +114,13 @@ actor MetacognitionCore {
 
         // Beräkna kognitiv koherens (hur väl dimensionerna hänger ihop)
         let values = Array(dimensions.values)
+        guard !values.isEmpty else {
+            return CognitiveAudit(
+                integratedIntelligence: 0, coherence: 0,
+                strongestDimensions: [], growingDimensions: [],
+                weaknesses: [], dimensionCount: 0
+            )
+        }
         let mean = values.reduce(0, +) / Double(values.count)
         let variance = values.map { pow($0 - mean, 2) }.reduce(0, +) / Double(values.count)
         // Coherence = 1 - normalized standard deviation (coefficient of variation capped at 1.0)
@@ -164,7 +171,9 @@ actor MetacognitionCore {
         }
 
         // 3. Overgeneralization: too many absolute statements
-        let absoluteWords = ["alltid", "aldrig", "alla", "ingen", "omöjligt", "perfekt", "helt säkert"]
+        let absoluteWords = ["alltid", "aldrig", "alla", "ingen", "omöjligt", "perfekt", "helt säkert",
+                              "absolut", "definitivt", "utan tvivel", "oomtvistligt", "otvetydigt",
+                              "garanterat", "uteslutande", "varenda en"]
         let absoluteCount = monologue.filter { line in
             absoluteWords.contains(where: { line.lowercased().contains($0) })
         }.count
