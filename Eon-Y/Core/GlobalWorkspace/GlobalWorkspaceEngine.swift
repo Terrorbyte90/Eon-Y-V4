@@ -297,6 +297,8 @@ final class GlobalWorkspaceEngine: ObservableObject {
             .filter { event.receivingModules.contains($0.name) }
             .map { $0.priority }
             .reduce(0, +)
+        // v27: Guard against empty registeredModules division by zero
+        guard !registeredModules.isEmpty else { return }
         let feedbackStrength = totalModulePriority / Double(registeredModules.count)
         integrationLevel = min(1.0, integrationLevel * 0.95 + feedbackStrength * 0.1)
     }

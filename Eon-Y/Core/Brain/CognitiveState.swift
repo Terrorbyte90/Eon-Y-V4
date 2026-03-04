@@ -440,7 +440,9 @@ final class CognitiveState: ObservableObject {
 
     private func updateFeedbackLoops() {
         for loop in feedbackLoops {
-            let avgLevel = loop.dimensions.compactMap { dimensions[$0] }.reduce(0, +) / Double(loop.dimensions.count)
+            // v27: Guard against empty dimensions division by zero
+            let validDims = loop.dimensions.compactMap { dimensions[$0] }
+            let avgLevel = validDims.isEmpty ? 0.5 : validDims.reduce(0, +) / Double(validDims.count)
             if loop.type == .positive && avgLevel > 0.5 {
                 // Förstärk dimensioner i loopen — men bara om de är aktivt tränade (> baseline)
                 for dim in loop.dimensions {
