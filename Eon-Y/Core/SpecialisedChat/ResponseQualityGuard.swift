@@ -73,9 +73,19 @@ actor ResponseQualityGuard {
             modifications.append("Fallback-svar genererat (för kort)")
         }
 
-        // 7. BERT-koherens (snabb check)
-        let coherence = await quickCoherenceCheck(question: question.resolvedInput, response: text)
-        let relevance = await quickRelevanceCheck(topic: question.coreTopic, response: text)
+        // 7. BERT-koherens (v14: skippa för hälsningar och korta template-svar)
+        let coherence: Double
+        let relevance: Double
+        let skipBERT = question.questionType == .greeting ||
+                       question.questionType == .personal ||
+                       text.count < 40 // Korta svar behöver inte BERT-check
+        if skipBERT {
+            coherence = 0.7  // Anta rimlig koherens
+            relevance = 0.6
+        } else {
+            coherence = await quickCoherenceCheck(question: question.resolvedInput, response: text)
+            relevance = await quickRelevanceCheck(topic: question.coreTopic, response: text)
+        }
 
         // 8. Flytande (baserat på ordlängd och meningsstruktur)
         let fluency = assessFluency(text)

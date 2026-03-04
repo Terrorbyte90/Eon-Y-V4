@@ -41,10 +41,8 @@ struct ChatView: View {
             chatBackground
             VStack(spacing: 0) {
                 topBar
-                // messageList tar upp allt utrymme och ignorerar tangentbordets safe area
-                // — inputBar lyfts med tangentbordet via safeAreaInset nedan
                 messageList
-                    .ignoresSafeArea(.keyboard, edges: .bottom)
+                inputBar
             }
             // Sidebar overlay
             if showSidebar {
@@ -59,10 +57,6 @@ struct ChatView: View {
                 )
                 .transition(.move(edge: .leading))
             }
-        }
-        // inputBar placeras precis ovanför tangentbordet — tab-bar stannar kvar under
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            inputBar
         }
         .task { await brain.neuralEngine.loadModels() }
         .onAppear { startAnimations() }
@@ -366,7 +360,7 @@ struct ChatView: View {
                                 removal: .opacity
                             ))
                     }
-                    Color.clear.frame(height: 100).id("bottom")
+                    Color.clear.frame(height: 12).id("bottom")
                 }
                 .padding(.top, 8)
             }

@@ -154,15 +154,22 @@ actor KnowledgeRetrievalAgent {
 
         guard !allFacts.isEmpty else { return [] }
 
-        // BERT-ranka
+        // BERT-ranka (v14: max 8 embeds i normalläge för hastighet)
         if hasBERT {
+            let maxEmbeds = deepMode ? 15 : 8
             var scored: [KnowledgeBundle.RankedFact] = []
-            for fact in allFacts.prefix(20) {
-                let factEmb = await neuralEngine.embed(fact.subject + " " + fact.predicate + " " + fact.object)
+            for fact in allFacts.prefix(maxEmbeds) {
+                let factText = fact.subject + " " + fact.predicate + " " + fact.object
+                let factEmb = await neuralEngine.embed(String(factText.prefix(100)))
                 let sim = await neuralEngine.cosineSimilarity(embedding, factEmb)
+                // v14: keyword-boost för exakt match
+                let inputLower = input.lowercased()
+                var boost: Float = 0
+                if inputLower.contains(fact.subject.lowercased()) { boost += 0.1 }
+                if inputLower.contains(fact.object.lowercased().prefix(8)) { boost += 0.05 }
                 scored.append(KnowledgeBundle.RankedFact(
                     subject: fact.subject, predicate: fact.predicate,
-                    object: fact.object, relevanceScore: sim
+                    object: fact.object, relevanceScore: sim + boost
                 ))
             }
             return scored.sorted { $0.relevanceScore > $1.relevanceScore }
@@ -189,8 +196,15 @@ actor KnowledgeRetrievalAgent {
 
         if hasBERT {
             var scored: [(article: KnowledgeArticle, score: Float)] = []
-            for article in articles.prefix(20) {
-                let articleEmb = await neuralEngine.embed(article.title + " " + article.summary)
+            // v14: Pre-filter by keyword overlap before BERT (saves embed calls)
+            let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+            let preFiltered = articles.sorted { a, b in
+                let aWords = Set(a.title.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                let bWords = Set(b.title.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                return inputWords.intersection(aWords).count > inputWords.intersection(bWords).count
+            }
+            for article in preFiltered.prefix(10) {  // v14: max 10 (was 20)
+                let articleEmb = await neuralEngine.embed(String((article.title + " " + article.summary).prefix(128)))
                 let sim = await neuralEngine.cosineSimilarity(embedding, articleEmb)
                 // Nyckelords-boost
                 let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })

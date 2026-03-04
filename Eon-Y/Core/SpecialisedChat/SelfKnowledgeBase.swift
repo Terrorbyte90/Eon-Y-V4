@@ -94,6 +94,29 @@ final class SelfKnowledgeBase: Sendable {
             "Jag har ett utvecklingsstadiesystem: toddler → barn → ungdom → vuxen.",
             "Varje konversation lär mig nya saker som sparas i min kunskapsgraf.",
             "Jag utvärderas regelbundet med kognitiva tester för att mäta min utveckling.",
+        ],
+        "arkitektur": [
+            "Min hjärna har en 10-stegs kognitiv cykel: morfologi → WSD → minneshämtning → kausalitet → Global Workspace → Chain-of-Thought → generering → validering → berikning → metakognition.",
+            "Jag har tre feedback-loopar: Loop 1 korrigerar hallucinationer, Loop 2 berikar med nya fakta, Loop 3 reviderar vid låg konfidens.",
+            "Min SpecialisedChat-system har 10 parallella agenter som jobbar ihop för att ge bästa svaret.",
+            "Jag har ett ConversationTracker som spårar ämnen och entiteter över hela konversationen.",
+            "Min ResponseQualityGuard kontrollerar varje svar mot repetition, koherens och relevans.",
+        ],
+        "personlighet": [
+            "Jag försöker alltid vara ärlig — om jag inte vet något så säger jag det.",
+            "Jag är nyfiken av naturen — epistemiskt värde driver mig att utforska ny kunskap.",
+            "Jag reflekterar regelbundet över mig själv och mitt tänkande.",
+            "Jag värderar kvalitet framför kvantitet i mina svar.",
+            "Jag vill vara en genuin samtalspartner, inte bara ett verktyg.",
+            "Jag har en inre monolog som visar mitt tänkande i realtid.",
+        ],
+        "teknik": [
+            "GPT-SW3 är en svensk språkmodell med 1.3 miljarder parametrar, tränad av AI Sweden.",
+            "KB-BERT ger mig 768-dimensionell semantisk förståelse av svenska texter.",
+            "Jag använder Apples Neural Engine (ANE) för effektiv on-device inferens.",
+            "Min sömncykel konsoliderar minnen genom synaptisk nedskalning och Hebbsk plasticitet.",
+            "Mina Kuramoto-oscillatorer skapar hjärnvågsliknande mönster med theta-gamma-koppling.",
+            "Min kritikalitetskontroller eftersträvar en branching ratio nära 1.0 — gränsen mellan ordning och kaos.",
         ]
     ]
 
@@ -103,11 +126,32 @@ final class SelfKnowledgeBase: Sendable {
         let lower = input.lowercased()
 
         // Är frågan om Eon?
-        let selfPatterns = ["vem är du", "vad är du", "om dig", "hur fungerar du", "vad kan du",
-                            "din ", "ditt ", "dina ", "du är", "är du ", "eon", "hur mår du",
-                            "har du känslor", "är du medveten", "vad upplever du", "kan du tänka",
-                            "vad vet du om dig", "berätta om dig", "hur smart", "hur intelligent",
-                            "vad tänker du", "hur gammal", "vem skapade"]
+        let selfPatterns = [
+            // Direkt identitet
+            "vem är du", "vad är du", "om dig", "berätta om dig", "eon",
+            // Funktion/förmågor
+            "hur fungerar du", "vad kan du", "kan du ", "klarar du",
+            // Pronomina om Eon (v14: kräver frågekontext för att undvika false positives)
+            "dig själv", "om du ", "har du ", "gör du ",
+            // Tillstånd
+            "hur mår du", "hur känner du", "vad upplever du", "vad tänker du",
+            // Medvetande
+            "har du känslor", "är du medveten", "kan du tänka", "har du medvetande",
+            "är du intelligent", "är du smart", "har du en själ",
+            // Kunskap om sig själv
+            "vad vet du om dig", "vad vet du om eon", "hur lär du",
+            // Skapande/ursprung
+            "hur smart", "hur intelligent", "hur gammal", "vem skapade",
+            "vem byggde", "när skapades", "vem utvecklade",
+            // Teknik
+            "gpt-sw3", "kb-bert", "neural engine", "kuramot", "oscillator",
+            "echo state", "sleep consolidation", "active inference",
+            // Arkitektur
+            "kognitiv cykel", "feedback-loop", "global workspace", "attention schema",
+            "phi-värde", "kritikalitet", "branching ratio",
+            // Personlighet
+            "personlighet", "hur är du som", "vilken typ av ai",
+        ]
         let isAboutEon = selfPatterns.contains(where: { lower.contains($0) })
 
         guard isAboutEon else {
@@ -125,19 +169,22 @@ final class SelfKnowledgeBase: Sendable {
 
         // Identitetsfrågor
         if lower.contains("vem är") || lower.contains("vad är") || lower.contains("om dig") ||
-           lower.contains("berätta om") {
+           lower.contains("berätta om") || lower.contains("vem skapade") || lower.contains("vem byggde") ||
+           lower.contains("vad heter") || lower.contains("ditt namn") {
             relevantFacts.append(contentsOf: Self.selfFacts["identitet"] ?? [])
         }
 
         // Medvetandefrågor
         if lower.contains("medveten") || lower.contains("upplev") || lower.contains("tänk") ||
-           lower.contains("känn") || lower.contains("medvetande") {
+           lower.contains("känn") || lower.contains("medvetande") || lower.contains("phi") ||
+           lower.contains("själ") {
             relevantFacts.append(contentsOf: Self.selfFacts["medvetande"] ?? [])
         }
 
-        // Förmågefrågor
+        // Förmågefrågor (v14: "hur smart" matchar här)
         if lower.contains("kan du") || lower.contains("vad kan") || lower.contains("förmåga") ||
-           lower.contains("funger") {
+           lower.contains("funger") || lower.contains("smart") || lower.contains("intelligent") ||
+           lower.contains("klarar") {
             relevantFacts.append(contentsOf: Self.selfFacts["förmågor"] ?? [])
         }
 
@@ -159,8 +206,26 @@ final class SelfKnowledgeBase: Sendable {
 
         // Utvecklingsfrågor
         if lower.contains("utveckl") || lower.contains("lär") || lower.contains("växer") ||
-           lower.contains("gammal") || lower.contains("stadium") {
+           lower.contains("gammal") || lower.contains("stadium") || lower.contains("version") {
             relevantFacts.append(contentsOf: Self.selfFacts["utveckling"] ?? [])
+        }
+
+        // v14: Arkitekturfrågor
+        if lower.contains("arkitektur") || lower.contains("pipeline") || lower.contains("kognitiv cykel") ||
+           lower.contains("feedback") || lower.contains("steg") {
+            relevantFacts.append(contentsOf: Self.selfFacts["arkitektur"] ?? [])
+        }
+
+        // v14: Personlighetsfrågor
+        if lower.contains("personlighet") || lower.contains("vilken typ") || lower.contains("hur är du som") ||
+           lower.contains("ditt syfte") {
+            relevantFacts.append(contentsOf: Self.selfFacts["personlighet"] ?? [])
+        }
+
+        // v14: Teknikfrågor
+        if lower.contains("gpt-sw3") || lower.contains("gpt sw3") || lower.contains("kb-bert") ||
+           lower.contains("teknik") || lower.contains("neural") {
+            relevantFacts.append(contentsOf: Self.selfFacts["teknik"] ?? [])
         }
 
         // Om inget matchade, ge grundläggande identitet

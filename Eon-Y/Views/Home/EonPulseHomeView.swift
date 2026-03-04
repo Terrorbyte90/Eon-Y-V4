@@ -43,8 +43,7 @@ struct EonPulseHomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
                     orbSection
-                        // 15% uppflyttning: original var -40, nu -40 - (280*0.15) ≈ -82
-                        .padding(.top, -82)
+                        .padding(.top, -40)
                     titleSection
                         .padding(.top, 18)
                     if showContent {
@@ -473,7 +472,7 @@ struct EonPulseHomeView: View {
     }
 
     var cognitionPanel: some View {
-        let lines = brain.innerMonologue.suffix(6)
+        let lines = brain.innerMonologue.suffix(4)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Circle()
@@ -505,7 +504,7 @@ struct EonPulseHomeView: View {
                                 .foregroundStyle(line.type.color)
                                 .frame(width: 18, height: 18)
                                 .background(Circle().fill(line.type.color.opacity(0.12)))
-                            if idx < 5 {
+                            if idx < 3 {
                                 Rectangle()
                                     .fill(line.type.color.opacity(0.15))
                                     .frame(width: 1, height: 14)
@@ -560,7 +559,7 @@ struct EonPulseHomeView: View {
 
     var selfAwarenessPanel: some View {
         let ce = ConsciousnessEngine.shared
-        let thoughts = Array(ce.thoughtStream.suffix(5))
+        let thoughts = Array(ce.thoughtStream.suffix(3))
         let reflection = ce.currentSelfReflection
         let accentColor = Color(hex: "#A78BFA")
 

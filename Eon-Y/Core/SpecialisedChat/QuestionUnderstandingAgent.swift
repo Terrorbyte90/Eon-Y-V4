@@ -153,12 +153,21 @@ actor QuestionUnderstandingAgent {
         // I djupläge: fler sökfrågor, djupare pronomenupplösning
         var deepQueries = profile.searchQueries
         // Lägg till synonymer och varianter
+        // v14: Korrekta svenska morfologiska varianter
         for noun in profile.keyNouns.prefix(3) {
             deepQueries.append(noun)
-            // Singular/plural-varianter
-            if noun.hasSuffix("er") { deepQueries.append(String(noun.dropLast(2))) }
-            if noun.hasSuffix("ar") { deepQueries.append(String(noun.dropLast(2))) }
-            if !noun.hasSuffix("s") { deepQueries.append(noun + "s") }
+            // Svenska plural → singular: -er, -ar, -or, -n
+            if noun.hasSuffix("erna") { deepQueries.append(String(noun.dropLast(4))) }
+            else if noun.hasSuffix("arna") { deepQueries.append(String(noun.dropLast(4))) }
+            else if noun.hasSuffix("orna") { deepQueries.append(String(noun.dropLast(4))) }
+            else if noun.hasSuffix("er") { deepQueries.append(String(noun.dropLast(2))) }
+            else if noun.hasSuffix("ar") { deepQueries.append(String(noun.dropLast(2))) }
+            else if noun.hasSuffix("or") { deepQueries.append(String(noun.dropLast(2))) }
+            // Genitiv -s
+            if noun.hasSuffix("s") && noun.count > 3 { deepQueries.append(String(noun.dropLast())) }
+            // Bestämd form -en/-et/-n/-t
+            if noun.hasSuffix("en") && noun.count > 4 { deepQueries.append(String(noun.dropLast(2))) }
+            if noun.hasSuffix("et") && noun.count > 4 { deepQueries.append(String(noun.dropLast(2))) }
         }
         return QuestionProfile(
             originalInput: profile.originalInput,
@@ -232,11 +241,17 @@ actor QuestionUnderstandingAgent {
             ("Den ", "\(mainReferent) "),
             ("Det ", "\(mainReferent) "),
         ]
-        // Bara ersätt om det ser ut som ett pronomen som refererar bakåt
-        if lower.hasPrefix("vad vet du om den") || lower.hasPrefix("vad vet du om det") ||
-           lower.hasPrefix("berätta mer om den") || lower.hasPrefix("berätta mer om det") ||
-           lower.hasPrefix("vad är det") || lower.hasPrefix("vad är den") ||
-           lower.contains("om den?") || lower.contains("om det?") {
+        // v14: Bredare pronomenupplösning — ersätt om pronomen verkar referera bakåt
+        let pronounContexts = [
+            "om den", "om det", "med den", "med det", "till den", "till det",
+            "för den", "för det", "vad är den", "vad är det", "vem är den",
+            "berätta om den", "berätta om det", "berätta mer om",
+            "vad hände med den", "vad hände med det", "vem grundade det",
+            "hur fungerar den", "hur fungerar det",
+        ]
+        if pronounContexts.contains(where: { lower.contains($0) }) ||
+           lower.hasSuffix("den?") || lower.hasSuffix("det?") ||
+           lower.hasSuffix("den.") || lower.hasSuffix("det.") {
             for (old, new) in replacements {
                 if resolved.contains(old) {
                     resolved = resolved.replacingOccurrences(of: old, with: new)
@@ -252,57 +267,77 @@ actor QuestionUnderstandingAgent {
 
     private func classifyQuestion(_ lower: String, wordCount: Int) -> QuestionProfile.QuestionType {
         // Hälsningar
-        let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "tjena", "morsning"]
+        let greetings = ["hej", "hallå", "tja", "hejsan", "god morgon", "god kväll", "tjena", "morsning",
+                         "hejhej", "hej hej", "god natt", "god dag"]
         if greetings.contains(where: { lower.hasPrefix($0) }) && wordCount <= 4 { return .greeting }
 
-        // Självrefererande
+        // Självrefererande (v14: utökat)
         let selfPatterns = ["vem är du", "vad är du", "berätta om dig", "hur fungerar du", "vad kan du",
                             "hur smart", "hur intelligent", "är du medveten", "har du känslor",
-                            "hur mår du", "vad upplever du", "vad tänker du om dig"]
+                            "hur mår du", "vad upplever du", "vad tänker du om dig",
+                            "vem skapade dig", "vem byggde dig", "vem utvecklade",
+                            "är du en ai", "är du en robot", "vad är ditt syfte",
+                            "hur gammal är du", "vilken version", "vad heter du"]
         if selfPatterns.contains(where: { lower.contains($0) }) { return .selfReference }
 
-        // Definition
-        let defPatterns = ["vad är ", "vad betyder ", "vad innebär ", "vad menas med ", "definiera "]
+        // Definition (v14: fler mönster)
+        let defPatterns = ["vad är ", "vad betyder ", "vad innebär ", "vad menas med ", "definiera ",
+                           "vad kallas ", "vad heter ", "vad står ", "vad representerar "]
         if defPatterns.contains(where: { lower.hasPrefix($0) }) { return .definition }
 
         // Jämförelse
         let compPatterns = ["skillnaden mellan", "jämför ", "vad skiljer", "hur skiljer sig", "bättre än",
-                            "sämre än", "liknar ", "vs ", " eller "]
+                            "sämre än", "liknar ", "vs ", " eller ", "kontra "]
         if compPatterns.contains(where: { lower.contains($0) }) && lower.contains("?") { return .comparison }
 
-        // Hur-gör-man
-        if lower.hasPrefix("hur ") && (lower.contains("gör") || lower.contains("kan man") || lower.contains("ska")) { return .howTo }
+        // Hur-gör-man (v14: fler mönster)
+        if lower.hasPrefix("hur ") && (lower.contains("gör") || lower.contains("kan man") || lower.contains("ska") ||
+           lower.contains("använder") || lower.contains("man ") || lower.contains("gör jag") ||
+           lower.contains("vet man") || lower.contains("fixar") || lower.contains("löser")) { return .howTo }
 
         // Varför
         if lower.hasPrefix("varför ") || lower.contains("varför ") { return .whyExplanation }
 
-        // Lista
-        let listPatterns = ["lista ", "räkna upp", "ge exempel", "vilka ", "nämn "]
-        if listPatterns.contains(where: { lower.hasPrefix($0) }) { return .list }
+        // Lista (v14: fler mönster, inte bara prefix)
+        let listPrefixPatterns = ["lista ", "räkna upp", "ge exempel", "nämn ", "vilka "]
+        if listPrefixPatterns.contains(where: { lower.hasPrefix($0) }) { return .list }
+        let listContainsPatterns = ["ge mig en lista", "nämn några", "ge exempel på", "vilka typer"]
+        if listContainsPatterns.contains(where: { lower.contains($0) }) { return .list }
 
-        // Ja/Nej
-        let ynVerbs: Set<String> = ["är", "kan", "har", "ska", "vet", "finns", "vill", "bör", "måste", "stämmer"]
+        // Ja/Nej (v14: fungerar utan frågetecken för informella frågor)
+        let ynVerbs: Set<String> = ["är", "kan", "har", "ska", "vet", "finns", "vill", "bör", "måste",
+                                     "stämmer", "tycker", "tror", "brukar", "gillar"]
         let firstWord = String(lower.prefix(while: { $0 != " " }))
-        if ynVerbs.contains(firstWord) && lower.contains("?") { return .yesNo }
+        if ynVerbs.contains(firstWord) && (lower.contains("?") || wordCount <= 6) { return .yesNo }
 
-        // Förklaring
-        let explainPatterns = ["förklara", "berätta om", "beskriv", "hur fungerar", "redogör"]
+        // Förklaring (v14: fler mönster)
+        let explainPatterns = ["förklara", "berätta om", "beskriv", "hur fungerar", "redogör",
+                               "berätta mer om", "vad innebär", "hur ser", "vad handlar"]
         if explainPatterns.contains(where: { lower.contains($0) }) { return .explanation }
 
-        // Åsikt
-        let opinionPatterns = ["tycker du", "anser du", "tror du", "din åsikt", "vad tänker du"]
+        // Åsikt (v14: fler mönster)
+        let opinionPatterns = ["tycker du", "anser du", "tror du", "din åsikt", "vad tänker du",
+                               "vad anser du om", "hur ser du på", "gillar du", "föredrar du",
+                               "är du för eller emot"]
         if opinionPatterns.contains(where: { lower.contains($0) }) { return .opinion }
 
-        // Kreativ
-        let creativePatterns = ["skriv en", "hitta på", "dikt", "berättelse", "fantisera"]
+        // Kreativ (v14: fler mönster)
+        let creativePatterns = ["skriv en", "hitta på", "dikt", "berättelse", "fantisera",
+                                "komponera", "formulera", "översätt", "fortsätt", "avsluta mening"]
         if creativePatterns.contains(where: { lower.contains($0) }) { return .creative }
 
-        // Personlig/emotionell
-        let personalPatterns = ["jag mår", "jag känner", "jag är ledsen", "jag är glad"]
+        // Personlig/emotionell (v14: fler mönster)
+        let personalPatterns = ["jag mår", "jag känner", "jag är ledsen", "jag är glad",
+                                "jag har det svårt", "jag är stressad", "jag behöver hjälp",
+                                "jag vet inte vad jag ska göra", "jag är orolig", "jag är trött",
+                                "jag är frustrerad", "jag är arg", "jag är ensam"]
         if personalPatterns.contains(where: { lower.contains($0) }) { return .personal }
 
-        // Kort uppföljning
-        if wordCount <= 3 && !lower.contains("?") { return .followUp }
+        // Kort uppföljning (v14: kräver ingen fråga + längre ord-gräns)
+        // Men inte om det är ett imperativ som "berätta om bitcoin"
+        let imperativeStarters = ["berätta", "förklara", "visa", "lista", "ge", "sök"]
+        let isImperative = imperativeStarters.contains(where: { lower.hasPrefix($0) })
+        if wordCount <= 3 && !lower.contains("?") && !isImperative { return .followUp }
 
         // Faktafråga (default vid frågetecken)
         if lower.contains("?") { return .factual }
@@ -359,15 +394,24 @@ actor QuestionUnderstandingAgent {
                                        "skulle", "kunde", "måste", "vill", "jag", "mig", "dig",
                                        "sin", "sitt", "sina", "tycker", "tror", "anser", "inte",
                                        "så", "här", "där", "alla", "allt", "gör", "gå", "göra",
-                                       "finns", "mer", "mycket", "också", "bara", "lite"]
+                                       "finns", "mer", "mycket", "också", "bara", "lite",
+                                       // v14: fler stoppord
+                                       "varför", "precis", "alltid", "aldrig", "dock", "sedan",
+                                       "väldigt", "verkligen", "faktiskt", "egentligen"]
 
         let words = lower.components(separatedBy: .whitespacesAndNewlines)
             .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-            .filter { $0.count > 1 && !stopwords.contains($0) }
+            .filter { $0.count > 2 && !stopwords.contains($0) }  // v14: >2 istället för >1
 
-        // Sista meningsfulla ordet är ofta ämnet i svenska frågor
+        // v14: Prioritetsordning för kärnämne:
+        // 1. Substantiv från NLTagger (mest tillförlitligt)
+        if let noun = nouns.first(where: { !stopwords.contains($0.lowercased()) && $0.count > 2 }) {
+            return noun.lowercased()
+        }
+        // 2. Längsta meningsfulla ordet (ofta ämnet)
+        if let longest = words.max(by: { $0.count < $1.count }) { return longest }
+        // 3. Sista meningsfulla ordet
         if let last = words.last { return last }
-        if let noun = nouns.first { return noun }
         return String(input.prefix(30))
     }
 
