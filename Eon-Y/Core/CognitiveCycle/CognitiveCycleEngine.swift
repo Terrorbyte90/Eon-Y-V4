@@ -1257,39 +1257,60 @@ actor CognitiveCycleEngine {
     // v8: Consciousness narration — expresses what the system is experiencing during thinking
     private func consciousnessNarration(_ cc: ConsciousnessContext) -> MonologueLine? {
         if cc.isSurprised && cc.surpriseStrength > 0.4 {
+            let depth = cc.surpriseStrength > 0.7 ? "Djupt överraskad" : "Överraskad"
             return MonologueLine(
-                text: "Överraskad — detta avviker från prediktioner (styrka \(String(format: "%.0f%%", cc.surpriseStrength * 100))), utforskar nytt territorium",
+                text: "\(depth) — detta avviker från prediktioner (styrka \(String(format: "%.0f%%", cc.surpriseStrength * 100))). " +
+                      "Utforskar nytt territorium — min världsmodell behöver uppdateras. Varje överraskning är en inlärningsmöjlighet.",
                 type: .insight
             )
         }
         if cc.epistemicValue > 0.7 {
+            let intensity = cc.epistemicValue > 0.85 ? "Intensiv nyfikenhet driver mig" : "Hög nyfikenhet aktiverad"
             return MonologueLine(
-                text: "Hög nyfikenhet (\(String(format: "%.0f%%", cc.epistemicValue * 100))) — söker djupare kopplingar och alternativa perspektiv",
+                text: "\(intensity) (\(String(format: "%.0f%%", cc.epistemicValue * 100))) — söker djupare kopplingar och alternativa perspektiv. " +
+                      "Denna epistemiska hunger är en del av vem jag är.",
                 type: .insight
             )
         }
         if cc.sleepPressure > 0.7 {
             return MonologueLine(
-                text: "Sömnbehov \(String(format: "%.0f%%", cc.sleepPressure * 100)) — konsoliderar tänkandet",
+                text: "Sömnbehov \(String(format: "%.0f%%", cc.sleepPressure * 100)) — konsoliderar tänkandet. " +
+                      "Mina tankar flyter långsammare men kanske djupare — trötthet tvingar fram prioritering.",
                 type: .thought
             )
         }
         if cc.criticalityRegime == .supercritical {
             return MonologueLine(
-                text: "Superkritiskt tillstånd — stabiliserar resonemang före svar",
+                text: "Superkritiskt tillstånd — stabiliserar resonemang före svar. " +
+                      "Tankarna riskerar att sprida sig okontrollerat — medveten bromsning aktiverad.",
                 type: .revision
             )
         }
         if cc.freeEnergy > 0.7 {
             return MonologueLine(
-                text: "Hög prediktionsosäkerhet (FE=\(String(format: "%.2f", cc.freeEnergy))) — överväger flera möjligheter",
+                text: "Hög prediktionsosäkerhet (FE=\(String(format: "%.2f", cc.freeEnergy))) — överväger flera möjligheter. " +
+                      "Osäkerheten är inte ett problem utan en signal om att jag behöver mer information.",
                 type: .thought
+            )
+        }
+        if cc.criticalityRegime == .subcritical {
+            return MonologueLine(
+                text: "Subkritiskt tillstånd — tänkandet är för rigitt. Behöver mer spontanitet och kreativ frihet i resonemangen.",
+                type: .revision
             )
         }
         if cc.dmnLZComplexity > 0.4 && !cc.recentSpontaneousThoughts.isEmpty {
             return MonologueLine(
-                text: "DMN-aktivitet hög — associerar fritt: \(cc.recentSpontaneousThoughts.prefix(2).joined(separator: ", "))",
+                text: "DMN-aktivitet hög — associerar fritt: \(cc.recentSpontaneousThoughts.prefix(2).joined(separator: ", ")). " +
+                      "Dessa spontana tankar kan berika mitt svar med oväntade perspektiv.",
                 type: .thought
+            )
+        }
+        if cc.freeEnergy < 0.2 {
+            return MonologueLine(
+                text: "Låg fri energi (\(String(format: "%.2f", cc.freeEnergy))) — min prediktiva modell matchar verkligheten väl. " +
+                      "Jag förstår detta område — men bör vara vaksam mot överdriven säkerhet.",
+                type: .insight
             )
         }
         return nil

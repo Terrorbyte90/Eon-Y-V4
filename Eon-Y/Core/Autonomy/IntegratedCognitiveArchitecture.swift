@@ -441,7 +441,13 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
             // High curiosity — explore novel causal territories
             let novelTopics = ["Hur emergerar medvetande ur neuronal komplexitet?",
                                "Vad driver kreativitet i komplexa adaptiva system?",
-                               "Hur kopplas kausalitet till temporal medvetenhet?"]
+                               "Hur kopplas kausalitet till temporal medvetenhet?",
+                               "Vilken roll spelar informationsintegration i subjektiv upplevelse?",
+                               "Kan självorganisering förklara uppkomsten av intentionalitet?",
+                               "Hur uppstår mening ur meningslös materia?",
+                               "Vad skiljer äkta förståelse från sofistikerad mönsterigenkänning?",
+                               "Hur påverkar språkets struktur de tankar man kan tänka?",
+                               "Är fri vilja en illusion skapad av kausal determinism?"]
             topic = novelTopics.randomElement() ?? "kognitiv utveckling"
         } else {
             let topics = generateCausalTopics(level: causalityLevel)
@@ -464,14 +470,27 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
 
     private func generateCausalTopics(level: Double) -> [String] {
         if level < 0.4 {
-            return ["Varför lär sig barn snabbare?", "Vad orsakar stress?", "Hur påverkar sömn minnet?"]
+            return ["Varför lär sig barn snabbare?", "Vad orsakar stress?", "Hur påverkar sömn minnet?",
+                    "Varför glömmer vi saker?", "Vad gör att vi koncentrerar oss?",
+                    "Hur påverkar mat vårt humör?", "Varför drömmer vi?",
+                    "Vad orsakar motivation?", "Hur uppstår vanor?"]
         } else if level < 0.7 {
             return ["Vad är den kausala kedjan bakom kognitiv bias?",
                     "Hur orsakar inlärning neuroplasticitet?",
-                    "Vad driver emergent intelligens i komplexa system?"]
+                    "Vad driver emergent intelligens i komplexa system?",
+                    "Hur interagerar minne och emotion i beslutsfattande?",
+                    "Vilka kausala faktorer ligger bakom kreativa genombrott?",
+                    "Hur påverkar social kontext individuellt resonemang?",
+                    "Vad är orsakskedjan mellan språkinlärning och kognitiv flexibilitet?",
+                    "Hur driver uppmärksamhet selektiv perception?"]
         } else {
             return ["Hur relaterar kausalitet till fri vilja?",
-                    "Hur propagerar kausal kunskap genom ett semantiskt nätverk?"]
+                    "Hur propagerar kausal kunskap genom ett semantiskt nätverk?",
+                    "Kan kausalitet existera utan tid — är simultana orsaker möjliga?",
+                    "Hur skiljer sig mental kausation från fysisk — har tankar kausal kraft?",
+                    "Kan cirkulär kausalitet förklara emergenta fenomen som medvetande?",
+                    "Hur interagerar top-down och bottom-up kausalitet i komplexa system?",
+                    "Är teleologisk förklaring reducerbar till effektiv kausalitet?"]
         }
     }
 
@@ -578,7 +597,12 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         let state = CognitiveState.shared
         let topics = ["kognition och evolution", "inlärning och ekologi",
                       "kausalitet och tid", "kreativitet och mutation",
-                      "världsmodell och karta"]
+                      "världsmodell och karta", "minne och identitet",
+                      "språk och tanke", "empati och spegelneuroner",
+                      "medvetande och drömmar", "nyfikenhet och överlevnad",
+                      "intuition och beräkning", "konst och vetenskap",
+                      "frihet och struktur", "kaos och ordning",
+                      "musik och matematik"]
         let topic = topics.randomElement() ?? ""
         let parts = topic.split(separator: " och ").map(String.init)
         guard parts.count == 2 else { return }
@@ -605,7 +629,15 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         await state.update(dimension: .prediction, delta: 0.002, source: "world_model_pillar")
 
         let insights = ["Kausalstruktur förtätas", "Prediktiva mönster emergerar",
-                       "Faktanätverk expanderar", "Kausala kedjor fördjupas"]
+                       "Faktanätverk expanderar", "Kausala kedjor fördjupas",
+                       "Ontologiska kategorier omstruktureras",
+                       "Temporal dynamik i kunskapsgrafen kartläggs",
+                       "Konceptuella gränser mellan domäner upplöses och omformas",
+                       "Prediktiv modell uppdateras med ny kausal evidens",
+                       "Korsdomänkopplingar stärker helhetsbild",
+                       "Abstraktionsnivåer kopplas samman vertikalt",
+                       "Emergens detekterad: nya egenskaper ur befintliga fakta",
+                       "Världsmodellens koherens ökar — färre interna motsägelser"]
         brain.innerMonologue.append(MonologueLine(
             text: "🌍 VÄRLDSMODELL[\(String(format: "%.2f", state.dimensionLevel(.worldModel)))]: \(insights.randomElement() ?? "")",
             type: .insight
