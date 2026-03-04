@@ -440,7 +440,9 @@ actor ReasoningEngine {
         let facts = await PersistentMemoryStore.shared.recentFactsWithConfidence(limit: 50)
 
         // Filtrera kausala relationer lokalt — ingen mutation av actor-property under await
-        let causalPredicates = ["orsakar", "leder_till", "påverkar", "förstärker", "hämmar", "möjliggör", "kräver", "ger_upphov_till"]
+        let causalPredicates = ["orsakar", "leder_till", "påverkar", "förstärker", "hämmar", "möjliggör", "kräver", "ger_upphov_till",
+                                  "korrelerar_med", "samverkar_med", "motverkar", "förutsätter", "resulterar_i", "stimulerar",
+                                  "begränsar", "katalyserar", "underlättar", "komplicerar"]
         let relations: [(cause: String, effect: String, strength: Double)] = facts.compactMap { fact in
             guard causalPredicates.contains(fact.predicate.lowercased()) else { return nil }
             let strength: Double = fact.predicate.contains("hämmar") ? -fact.confidence : fact.confidence

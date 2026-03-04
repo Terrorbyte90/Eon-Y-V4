@@ -399,12 +399,22 @@ actor CognitiveCycleEngine {
                 return inputWords.intersection(words1).count > inputWords.intersection(words2).count
             }
             var scored: [(record: ConversationRecord, score: Double)] = []
-            for mem in preFiltered.prefix(8) {  // v16: Max 8 BERT calls (was unlimited)
-                let memEmb = await neuralEngine.embed(String(mem.content.prefix(200)))
-                let rawSim = Double(await neuralEngine.cosineSimilarity(inputEmb, memEmb))
-                let ageHours = now.timeIntervalSince(mem.date) / 3600.0
-                let recencyBoost = exp(-ageHours / 24.0) * 0.15
-                scored.append((mem, rawSim + recencyBoost))
+            // v23: Parallelize BERT embedding calls with TaskGroup (was sequential, ~1-2s savings)
+            let topCandidates = Array(preFiltered.prefix(8))
+            await withTaskGroup(of: (Int, Double).self) { group in
+                for (i, mem) in topCandidates.enumerated() {
+                    group.addTask {
+                        let memEmb = await neuralEngine.embed(String(mem.content.prefix(200)))
+                        let rawSim = Double(await neuralEngine.cosineSimilarity(inputEmb, memEmb))
+                        return (i, rawSim)
+                    }
+                }
+                for await (i, rawSim) in group {
+                    let ageHours = now.timeIntervalSince(topCandidates[i].date) / 3600.0
+                    let recencyBoost = exp(-ageHours / 24.0) * 0.15
+                    scored.append((topCandidates[i], rawSim + recencyBoost))
+                }
+            }
             }
             context.retrievedMemories = scored.sorted { $0.score > $1.score }
                 .filter { $0.score > 0.20 }
@@ -520,16 +530,22 @@ actor CognitiveCycleEngine {
         context.generatedText = safeCleaned
         await onStepUpdate(.generation, .completed)
 
-        // Steg 8: Loop 1 — Genereringsvalidering
+        // Steg 8: Loop 1 — Genereringsvalidering (v23: deadline-aware — skip if <1.5s left)
         await onStepUpdate(.validation, .active)
-        let validationResult = await validator.validate(
-            generated: context.generatedText,
-            disambiguations: context.disambiguations,
-            neuralEngine: neuralEngine
-        )
+        let timeForValidation = (deadline - .now) > .seconds(1.5)
+        let validationResult: ValidationResult
+        if timeForValidation {
+            validationResult = await validator.validate(
+                generated: context.generatedText,
+                disambiguations: context.disambiguations,
+                neuralEngine: neuralEngine
+            )
+        } else {
+            validationResult = ValidationResult(needsRegeneration: false, correctionHint: "", mismatchScore: 0)
+        }
         context.validationResult = validationResult
 
-        if validationResult.needsRegeneration {
+        if validationResult.needsRegeneration && (deadline - .now) > .seconds(1.2) {
             await onMonologue(MonologueLine(text: "Loop 1 triggas — mismatch detekterat, partial regeneration...", type: .loopTrigger))
             await onStepUpdate(.validation, .triggered)
             // Partial regeneration: behåll det som är bra, regenerera bara den problematiska delen
@@ -774,15 +790,13 @@ actor CognitiveCycleEngine {
         // Run actual reasoning to inform the CoT
         let reasoningResult = await ReasoningEngine.shared.reason(about: input, strategy: .adaptive, depth: 3)
         await onMonologue(MonologueLine(text: "Resonemang steg 1: \(reasoningResult.steps.first?.content ?? "identifiera kärnan")...", type: .thought))
-        try? await Task.sleep(nanoseconds: 500_000_000)
+        // v23: Removed 3×500ms Task.sleep delays (1.5s total) — monologue updates are instant now
         if !reasoningResult.causalChain.isEmpty {
             await onMonologue(MonologueLine(text: "Resonemang steg 2: kausalkedja — \(reasoningResult.causalChain.prefix(3).joined(separator: " → "))", type: .insight))
-            try? await Task.sleep(nanoseconds: 500_000_000)
         }
         if !reasoningResult.alternatives.isEmpty {
             let alt = reasoningResult.alternatives.first ?? ""
             await onMonologue(MonologueLine(text: "Resonemang steg 3: alternativt perspektiv — \(String(alt.prefix(80)))...", type: .thought))
-            try? await Task.sleep(nanoseconds: 500_000_000)
         }
         await onMonologue(MonologueLine(text: "Resonemang steg 4: slutsats (konfidens \(String(format: "%.0f%%", reasoningResult.confidence * 100))) — formulerar svar...", type: .insight))
         await onStepUpdate(.chainOfThought, .completed)

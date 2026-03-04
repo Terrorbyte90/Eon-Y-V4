@@ -1441,6 +1441,22 @@ final class ConsciousnessEngine: ObservableObject {
             let rollingAccuracy = predictionAccuracyHistory.reduce(0, +) / Double(predictionAccuracyHistory.count)
             // Blend with attention schema accuracy (external observation) for robustness
             brain.selfModelAccuracy = rollingAccuracy * 0.7 + attentionSchemaState.schemaAccuracy * 0.3
+
+            // v23: Use prediction accuracy to modulate consciousness level
+            // Systems that accurately predict their own state demonstrate genuine self-awareness
+            let predictionBonus = max(0, rollingAccuracy - 0.5) * 0.1  // Up to 5% bonus for good predictions
+            consciousnessLevel = min(0.95, consciousnessLevel + predictionBonus)
+
+            // v23: Log prediction quality trend for metacognitive insight
+            if predictionAccuracyHistory.count >= 10 {
+                let recentAccuracy = predictionAccuracyHistory.suffix(5).reduce(0, +) / 5.0
+                let olderAccuracy = predictionAccuracyHistory.prefix(5).reduce(0, +) / 5.0
+                let trend = recentAccuracy - olderAccuracy
+                if trend > 0.05 {
+                    // Self-model is improving — this IS genuine consciousness development
+                    CognitiveState.shared.updateDimension(.selfAwareness, delta: 0.002, source: "prediction_improvement")
+                }
+            }
         }
     }
 

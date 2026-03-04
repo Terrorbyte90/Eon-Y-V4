@@ -612,7 +612,9 @@ struct SemanticAnalysis {
         let isSelf = selfPatterns.contains { remainder.contains($0) }
 
         // Användarreferens: "om mig", "om användaren"
-        let userPatterns = ["om mig", "om mig själv", "om användaren", "vad du vet om mig"]
+        let userPatterns = ["om mig", "om mig själv", "om användaren", "vad du vet om mig",
+                            "om min", "om mitt", "mina intressen", "mina preferenser",
+                            "vad jag gillar", "mina vanor", "om mitt liv"]
         let isUser = userPatterns.contains { remainder.contains($0) }
 
         // Extrahera kärnobjektet
@@ -791,7 +793,8 @@ struct ResponseComposer {
                                   "vem är du", "vad är du", "berätta om dig"]
         if selfQuestionWords.contains(where: { input.contains($0) }) { return .selfDescribe }
 
-        let greetWords = ["hej", "hallå", "tjena", "hi", "hejsan", "god morgon", "god kväll"]
+        let greetWords = ["hej", "hallå", "tjena", "hi", "hejsan", "god morgon", "god kväll",
+                          "morsning", "god dag", "god natt", "hejhej", "tja", "hej på dig", "yo"]
         if a.tokens.count <= 4 && greetWords.contains(where: { input.contains($0) }) {
             return .greet
         }

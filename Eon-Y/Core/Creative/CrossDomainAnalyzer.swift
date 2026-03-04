@@ -174,7 +174,8 @@ actor CrossDomainAnalyzer {
 
             // Domain-specific terms (words with technical suffixes)
             let lower = word.lowercased()
-            let technicalSuffixes = ["tion", "sion", "ologi", "grafi", "ment", "itet", "ism", "ist", "ning", "else"]
+            let technicalSuffixes = ["tion", "sion", "ologi", "grafi", "ment", "itet", "ism", "ist", "ning", "else",
+                                      "skap", "het", "dom", "nad", "lek", "ande", "ende", "eri", "tek", "mik"]
             if technicalSuffixes.contains(where: { lower.hasSuffix($0) }) && word.count > 5 {
                 concepts.insert(word.lowercased())
             }
@@ -212,6 +213,17 @@ actor CrossDomainAnalyzer {
             ("(.*?) påverkar (.*)", "påverkar"),
             ("eftersom (.*?), (.*)", "eftersom"),
             ("(.*?) därför (.*)", "därför"),
+            ("(.*?) medför (.*)", "medför"),
+            ("(.*?) framkallar (.*)", "framkallar"),
+            ("(.*?) förutsätter (.*)", "förutsätter"),
+            ("(.*?) hämmar (.*)", "hämmar"),
+            ("(.*?) stimulerar (.*)", "stimulerar"),
+            ("(.*?) begränsar (.*)", "begränsar"),
+            ("(.*?) korrelerar med (.*)", "korrelerar_med"),
+            ("(.*?) samverkar med (.*)", "samverkar_med"),
+            ("(.*?) är en konsekvens av (.*)", "konsekvens_av"),
+            ("(.*?) ger upphov till (.*)", "ger_upphov_till"),
+            ("(.*?) katalyserar (.*)", "katalyserar"),
         ]
 
         for sentence in sentences {
