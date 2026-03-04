@@ -18,6 +18,7 @@ struct MindView: View {
         ("Monolog",  "text.bubble"),
         ("Tankar",   "square.3.layers.3d"),
         ("Framsteg", "chart.line.uptrend.xyaxis"),
+        ("Kreativ",  "sparkles"),
     ]
 
     var body: some View {
@@ -32,7 +33,8 @@ struct MindView: View {
                         case 0: cycleTab
                         case 1: monologueTab
                         case 2: thoughtGlassTab
-                        default: progressTab
+                        case 3: progressTab
+                        default: CreativeView().environmentObject(brain)
                         }
                     }
                     .scrollTabBarVisibility(tabBarVisible: tabBarVisible)

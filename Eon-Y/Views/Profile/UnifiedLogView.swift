@@ -7,12 +7,14 @@ import SwiftUI
 struct UnifiedLogView: View {
     enum LogTab: String, CaseIterable {
         case cognition   = "Kognition"
+        case language    = "Språk"
         case diagnostics = "Diagnostik"
         case sessions    = "Sessioner"
 
         var icon: String {
             switch self {
             case .cognition:   return "brain.head.profile"
+            case .language:    return "textformat.abc"
             case .diagnostics: return "waveform.path.ecg"
             case .sessions:    return "list.bullet.clipboard"
             }
@@ -21,6 +23,7 @@ struct UnifiedLogView: View {
         var color: Color {
             switch self {
             case .cognition:   return .purple
+            case .language:    return Color(hex: "#14B8A6")
             case .diagnostics: return .orange
             case .sessions:    return .cyan
             }
@@ -31,6 +34,7 @@ struct UnifiedLogView: View {
     @State private var selectedTab: LogTab = .cognition
     @State private var searchText: String = ""
     @State private var cognitionLines: [LogLine] = []
+    @State private var languageLines: [LogLine] = []
     @State private var diagnosticsLines: [LogLine] = []
     @State private var sessionLines: [LogLine] = []
     @State private var isLoading = false
@@ -207,6 +211,7 @@ struct UnifiedLogView: View {
         let lines: [LogLine]
         switch selectedTab {
         case .cognition:   lines = cognitionLines
+        case .language:    lines = languageLines
         case .diagnostics: lines = diagnosticsLines
         case .sessions:    lines = sessionLines
         }
@@ -225,6 +230,10 @@ struct UnifiedLogView: View {
                 .enumerated()
                 .map { LogLine(index: $0.offset, text: $0.element, tab: .cognition) }
 
+            // v15: Language log from EonBrain
+            let langLog = await MainActor.run { EonBrain.shared.languageLog }
+            let lang = langLog.enumerated().map { LogLine(index: $0.offset, text: $0.element, tab: .language) }
+
             let diag = ResourceDiagnosticsLogger.shared.readAll()
                 .components(separatedBy: "\n")
                 .filter { !$0.isEmpty }
@@ -239,6 +248,7 @@ struct UnifiedLogView: View {
 
             await MainActor.run {
                 self.cognitionLines = cog
+                self.languageLines = lang
                 self.diagnosticsLines = diag
                 self.sessionLines = sess
                 self.isLoading = false
@@ -272,6 +282,8 @@ struct UnifiedLogView: View {
         case .cognition:
             CognitionLogger.shared.clear()
             cognitionLines = []
+        case .language:
+            languageLines = []
         case .diagnostics:
             ResourceDiagnosticsLogger.shared.clear()
             diagnosticsLines = []

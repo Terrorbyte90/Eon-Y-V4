@@ -19,7 +19,7 @@ extension EnvironmentValues {
 enum EonTab: Int, CaseIterable {
     case home = 0
     case chat
-    case creative
+    case language
     case mind
     case selfAwareness
     case knowledge
@@ -29,7 +29,7 @@ enum EonTab: Int, CaseIterable {
         switch self {
         case .home:           return "Hem"
         case .chat:           return "Chatt"
-        case .creative:       return "Kreativ"
+        case .language:       return "Språk"
         case .mind:           return "Hjärna"
         case .selfAwareness:  return "Medvetande"
         case .knowledge:      return "Kunskap"
@@ -41,7 +41,7 @@ enum EonTab: Int, CaseIterable {
         switch self {
         case .home:           return "circle.hexagongrid.fill"
         case .chat:           return "bubble.left.and.bubble.right.fill"
-        case .creative:       return "sparkles"
+        case .language:       return "textformat.abc"
         case .mind:           return "brain.head.profile"
         case .selfAwareness:  return "eye.trianglebadge.exclamationmark"
         case .knowledge:      return "books.vertical.fill"
@@ -53,7 +53,7 @@ enum EonTab: Int, CaseIterable {
         switch self {
         case .home:           return Color(hex: "#A78BFA")
         case .chat:           return Color(hex: "#34D399")
-        case .creative:       return Color(hex: "#EC4899")
+        case .language:       return Color(hex: "#14B8A6")
         case .mind:           return Color(hex: "#60A5FA")
         case .selfAwareness:  return Color(hex: "#F472B6")
         case .knowledge:      return Color(hex: "#FBBF24")
@@ -124,11 +124,11 @@ struct TabContentView: View {
                     .allowsHitTesting(selectedTab == .home)
             }
 
-            if visitedTabs.contains(.creative) {
-                CreativeView()
+            if visitedTabs.contains(.language) {
+                LanguageView()
                     .environment(\.tabBarVisible, $tabBarVisible)
-                    .opacity(selectedTab == .creative ? 1 : 0)
-                    .allowsHitTesting(selectedTab == .creative)
+                    .opacity(selectedTab == .language ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .language)
             }
 
             if visitedTabs.contains(.mind) {
@@ -272,7 +272,7 @@ struct EonTabBar: View {
         .onReceive(brain.$engineActivity) { activity in
             tabActivity[.mind]           = activity["cognitive"] ?? 0
             tabActivity[.chat]           = activity["language"] ?? 0
-            tabActivity[.creative]       = activity["hypothesis"] ?? 0
+            tabActivity[.language]       = activity["language"] ?? 0
             tabActivity[.selfAwareness]  = activity["autonomy"] ?? 0
             tabActivity[.knowledge]      = activity["memory"] ?? 0
         }
