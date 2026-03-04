@@ -310,6 +310,37 @@ struct LanguageView: View {
                 }
             }
 
+            // v19: Grammar pattern insights
+            if !learning.grammarPatterns.isEmpty || learning.compoundWordCount > 0 {
+                GlassCard(tint: Color(hex: "#F472B6")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        PanelHeader(icon: "textformat.abc.dottedunderline", title: "Grammatikmönster", color: Color(hex: "#F472B6")) {
+                            if learning.compoundWordCount > 0 {
+                                Text("\(learning.compoundWordCount) sammansättningar")
+                                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(Color(hex: "#F472B6").opacity(0.7))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Capsule().fill(Color(hex: "#F472B6").opacity(0.1)))
+                            } else {
+                                EmptyView()
+                            }
+                        }
+
+                        ForEach(Array(learning.grammarPatterns.prefix(5).enumerated()), id: \.offset) { _, pattern in
+                            HStack(spacing: 8) {
+                                Text(formatPatternName(pattern.pattern))
+                                    .font(.system(size: 11, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                Spacer()
+                                Text("\(pattern.count)x")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(Color(hex: "#F472B6").opacity(0.6))
+                            }
+                        }
+                    }
+                }
+            }
+
             // Neural language models status
             GlassCard(tint: Color(hex: "#A78BFA")) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -659,6 +690,22 @@ struct LanguageView: View {
         }
     }
 
+    private func formatPatternName(_ raw: String) -> String {
+        let map: [String: String] = [
+            "V2_huvudsats": "V2-ordföljd (huvudsats)",
+            "passiv_s": "Passiv s-form",
+            "bisats_att": "Bisats (att)",
+            "bisats_som": "Bisats (som)",
+            "bisats_när": "Bisats (när)",
+            "bisats_om": "Bisats (om)",
+            "bisats_eftersom": "Bisats (eftersom)",
+            "bisats_medan": "Bisats (medan)",
+            "bisats_innan": "Bisats (innan)",
+            "bisats_efter": "Bisats (efter)",
+        ]
+        return map[raw] ?? raw.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
     private func morphologyLabel(_ level: Double) -> String {
         if level >= 0.8 { return "Expert" }
         if level >= 0.6 { return "Avancerad" }
@@ -720,11 +767,17 @@ extension LearningEngine {
         @Published var wordsLearnedToday: Int = 0
         @Published var vocabularyCount: Int = 0
 
+        // v19: Grammar pattern insights
+        @Published var compoundWordCount: Int = 0
+        @Published var grammarPatterns: [(pattern: String, count: Int)] = []
+
         func refresh() {
             Task {
                 let snapshot = await LearningEngine.shared.competencySnapshot()
                 let level = await LearningEngine.shared.overallCompetencyLevel()
                 let metrics = await LearningEngine.shared.dailyMetrics()
+                let compounds = await LearningEngine.shared.compoundWordCount()
+                let patterns = await LearningEngine.shared.grammarPatternSummary()
                 await MainActor.run {
                     self.competencies = snapshot
                     self.overallLevel = level
@@ -734,6 +787,8 @@ extension LearningEngine {
                     self.velocity = metrics.learningVelocity
                     self.activeTopics = metrics.activeStudyTopics
                     self.latestLearnedWords = metrics.recentWords
+                    self.compoundWordCount = compounds
+                    self.grammarPatterns = patterns
                 }
             }
         }

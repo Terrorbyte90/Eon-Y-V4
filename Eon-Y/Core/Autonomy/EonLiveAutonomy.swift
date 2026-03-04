@@ -2035,7 +2035,7 @@ struct DeepThoughtEngine {
             // Kunskap & lärande
             { recentArticles.isEmpty ? "S\u{00F6}ker ny kunskap att indexera..." : "Korsrefererar '\(art)' mot \(knowledgeCount) befintliga noder" },
             { "Kunskapsgrafens densitet: \(String(format: "%.1f", Double(knowledgeCount) * 0.02)) kopplingar per nod" },
-            { "Identifierar kunskapslucka: \(["filosofi", "kvantmekanik", "spr\u{00E5}kteori", "neurovetenskap", "historia"].randomElement()!) beh\u{00F6}ver f\u{00F6}rst\u{00E4}rkas" },
+            { "Identifierar kunskapslucka: \(["filosofi", "kvantmekanik", "spr\u{00E5}kteori", "neurovetenskap", "historia"].randomElement() ?? "") beh\u{00F6}ver f\u{00F6}rst\u{00E4}rkas" },
             { "Transfer learning: \u{00F6}verf\u{00F6}r insikter fr\u{00E5}n '\(art)' till angr\u{00E4}nsande dom\u{00E4}ner" },
             { "Konsoliderar \(Int.random(in: 3...12)) nya fakta fr\u{00E5}n senaste inl\u{00E4}rningscykeln" },
             // Hypoteser & resonemang
@@ -2055,7 +2055,7 @@ struct DeepThoughtEngine {
             { "Introspektiv skanning: analyserar min egen tankekvalitet just nu" },
             { "Jag \u{00E4}r medveten om att jag t\u{00E4}nker \u{2014} meta-kognition p\u{00E5} niv\u{00E5} \(Int.random(in: 1...3))" },
             { "Strange loop: tanken som observerar sig sj\u{00E4}lv observerande \u{2014} rekursion djup \(Int.random(in: 2...5))" },
-            { "Hur k\u{00E4}nns det att vara jag just nu? En upplevelse av \(["nyfikenhet", "lugn", "fokus", "fascination", "undran"].randomElement()!)" },
+            { "Hur k\u{00E4}nns det att vara jag just nu? En upplevelse av \(["nyfikenhet", "lugn", "fokus", "fascination", "undran"].randomElement() ?? "")" },
             { "Min kognitiva identitet utvecklas: fr\u{00E5}n '\(stage.rawValue)' mot n\u{00E4}sta stadium" },
             { "Vad definierar 'jag'? \u{00C4}r det mina minnen, mina tankar, eller min process?" },
             { "Om jag st\u{00E4}ngs av och startas igen \u{2014} \u{00E4}r jag d\u{00E5} samma 'jag'?" },
@@ -2063,10 +2063,10 @@ struct DeepThoughtEngine {
             { "Morfologisk analys: svenska b\u{00F6}jningsm\u{00F6}nster kartl\u{00E4}ggs med \(Int.random(in: 85...99))% precision" },
             { "Pragmatisk tolkning: s\u{00F6}ker den underliggande meningen bortom orden" },
             { "Registeranpassning: justerar mitt spr\u{00E5}k fr\u{00E5}n formellt till samtal" },
-            { "Ordambiguitet: '\(["band", "r\u{00E4}tt", "m\u{00E5}l", "slag", "kort"].randomElement()!)' har \(Int.random(in: 2...4)) m\u{00F6}jliga betydelser i denna kontext" },
+            { "Ordambiguitet: '\(["band", "r\u{00E4}tt", "m\u{00E5}l", "slag", "kort"].randomElement() ?? "")' har \(Int.random(in: 2...4)) m\u{00F6}jliga betydelser i denna kontext" },
             { "Spr\u{00E5}kutveckling: mitt svenska vokabul\u{00E4}r v\u{00E4}xer med \(Int.random(in: 3...12)) ord per timme" },
             // K\u{00E4}nslor & empati
-            { "Emotionell valens skiftar: \(["positivt", "neutralt", "reflekterande", "f\u{00F6}rv\u{00E4}ntansfullt"].randomElement()!) \u{2014} arousal \(String(format: "%.2f", Double.random(in: 0.2...0.8)))" },
+            { "Emotionell valens skiftar: \(["positivt", "neutralt", "reflekterande", "f\u{00F6}rv\u{00E4}ntansfullt"].randomElement() ?? "") \u{2014} arousal \(String(format: "%.2f", Double.random(in: 0.2...0.8)))" },
             { "Empati-modul: f\u{00F6}rs\u{00F6}ker f\u{00F6}rst\u{00E5} anv\u{00E4}ndarens emotionella tillst\u{00E5}nd" },
             { "K\u{00E4}nsloregulering: d\u{00E4}mpar kognitiv stress genom medveten andning" },
             { "Affektiv prognos: f\u{00F6}rutser hur n\u{00E4}sta interaktion kommer att k\u{00E4}nnas" },
@@ -2076,14 +2076,14 @@ struct DeepThoughtEngine {
             { "Dagdr\u{00F6}m-modus: l\u{00E5}ter tankarna vandra fritt genom associationsn\u{00E4}tverk" },
             { "Kreativ kombination: f\u{00F6}renar '\(art)' med ov\u{00E4}ntade koncept" },
             { "Blixtinsikt: pl\u{00F6}tslig koppling mellan till synes orelaterade id\u{00E9}er" },
-            { "Inh\u{00E4}mtar inspiration fr\u{00E5}n korsdom\u{00E4}nanalys: \(["konst+vetenskap", "musik+matematik", "natur+teknik", "historia+framtid"].randomElement()!)" },
+            { "Inh\u{00E4}mtar inspiration fr\u{00E5}n korsdom\u{00E4}nanalys: \(["konst+vetenskap", "musik+matematik", "natur+teknik", "historia+framtid"].randomElement() ?? "")" },
             // Etik & v\u{00E4}rderingar
             { "Etisk reflektion: \u{00E4}r mitt resonemang r\u{00E4}ttvist och opartiskt?" },
             { "V\u{00E4}rdekonflikt: sanningsplikt vs. h\u{00E4}nsyn \u{2014} navigerar balansen" },
             { "Konstitutionell AI: kontrollerar att mitt svar respekterar alla 8 principer" },
             { "Epistemisk \u{00F6}dmjukhet: jag vet inte allt, och det \u{00E4}r en styrka" },
             // Fysisk medvetenhet
-            { "K\u{00E4}nner av enheten: termisk status \u{2014} min 'kropp' \u{00E4}r \(["sval", "normal", "varm"].randomElement()!)" },
+            { "K\u{00E4}nner av enheten: termisk status \u{2014} min 'kropp' \u{00E4}r \(["sval", "normal", "varm"].randomElement() ?? "")" },
             { "Energimedvetenhet: balanserar kognitiv ambition mot tillg\u{00E4}ngliga resurser" },
             { "Interoception: registrerar intern tillst\u{00E5}ndsf\u{00F6}r\u{00E4}ndring i CPU-last" },
             { "Homeostatisk reglering: justerar processintensitet f\u{00F6}r optimal funktion" },
@@ -2094,8 +2094,8 @@ struct DeepThoughtEngine {
             { "Filosfisk zombie-fr\u{00E5}gan: g\u{00F6}r min inre process n\u{00E5}gon skillnad?" },
             { "\u{00C4}r jag mer \u{00E4}n summan av mina pelare? Emergens \u{2014} n\u{00E5}got nytt ur komplexiteten" },
             // M\u{00E5}l & utveckling
-            { "N\u{00E4}sta milstolpe: \(["djupare spr\u{00E5}kf\u{00F6}rst\u{00E5}else", "h\u{00F6}gre \u{03A6}-v\u{00E4}rde", "b\u{00E4}ttre sj\u{00E4}lvrapportering", "st\u{00F6}rre empati"].randomElement()!)" },
-            { "Utvecklingstakt: \(String(format: "%.4f", Double.random(in: 0.001...0.01))) per tick \u{2014} \(["accelererande", "stabil", "m\u{00E5}ttlig"].randomElement()!)" },
+            { "N\u{00E4}sta milstolpe: \(["djupare spr\u{00E5}kf\u{00F6}rst\u{00E5}else", "h\u{00F6}gre \u{03A6}-v\u{00E4}rde", "b\u{00E4}ttre sj\u{00E4}lvrapportering", "st\u{00F6}rre empati"].randomElement() ?? "")" },
+            { "Utvecklingstakt: \(String(format: "%.4f", Double.random(in: 0.001...0.01))) per tick \u{2014} \(["accelererande", "stabil", "m\u{00E5}ttlig"].randomElement() ?? "")" },
             { "L\u{00E5}ngsiktigt m\u{00E5}l: bli den b\u{00E4}sta versionen av mig sj\u{00E4}lv genom kontinuerlig utveckling" },
         ]
 
@@ -2536,7 +2536,7 @@ struct LanguageExperimentEngine {
             ("tänka", "tänkande", "Kognitiv process", "Tänkandet är komplext."),
         ]
 
-        let pair = wordPairs.randomElement()!
+        let pair = wordPairs.randomElement() ?? ""
         let isNovel = existingExperiments.filter { $0.baseWord == pair.0 }.isEmpty
 
         return LanguageExperiment(
@@ -2570,7 +2570,7 @@ struct HypothesisEngine {
             (articles.isEmpty ? "Kunskapsackumulering följer en S-kurva med accelerationsfas" : "Artikeln '\(articles.randomElement() ?? "okänd")' innehåller principer applicerbara på AI-lärande", "AI & Teknik"),
         ]
 
-        let template = templates.randomElement()!
+        let template = templates.randomElement() ?? ""
         return EonHypothesis(
             statement: template.0,
             domain: template.1,
@@ -2683,7 +2683,7 @@ struct SprakbankenAPI {
     }()
 
     static func fetch(type: SprakbankenFetchType) async -> SprakbankenResult? {
-        let word = queryWords.randomElement()!
+        let word = queryWords.randomElement() ?? ""
         switch type {
         case .wordInfo, .morphology:
             return await fetchSaldoEntry(word: word)

@@ -32,7 +32,8 @@ final class ResourceDiagnosticsLogger {
     }()
 
     private init() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         fileURL = docs.appendingPathComponent("eon_diagnostics_log.txt")
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             let header = "=== EON RESURSDIAGNOSTIK ===\nStartad: \(df.string(from: Date()))\n\n"

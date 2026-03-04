@@ -28,7 +28,8 @@ actor PersistentMemoryStore {
     private let dbPath: String
 
     private init() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         let path = docs.appendingPathComponent("eon_v3.sqlite").path
         dbPath = path
         // Öppna databas direkt i init (actor init kan mutera egna stored properties)

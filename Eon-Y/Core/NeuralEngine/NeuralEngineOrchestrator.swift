@@ -250,7 +250,7 @@ actor NeuralEngineOrchestrator {
         let paragraphDeduped = removeParagraphRepetition(text)
 
         // Split on sentence-ending punctuation while preserving the delimiter
-        let pattern = try! NSRegularExpression(pattern: "([^.!?]+[.!?]+)", options: [])
+        guard let pattern = try? NSRegularExpression(pattern: "([^.!?]+[.!?]+)", options: []) else { return paragraphDeduped }
         let range = NSRange(paragraphDeduped.startIndex..., in: paragraphDeduped)
         let matches = pattern.matches(in: paragraphDeduped, range: range)
 
@@ -315,31 +315,38 @@ actor NeuralEngineOrchestrator {
         return text
     }
 
-    /// v18: Final safety dedup — catches any remaining 2+ repetitions of substantial text blocks
-    /// This runs AFTER sentence and paragraph dedup as a last resort
+    /// v19: Final safety dedup — catches any remaining repetitions of substantial text blocks
+    /// This runs AFTER sentence and paragraph dedup as a last resort.
+    /// Now also catches near-duplicate sentences (>80% Jaccard similarity).
     nonisolated static func finalSafetyDedup(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count > 100 else { return text }
 
-        // Split into sentences and check for any sentence appearing 2+ times
+        // Split into sentences and check for any sentence appearing 2+ times (exact OR near-duplicate)
         let sentences = trimmed
             .components(separatedBy: CharacterSet(charactersIn: ".!?"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.count > 15 }
 
-        var seen: [String: Int] = [:]
+        var seenNormalized: [String] = []
         var uniqueSentences: [String] = []
+        var removedCount = 0
         for sentence in sentences {
             let normalized = sentence.lowercased()
-            let count = seen[normalized, default: 0]
-            if count == 0 {
+            // Check exact duplicate
+            let isExactDup = seenNormalized.contains(normalized)
+            // Check near-duplicate (>80% word overlap)
+            let isNearDup = !isExactDup && seenNormalized.contains { sentenceSimilarity($0, normalized) > 0.80 }
+            if !isExactDup && !isNearDup {
+                seenNormalized.append(normalized)
                 uniqueSentences.append(sentence)
+            } else {
+                removedCount += 1
             }
-            seen[normalized] = count + 1
         }
 
         // If we removed duplicates, reconstruct
-        if uniqueSentences.count < sentences.count {
+        if removedCount > 0 {
             return uniqueSentences.joined(separator: ". ") + "."
         }
 

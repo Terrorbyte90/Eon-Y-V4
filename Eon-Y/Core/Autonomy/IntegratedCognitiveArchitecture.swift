@@ -579,7 +579,7 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         let topics = ["kognition och evolution", "inlärning och ekologi",
                       "kausalitet och tid", "kreativitet och mutation",
                       "världsmodell och karta"]
-        let topic = topics.randomElement()!
+        let topic = topics.randomElement() ?? ""
         let parts = topic.split(separator: " och ").map(String.init)
         guard parts.count == 2 else { return }
 
@@ -607,7 +607,7 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         let insights = ["Kausalstruktur förtätas", "Prediktiva mönster emergerar",
                        "Faktanätverk expanderar", "Kausala kedjor fördjupas"]
         brain.innerMonologue.append(MonologueLine(
-            text: "🌍 VÄRLDSMODELL[\(String(format: "%.2f", state.dimensionLevel(.worldModel)))]: \(insights.randomElement()!)",
+            text: "🌍 VÄRLDSMODELL[\(String(format: "%.2f", state.dimensionLevel(.worldModel)))]: \(insights.randomElement() ?? "")",
             type: .insight
         ))
     }
