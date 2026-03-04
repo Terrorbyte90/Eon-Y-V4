@@ -8,8 +8,8 @@ import Combine
 
 struct SmartDashView: View {
     @EnvironmentObject var brain: EonBrain
-    @StateObject private var consciousness = ConsciousnessEngine.shared
-    @StateObject private var motorController = EonMotorController.shared
+    @ObservedObject private var consciousness = ConsciousnessEngine.shared
+    @ObservedObject private var motorController = EonMotorController.shared
     @ObservedObject private var oscillators = OscillatorBank.shared
     @ObservedObject private var criticalityCtrl = CriticalityController.shared
     @ObservedObject private var sleepEng = SleepConsolidationEngine.shared

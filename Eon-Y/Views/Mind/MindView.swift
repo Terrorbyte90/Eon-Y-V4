@@ -34,7 +34,7 @@ struct MindView: View {
                         case 1: monologueTab
                         case 2: thoughtGlassTab
                         case 3: progressTab
-                        default: CreativeView().environmentObject(brain)
+                        default: CreativeView(embedded: true).environmentObject(brain)
                         }
                     }
                     .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
@@ -51,111 +51,90 @@ struct MindView: View {
 
     // MARK: - Background
 
+    private let accentColor = Color(hex: "#60A5FA")
+
     var mindBackground: some View {
         ZStack {
-            Color(hex: "#050210").ignoresSafeArea()
+            Color(hex: "#07050F").ignoresSafeArea()
             RadialGradient(
-                colors: [Color(hex: "#7C3AED").opacity(0.12), Color.clear],
-                center: .init(x: 0.3, y: 0.0), startRadius: 0, endRadius: 500
+                colors: [accentColor.opacity(0.25), Color.clear],
+                center: .init(x: 0.2, y: 0.05),
+                startRadius: 0, endRadius: 500
             ).ignoresSafeArea()
             RadialGradient(
-                colors: [Color(hex: "#38BDF8").opacity(0.06), Color.clear],
-                center: .init(x: 0.8, y: 0.15), startRadius: 0, endRadius: 350
+                colors: [Color(hex: "#1E3A5F").opacity(0.15), Color.clear],
+                center: .init(x: 0.8, y: 0.5),
+                startRadius: 0, endRadius: 400
             ).ignoresSafeArea()
         }
     }
 
     // MARK: - Header
 
+    private var mindStatusLabel: String {
+        if brain.isThinking { return "Bearbetar kognitiv cykel..." }
+        if critCtrl.regime == .critical { return "Kritiskt läge — maximal integration" }
+        if oscillators.globalSync > 0.5 { return "Hög synkronisering — koherent tänkande" }
+        if activeInf.freeEnergy > 0.5 { return "Explorativt läge — söker ny kunskap" }
+        return "Autonom kognition aktiv"
+    }
+
     var mindHeader: some View {
-        HStack(alignment: .center, spacing: 14) {
-            // Orb
-            ZStack {
-                Circle()
-                    .fill(Color(hex: "#7C3AED").opacity(0.18))
-                    .frame(width: 44, height: 44)
-                    .blur(radius: 8)
-                    .scaleEffect(orbPulse)
-                Circle()
-                    .trim(from: 0, to: 0.6)
-                    .stroke(
-                        AngularGradient(colors: [.clear, Color(hex: "#A78BFA").opacity(0.7), .clear], center: .center),
-                        style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
-                    )
-                    .frame(width: 40, height: 40)
-                    .rotationEffect(.degrees(ringRot))
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [Color(hex: "#1A0A35"), Color(hex: "#050210")],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 32, height: 32)
-                    .overlay(Circle().strokeBorder(Color(hex: "#7C3AED").opacity(0.5), lineWidth: 0.8))
-                    .shadow(color: Color(hex: "#7C3AED").opacity(0.4), radius: 8)
-                Image(systemName: "brain.head.profile")
-                    .font(.system(size: 13, weight: .light))
-                    .foregroundStyle(Color(hex: "#A78BFA"))
+        VStack(spacing: 6) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(RadialGradient(
+                            colors: [accentColor.opacity(0.5), Color(hex: "#1E3A5F").opacity(0.3), Color.clear],
+                            center: .center, startRadius: 0, endRadius: 24
+                        ))
+                        .frame(width: 48, height: 48)
+                        .scaleEffect(orbPulse)
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(accentColor)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Hjärna")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(mindStatusLabel)
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                Spacer()
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Hjärna")
-                    .font(.system(size: 26, weight: .thin, design: .serif))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Color(hex: "#E2D9F3"), Color(hex: "#A78BFA")],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .shadow(color: Color(hex: "#7C3AED").opacity(0.5), radius: 8, x: 0, y: 2)
-                HStack(spacing: 6) {
+            // Live metrics strip
+            HStack(spacing: 8) {
+                HStack(spacing: 3) {
                     Circle()
                         .fill(brain.isAutonomouslyActive ? Color(hex: "#34D399") : Color(hex: "#FBBF24"))
                         .frame(width: 4, height: 4)
-                        .scaleEffect(orbPulse)
-                    Text(brain.isAutonomouslyActive ? "Autonom · aktiv" : "Standby")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.3))
-                    Text("·")
-                        .foregroundStyle(.white.opacity(0.15))
-                    Text("II \(String(format: "%.3f", brain.integratedIntelligence))")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color(hex: "#A78BFA").opacity(0.7))
+                        .shadow(color: brain.isAutonomouslyActive ? Color(hex: "#34D399").opacity(0.8) : .clear, radius: 2)
+                    Text(brain.isAutonomouslyActive ? "Autonom" : "Standby")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(brain.isAutonomouslyActive ? Color(hex: "#34D399").opacity(0.8) : accentColor.opacity(0.6))
                 }
-                HStack(spacing: 6) {
+                Spacer()
+                HStack(spacing: 10) {
+                    Text("II \(String(format: "%.3f", brain.integratedIntelligence))")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(accentColor.opacity(0.5))
                     Text("Sync \(String(format: "%.0f%%", oscillators.globalSync * 100))")
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(Color(hex: "#38BDF8").opacity(0.5))
                     Text("σ \(String(format: "%.2f", critCtrl.branchingRatio))")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle((critCtrl.regime == .critical ? Color(hex: "#34D399") : Color(hex: "#FBBF24")).opacity(0.5))
-                    Text("FE \(String(format: "%.1f", activeInf.freeEnergy))")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(Color(hex: "#06B6D4").opacity(0.5))
-                    if sleepEng.isAsleep {
-                        Image(systemName: "moon.zzz.fill")
-                            .font(.system(size: 8))
-                            .foregroundStyle(Color(hex: "#6366F1").opacity(0.6))
-                    }
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#FBBF24").opacity(0.5))
                 }
             }
-
-            Spacer()
-
-            PhiGaugeMini(phi: brain.phiValue)
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(accentColor.opacity(0.04)))
         }
-        .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 12)
-        .background(
-            Color(hex: "#050210").opacity(0.9)
-                .background(.ultraThinMaterial.opacity(0.2))
-                .overlay(
-                    LinearGradient(
-                        colors: [Color(hex: "#7C3AED").opacity(0.35), Color(hex: "#38BDF8").opacity(0.15), .clear],
-                        startPoint: .leading, endPoint: .trailing
-                    ).frame(height: 0.5),
-                    alignment: .bottom
-                )
-                .ignoresSafeArea(edges: .top)
-        )
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 4)
     }
 
     // MARK: - Tab Bar
@@ -163,45 +142,27 @@ struct MindView: View {
     var mindTabBar: some View {
         HStack(spacing: 0) {
             ForEach(tabs.indices, id: \.self) { i in
-                let (label, icon) = tabs[i]
-                let active = selectedTab == i
-                Button { withAnimation(.spring(response: 0.28)) { selectedTab = i } } label: {
+                Button {
+                    withAnimation(.spring(response: 0.3)) { selectedTab = i }
+                } label: {
                     VStack(spacing: 4) {
-                        Image(systemName: icon)
-                            .font(.system(size: 14, weight: active ? .semibold : .regular))
-                            .foregroundStyle(active ? tabColor(i) : .white.opacity(0.28))
-                        Text(label)
-                            .font(.system(size: 10, weight: active ? .semibold : .regular, design: .rounded))
-                            .foregroundStyle(active ? tabColor(i) : .white.opacity(0.28))
+                        Image(systemName: tabs[i].1)
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(tabs[i].0)
+                            .font(.system(size: 10, weight: selectedTab == i ? .semibold : .regular, design: .rounded))
                     }
+                    .foregroundStyle(selectedTab == i ? accentColor : .white.opacity(0.35))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
                     .background(
-                        active
-                            ? RoundedRectangle(cornerRadius: 0)
-                                .fill(tabColor(i).opacity(0.08))
-                            : nil
+                        selectedTab == i ? accentColor.opacity(0.1) : Color.clear
                     )
-                    .overlay(alignment: .bottom) {
-                        if active {
-                            Rectangle()
-                                .fill(tabColor(i))
-                                .frame(height: 2)
-                                .padding(.horizontal, 20)
-                        }
-                    }
                 }
-                .animation(.spring(response: 0.3), value: active)
             }
         }
-        .background(
-            Color(hex: "#050210").opacity(0.85)
-                .overlay(Rectangle().fill(Color.white.opacity(0.05)).frame(height: 0.5), alignment: .bottom)
-        )
-    }
-
-    func tabColor(_ i: Int) -> Color {
-        [Color(hex: "#A78BFA"), Color(hex: "#F472B6"), Color(hex: "#38BDF8"), Color(hex: "#FBBF24")][i]
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16).padding(.vertical, 6)
     }
 
     // MARK: - Cycle Tab
@@ -1445,7 +1406,7 @@ struct MindProgressBar: View {
         levels.last(where: { brain.integratedIntelligence >= $0.threshold }) ?? levels[0]
     }
     private var nextLevel: (emoji: String, name: String, threshold: Double) {
-        levels.first(where: { brain.integratedIntelligence < $0.threshold }) ?? levels.last!
+        levels.first(where: { brain.integratedIntelligence < $0.threshold }) ?? levels[levels.count - 1]
     }
     private var levelProgress: Double {
         let cur = currentLevel.threshold; let nxt = nextLevel.threshold; let range = nxt - cur

@@ -9,7 +9,7 @@ struct SelfAwarenessView: View {
     @EnvironmentObject var brain: EonBrain
     @Environment(\.tabBarVisible) private var tabBarVisible
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var consciousness = ConsciousnessEngine.shared
+    @ObservedObject private var consciousness = ConsciousnessEngine.shared
     @State private var selectedSection: SASection = .overview
     @State private var orbPulse: CGFloat = 1.0
     @State private var ringRot: Double = 0
@@ -39,7 +39,7 @@ struct SelfAwarenessView: View {
             saBackground
             VStack(spacing: 0) {
                 saHeader
-                sectionPicker
+                saTabBar
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 14) {
                         switch selectedSection {
@@ -73,140 +73,132 @@ struct SelfAwarenessView: View {
         withAnimation(.linear(duration: 12).repeatForever(autoreverses: false)) { ringRot = 360 }
     }
 
-    // MARK: - Background (statisk gradient — ingen repeatForever-animation)
+    // MARK: - Background
 
-    var saBackground: some View {
+    private let accentColor = Color(hex: "#F472B6")
+    private let secondaryAccent = Color(hex: "#831843")
+
+    private var saBackground: some View {
         ZStack {
-            Color(hex: "#050310").ignoresSafeArea()
+            Color(hex: "#07050F").ignoresSafeArea()
             RadialGradient(
-                colors: [Color(hex: "#3B0764").opacity(0.30), Color.clear],
-                center: .init(x: 0.3, y: 0.0), startRadius: 0, endRadius: 500
+                colors: [accentColor.opacity(0.25), Color.clear],
+                center: .init(x: 0.2, y: 0.05),
+                startRadius: 0, endRadius: 500
             ).ignoresSafeArea()
             RadialGradient(
-                colors: [Color(hex: "#0F172A").opacity(0.4), Color.clear],
-                center: .init(x: 0.8, y: 0.6), startRadius: 0, endRadius: 400
+                colors: [secondaryAccent.opacity(0.15), Color.clear],
+                center: .init(x: 0.8, y: 0.5),
+                startRadius: 0, endRadius: 400
             ).ignoresSafeArea()
         }
     }
 
     // MARK: - Header
 
-    var saHeader: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(Color(hex: "#EC4899").opacity(0.15))
-                    .frame(width: 46, height: 46)
-                    .blur(radius: 8)
-                    .scaleEffect(orbPulse)
-                Circle()
-                    .trim(from: 0, to: 0.65)
-                    .stroke(
-                        AngularGradient(colors: [.clear, Color(hex: "#F472B6").opacity(0.7), Color(hex: "#A78BFA").opacity(0.5), .clear], center: .center),
-                        style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
-                    )
-                    .frame(width: 42, height: 42)
-                    .rotationEffect(.degrees(ringRot))
-                Circle()
-                    .fill(RadialGradient(
-                        colors: [Color(hex: "#1A0A35"), Color(hex: "#050210")],
-                        center: .center, startRadius: 0, endRadius: 20
-                    ))
-                    .frame(width: 34, height: 34)
-                    .overlay(Circle().strokeBorder(Color(hex: "#EC4899").opacity(0.5), lineWidth: 0.8))
-                Image(systemName: "eye.trianglebadge.exclamationmark")
-                    .font(.system(size: 14, weight: .light))
-                    .foregroundStyle(Color(hex: "#F472B6"))
+    private var saHeader: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(RadialGradient(
+                            colors: [accentColor.opacity(0.5), secondaryAccent.opacity(0.3), Color.clear],
+                            center: .center, startRadius: 0, endRadius: 24
+                        ))
+                        .frame(width: 48, height: 48)
+                        .scaleEffect(orbPulse)
+                    Image(systemName: "eye.trianglebadge.exclamationmark")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(accentColor)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Självmedvetenhet")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(consciousnessStatusLabel)
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                Spacer()
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Självmedvetenhet")
-                    .font(.system(size: 24, weight: .thin, design: .serif))
-                    .foregroundStyle(
-                        LinearGradient(colors: [Color(hex: "#F9A8D4"), Color(hex: "#C084FC")],
-                                       startPoint: .leading, endPoint: .trailing)
-                    )
-                    .shadow(color: Color(hex: "#EC4899").opacity(0.5), radius: 8)
-                HStack(spacing: 6) {
+            // Live metrics strip
+            HStack(spacing: 8) {
+                HStack(spacing: 3) {
                     Circle()
-                        .fill(consciousness.consciousnessLevel > 0.3 ? Color(hex: "#34D399") : Color(hex: "#FBBF24"))
+                        .fill(consciousness.consciousnessLevel > 0.3 ? Color(hex: "#34D399") : accentColor)
                         .frame(width: 4, height: 4)
-                        .scaleEffect(orbPulse)
-                    Text("Q-index: \(String(format: "%.3f", consciousness.qIndex))")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color(hex: "#F472B6").opacity(0.7))
-                    Text("·")
-                        .foregroundStyle(.white.opacity(0.15))
+                        .shadow(color: consciousness.consciousnessLevel > 0.3 ? Color(hex: "#34D399").opacity(0.8) : .clear, radius: 2)
+                    Text(consciousness.consciousnessLevel > 0.3 ? "Medveten" : "Grundläge")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(consciousness.consciousnessLevel > 0.3 ? Color(hex: "#34D399").opacity(0.8) : accentColor.opacity(0.6))
+                }
+                Spacer()
+                HStack(spacing: 10) {
+                    Text("Q \(String(format: "%.3f", consciousness.qIndex))")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(accentColor.opacity(0.5))
                     Text("Butlin \(consciousness.butlin14Score)/14")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#38BDF8").opacity(0.5))
+                    Text("\(Int(consciousness.consciousnessLevel * 100))%")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#FBBF24").opacity(0.5))
                 }
             }
-            Spacer()
-
-            // Consciousness gauge mini
-            ZStack {
-                Circle()
-                    .trim(from: 0, to: 0.75)
-                    .stroke(Color.white.opacity(0.07), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                    .frame(width: 40, height: 40)
-                    .rotationEffect(.degrees(135))
-                Circle()
-                    .trim(from: 0, to: min(consciousness.consciousnessLevel, 1.0) * 0.75)
-                    .stroke(
-                        LinearGradient(colors: [Color(hex: "#EC4899"), Color(hex: "#A78BFA")],
-                                       startPoint: .leading, endPoint: .trailing),
-                        style: StrokeStyle(lineWidth: 4, lineCap: .round)
-                    )
-                    .frame(width: 40, height: 40)
-                    .rotationEffect(.degrees(135))
-                Text("\(Int(consciousness.consciousnessLevel * 100))")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color(hex: "#F472B6"))
-            }
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(accentColor.opacity(0.04)))
         }
-        .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 12)
-        .background(
-            Color(hex: "#050310").opacity(0.9)
-                .background(.ultraThinMaterial.opacity(0.2))
-                .overlay(
-                    LinearGradient(
-                        colors: [Color(hex: "#EC4899").opacity(0.3), Color(hex: "#A78BFA").opacity(0.15), .clear],
-                        startPoint: .leading, endPoint: .trailing
-                    ).frame(height: 0.5),
-                    alignment: .bottom
-                )
-                .ignoresSafeArea(edges: .top)
-        )
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 4)
     }
 
-    // MARK: - Section Picker
+    private var consciousnessStatusLabel: String {
+        let level = consciousness.consciousnessLevel
+        if level > 0.6 { return "Djup självreflektion — analyserar inre tillstånd" }
+        if level > 0.3 { return "Aktiv medvetenhet — bearbetar intryck" }
+        return "Grundläggande medvetandeprocesser aktiva"
+    }
 
-    var sectionPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(SASection.allCases, id: \.self) { section in
-                    let active = selectedSection == section
-                    Button {
-                        withAnimation(.spring(response: 0.28)) { selectedSection = section }
-                    } label: {
-                        Text(section.rawValue)
-                            .font(.system(size: 12, weight: active ? .bold : .regular, design: .rounded))
-                            .foregroundStyle(active ? Color(hex: "#F472B6") : .white.opacity(0.35))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(
-                                active
-                                ? RoundedRectangle(cornerRadius: 10).fill(Color(hex: "#EC4899").opacity(0.12))
-                                : nil
-                            )
+    // MARK: - Tab Bar
+
+    private var saTabs: [(String, String, SASection)] {
+        [
+            ("Översikt",    "chart.bar.fill",                .overview),
+            ("Tankar",      "bubble.left.fill",              .thoughts),
+            ("Läsning",     "book.fill",                     .reading),
+            ("Inre Värld",  "globe.europe.africa.fill",      .innerWorld),
+            ("Mätningar",   "waveform.path.ecg",             .metrics),
+            ("Mål",         "target",                        .goals),
+        ]
+    }
+
+    private var saTabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(saTabs, id: \.2) { tab in
+                let isSelected = selectedSection == tab.2
+                Button {
+                    withAnimation(.spring(response: 0.3)) { selectedSection = tab.2 }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.1)
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(tab.0)
+                            .font(.system(size: 10, weight: isSelected ? .semibold : .regular, design: .rounded))
                     }
+                    .foregroundStyle(isSelected ? accentColor : .white.opacity(0.35))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(
+                        isSelected ? accentColor.opacity(0.1) : Color.clear
+                    )
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
         }
-        .background(Color(hex: "#050310").opacity(0.85))
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16).padding(.vertical, 6)
     }
 
     // MARK: - Overview Section

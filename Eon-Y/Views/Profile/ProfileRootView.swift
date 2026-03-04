@@ -13,43 +13,25 @@ struct ProfileRootView: View {
     @ObservedObject private var criticality = CriticalityController.shared
     @ObservedObject private var sleepEngine = SleepConsolidationEngine.shared
 
-    private let sections = ["Profil", "Inställningar", "Loggar", "Om Eon"]
-    private let sectionColors: [Color] = [
-        Color(hex: "#F472B6"),
-        Color(hex: "#A78BFA"),
-        Color(hex: "#38BDF8"),
-        Color(hex: "#34D399"),
+    @State private var orbPulse: CGFloat = 1.0
+
+    private let tabs: [(String, String)] = [
+        ("Profil",          "person.fill"),
+        ("Inställningar",   "gearshape.fill"),
+        ("Loggar",          "doc.text.fill"),
+        ("Om Eon",          "info.circle.fill"),
     ]
 
+    private let accentColor = Color(hex: "#F59E0B")
+    private let secondaryAccent = Color(hex: "#92400E")
+
     var body: some View {
-        ZStack {
-            Color(hex: "#07050F").ignoresSafeArea()
+        ZStack(alignment: .top) {
+            profileBackground
 
             VStack(spacing: 0) {
                 profileHeader
-
-                // Custom segmented control — 4 sektioner
-                HStack(spacing: 4) {
-                    ForEach(sections.indices, id: \.self) { i in
-                        Button {
-                            withAnimation(.spring(response: 0.3)) { selectedSection = i }
-                        } label: {
-                            Text(sections[i])
-                                .font(.system(size: 11, weight: selectedSection == i ? .semibold : .regular, design: .rounded))
-                                .foregroundStyle(selectedSection == i ? sectionColors[i] : Color.white.opacity(0.38))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(selectedSection == i ? sectionColors[i].opacity(0.14) : Color.clear)
-                                )
-                        }
-                    }
-                }
-                .padding(5)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.05)))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
+                profileTabBar
 
                 // Sektion-innehåll
                 switch selectedSection {
@@ -78,95 +60,125 @@ struct ProfileRootView: View {
                 }
             }
         }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
+                orbPulse = 1.06
+            }
+        }
+    }
+
+    // MARK: - Background
+
+    private var profileBackground: some View {
+        ZStack {
+            Color(hex: "#07050F").ignoresSafeArea()
+            RadialGradient(
+                colors: [accentColor.opacity(0.25), Color.clear],
+                center: .init(x: 0.2, y: 0.05),
+                startRadius: 0, endRadius: 500
+            ).ignoresSafeArea()
+            RadialGradient(
+                colors: [secondaryAccent.opacity(0.15), Color.clear],
+                center: .init(x: 0.8, y: 0.5),
+                startRadius: 0, endRadius: 400
+            ).ignoresSafeArea()
+        }
     }
 
     // MARK: - Header
 
     var profileHeader: some View {
-        VStack(spacing: 0) {
-            // Avatar sektion (visas bara på profil-fliken)
-            if selectedSection == 0 {
-                VStack(spacing: 10) {
-                    ZStack {
-                        // Orbital rings
-                        ForEach(0..<3, id: \.self) { i in
-                            Circle()
-                                .strokeBorder(Color(hex: "#F472B6").opacity(0.08 + Double(i) * 0.04), lineWidth: 0.6)
-                                .frame(width: CGFloat(70 + i * 22), height: CGFloat(70 + i * 22))
-                        }
-                        // Avatar
-                        ZStack {
-                            Circle()
-                                .fill(RadialGradient(
-                                    colors: [Color(hex: "#F472B6").opacity(0.4), Color(hex: "#7C3AED").opacity(0.3)],
-                                    center: .center, startRadius: 0, endRadius: 30
-                                ))
-                                .frame(width: 60, height: 60)
-                            Text(userInitials)
-                                .font(.system(size: 20, weight: .black, design: .rounded))
-                                .foregroundStyle(.white)
-                        }
-                        .shadow(color: Color(hex: "#F472B6").opacity(0.4), radius: 12)
-                    }
-                    .frame(height: 80)
+        VStack(spacing: 6) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(RadialGradient(
+                            colors: [accentColor.opacity(0.5), secondaryAccent.opacity(0.3), Color.clear],
+                            center: .center, startRadius: 0, endRadius: 24
+                        ))
+                        .frame(width: 48, height: 48)
+                        .scaleEffect(orbPulse)
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(accentColor)
+                }
 
-                    Text("Användare")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Profil")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("Aktiv sedan \(userProfile.profile.knownSince.formatted(.dateTime.day().month().year()))")
+                    Text(profileStatusLabel)
                         .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
 
-                    // Stats rad — alla värden från faktisk data
-                    HStack(spacing: 0) {
-                        ProfileStatItem(value: "\(userProfile.totalConversations)", label: "Samtal", color: Color(hex: "#F472B6"))
-                        Divider().background(Color.white.opacity(0.1)).frame(height: 30)
-                        ProfileStatItem(value: wordCountLabel, label: "Ord totalt", color: Color(hex: "#A78BFA"))
-                        Divider().background(Color.white.opacity(0.1)).frame(height: 30)
-                        ProfileStatItem(value: engagementLabel, label: "Engagemang", color: Color(hex: "#5EEAD4"))
-                        Divider().background(Color.white.opacity(0.1)).frame(height: 30)
-                        ProfileStatItem(value: "\(userProfile.uniqueVocabularySize)", label: "Unika ord", color: Color(hex: "#FBBF24"))
+            // Metrics strip
+            HStack(spacing: 8) {
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(Color(hex: "#34D399"))
+                        .frame(width: 4, height: 4)
+                        .shadow(color: Color(hex: "#34D399").opacity(0.8), radius: 2)
+                    Text("Aktiv sedan \(userProfile.profile.knownSince.formatted(.dateTime.day().month(.abbreviated).year()))")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color(hex: "#34D399").opacity(0.8))
+                }
+                Spacer()
+                HStack(spacing: 10) {
+                    Text("\(userProfile.totalConversations) samtal")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(accentColor.opacity(0.5))
+                    Text("\(brain.knowledgeNodeCount) noder")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#38BDF8").opacity(0.5))
+                    Text("\(userProfile.uniqueVocabularySize) ord")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#FBBF24").opacity(0.5))
+                }
+            }
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(accentColor.opacity(0.04)))
+        }
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 4)
+    }
+
+    private var profileStatusLabel: String {
+        let convs = userProfile.totalConversations
+        if convs > 100 { return "Djup relation — \(convs) konversationer" }
+        if convs > 30 { return "Växande förståelse — bygger kunskapsbild" }
+        if convs > 5 { return "Lär känna dig — samlar intryck" }
+        return "Ny användare — välkommen!"
+    }
+
+    // MARK: - Tab Bar
+
+    private var profileTabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(tabs.indices, id: \.self) { i in
+                Button {
+                    withAnimation(.spring(response: 0.3)) { selectedSection = i }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tabs[i].1)
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(tabs[i].0)
+                            .font(.system(size: 10, weight: selectedSection == i ? .semibold : .regular, design: .rounded))
                     }
-                    .padding(.vertical, 10)
+                    .foregroundStyle(selectedSection == i ? accentColor : .white.opacity(0.35))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
                     .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Color.white.opacity(0.04))
-                            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                        selectedSection == i ? accentColor.opacity(0.1) : Color.clear
                     )
-                    .padding(.horizontal, 20)
                 }
-                .padding(.top, 16)
-                .padding(.bottom, 10)
-            } else {
-                let titles = ["Din profil", "Inställningar", "Loggar", "Om Eon"]
-                let subtitles = [
-                    "Eons bild av dig",
-                    "Konfigurera Eon",
-                    "All aktivitetsloggning",
-                    "Q:\(String(format: "%.1f%%", consciousness.qIndex * 100)) · \(brain.developmentalStage.rawValue.capitalized)"
-                ]
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(titles[min(selectedSection, titles.count - 1)])
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text(subtitles[min(selectedSection, subtitles.count - 1)])
-                            .font(.system(size: 12, design: .rounded))
-                            .foregroundStyle(Color.white.opacity(0.45))
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 12)
             }
         }
-        .background(
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .overlay(Color(hex: "#07050F").opacity(0.5))
-                .ignoresSafeArea(edges: .top)
-        )
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16).padding(.vertical, 6)
     }
 
     // Formatera ordantal: 1 234 → "1,2k" om > 999

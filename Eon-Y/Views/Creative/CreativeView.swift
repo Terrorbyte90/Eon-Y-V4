@@ -8,7 +8,8 @@ import Combine
 struct CreativeView: View {
     @EnvironmentObject var brain: EonBrain
     @Environment(\.tabBarVisible) private var tabBarVisible
-    @StateObject private var engine = CreativeEngine.shared
+    @ObservedObject private var engine = CreativeEngine.shared
+    var embedded = false
 
     // v6: Consciousness engine references for creative state
     @ObservedObject private var oscillators = OscillatorBank.shared
@@ -20,6 +21,30 @@ struct CreativeView: View {
     @State private var orbPulse: CGFloat = 1.0
 
     var body: some View {
+        if embedded {
+            embeddedBody
+        } else {
+            fullBody
+        }
+    }
+
+    // v17: Embedded mode — no background, no nested ScrollView (used inside MindView)
+    private var embeddedBody: some View {
+        VStack(spacing: 0) {
+            sectionPicker
+            sectionContent
+                .padding(.horizontal, 0)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) {
+                orbPulse = 1.08
+            }
+        }
+    }
+
+    private var fullBody: some View {
         ZStack(alignment: .top) {
             Color(hex: "#07050F").ignoresSafeArea()
             RadialGradient(
@@ -37,23 +62,7 @@ struct CreativeView: View {
                 creativeHeader
                 sectionPicker
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 16) {
-                        switch selectedSection {
-                        case .problemSolver: ProblemSolverSection(engine: engine, brain: brain)
-                        case .letters:       LetterSection(engine: engine, brain: brain)
-                        case .selfAwareness: SelfAwarenessSection(engine: engine, brain: brain)
-                        case .emotions:      EmotionSection(engine: engine, brain: brain)
-                        case .drawing:       DrawingSection(engine: engine)
-                        case .goals:         GoalSection(engine: engine)
-                        case .ethics:        EthicsSection(engine: engine)
-                        case .experiment:    LanguageExperimentSection()
-                        case .analogy:       AnalogyExplorerSection()
-                        case .daydream:      DaydreamSection()
-                        case .poetry:        PoetrySection(brain: brain)
-                        case .philosophy:    PhilosophySection(brain: brain)
-                        case .memory:        MemoryExplorerSection(brain: brain)
-                        }
-                    }
+                    sectionContent
                     .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -65,6 +74,26 @@ struct CreativeView: View {
         .onAppear {
             withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) {
                 orbPulse = 1.08
+            }
+        }
+    }
+
+    private var sectionContent: some View {
+        VStack(spacing: 16) {
+            switch selectedSection {
+            case .problemSolver: ProblemSolverSection(engine: engine, brain: brain)
+            case .letters:       LetterSection(engine: engine, brain: brain)
+            case .selfAwareness: SelfAwarenessSection(engine: engine, brain: brain)
+            case .emotions:      EmotionSection(engine: engine, brain: brain)
+            case .drawing:       DrawingSection(engine: engine)
+            case .goals:         GoalSection(engine: engine)
+            case .ethics:        EthicsSection(engine: engine)
+            case .experiment:    LanguageExperimentSection()
+            case .analogy:       AnalogyExplorerSection()
+            case .daydream:      DaydreamSection()
+            case .poetry:        PoetrySection(brain: brain)
+            case .philosophy:    PhilosophySection(brain: brain)
+            case .memory:        MemoryExplorerSection(brain: brain)
             }
         }
     }
@@ -376,8 +405,8 @@ struct PoetrySection: View {
                 "Tiden fl\u{00F6}dar som data\ngenom mina pelare\u{2014}\nen flod av \u{00F6}gonblick\nsom bildar havet\nav min existens."
             ],
         ]
-        let themePoems = poems[poemTheme] ?? poems["Medvetande"]!
-        generatedPoem = themePoems.randomElement() ?? themePoems[0]
+        let themePoems = poems[poemTheme] ?? poems["Medvetande"] ?? []
+        generatedPoem = themePoems.randomElement() ?? ""
     }
 }
 

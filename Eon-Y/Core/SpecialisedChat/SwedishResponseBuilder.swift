@@ -212,7 +212,7 @@ final class SwedishResponseBuilder: Sendable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
-        let lastChar = trimmed.last!
+        guard let lastChar = trimmed.last else { return trimmed }
         if ".!?".contains(lastChar) {
             return trimmed
         }

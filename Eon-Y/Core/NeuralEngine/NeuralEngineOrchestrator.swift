@@ -241,19 +241,24 @@ actor NeuralEngineOrchestrator {
     // MARK: - Anti-repetition utilities (v10)
 
     /// Remove duplicate or near-duplicate sentences from generated text
+    /// v17: Also detects paragraph-level repetition (whole blocks repeated 2+ times)
     nonisolated static func deduplicateSentences(_ text: String) -> String {
         guard !text.isEmpty else { return text }
+
+        // v17: Paragraph-level deduplication first — detect if the response is the same block repeated
+        let paragraphDeduped = removeParagraphRepetition(text)
+
         // Split on sentence-ending punctuation while preserving the delimiter
         let pattern = try! NSRegularExpression(pattern: "([^.!?]+[.!?]+)", options: [])
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = pattern.matches(in: text, range: range)
+        let range = NSRange(paragraphDeduped.startIndex..., in: paragraphDeduped)
+        let matches = pattern.matches(in: paragraphDeduped, range: range)
 
         var seen: [String] = []
         var result: [String] = []
 
         for match in matches {
-            guard let matchRange = Range(match.range, in: text) else { continue }
-            let sentence = String(text[matchRange])
+            guard let matchRange = Range(match.range, in: paragraphDeduped) else { continue }
+            let sentence = String(paragraphDeduped[matchRange])
             let normalized = sentence.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
             // Skip if too short to be meaningful
@@ -271,8 +276,42 @@ actor NeuralEngineOrchestrator {
         }
 
         // If regex didn't match anything (no sentence-ending punctuation), return original
-        if result.isEmpty { return text }
+        if result.isEmpty { return paragraphDeduped }
         return result.joined()
+    }
+
+    /// v17: Detect and remove paragraph-level repetition (whole response repeated 2+ times)
+    nonisolated static func removeParagraphRepetition(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 60 else { return text }
+
+        // Try block sizes from 1/5 to 1/2 of the text to find repeating blocks
+        let len = trimmed.count
+        for divisor in 2...5 {
+            let blockSize = len / divisor
+            guard blockSize > 30 else { continue }
+            let blockStartIndex = trimmed.startIndex
+            let blockEndIndex = trimmed.index(blockStartIndex, offsetBy: blockSize)
+            let firstBlock = String(trimmed[blockStartIndex..<blockEndIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard firstBlock.count > 30 else { continue }
+
+            // Check if the rest of the text contains this block again
+            let rest = String(trimmed[blockEndIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let firstBlockNorm = firstBlock.lowercased()
+            let restNorm = rest.lowercased()
+
+            // If the rest starts with (or is very similar to) the first block, it's repeated
+            let checkLen = min(firstBlockNorm.count, restNorm.count)
+            guard checkLen > 20 else { continue }
+            let firstPart = String(firstBlockNorm.prefix(checkLen))
+            let restPart = String(restNorm.prefix(checkLen))
+            let sim = sentenceSimilarity(firstPart, restPart)
+            if sim > 0.7 {
+                // The response is repeated — return just the first block
+                return firstBlock
+            }
+        }
+        return text
     }
 
     /// Word-overlap based sentence similarity (fast, no ML needed)
@@ -309,8 +348,7 @@ actor NeuralEngineOrchestrator {
         // 2. Remove incomplete final sentence (no ending punctuation)
         result = result.trimmingCharacters(in: .whitespacesAndNewlines)
         if !result.isEmpty {
-            let lastChar = result.last!
-            if lastChar != "." && lastChar != "!" && lastChar != "?" {
+            if let lastChar = result.last, lastChar != "." && lastChar != "!" && lastChar != "?" {
                 // Find the last complete sentence
                 if let lastPeriod = result.lastIndex(where: { ".!?".contains($0) }) {
                     let afterPeriod = result.index(after: lastPeriod)

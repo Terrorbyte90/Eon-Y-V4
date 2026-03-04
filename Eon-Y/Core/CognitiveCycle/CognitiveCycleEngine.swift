@@ -547,7 +547,8 @@ actor CognitiveCycleEngine {
             let correctedStream = await neuralEngine.generateStream(prompt: correctedPrompt, maxTokens: 150, temperature: 0.62)
             for await token in correctedStream {
                 correctedText += token
-                await onToken(token)
+                // v17: Don't stream regeneration tokens — they overlap with the initial response.
+                // The final cleaned response replaces the UI content via lastCleanedResponse.
             }
             // v10: Dedup the corrected text too
             context.generatedText = NeuralEngineOrchestrator.deduplicateSentences(correctedText)
@@ -760,7 +761,7 @@ actor CognitiveCycleEngine {
                 article.content.lowercased().contains(String(lower.prefix(20)))
             }.prefix(3))
         }
-        await onMonologue(MonologueLine(text: "Hittade \(memories.count) minnen, \(relevantArticles.count) relevanta artiklar i kunskapsbanken", type: .memory))
+        await onMonologue(MonologueLine(text: "Hittade \(context.retrievedMemories.count) minnen, \(relevantArticles.count) relevanta artiklar i kunskapsbanken", type: .memory))
 
         let deepPrompt = await buildDeepPrompt(input: input, context: context, articles: relevantArticles)
         context.prompt = deepPrompt
