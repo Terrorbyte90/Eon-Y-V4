@@ -729,7 +729,8 @@ final class CreativeEngine: ObservableObject {
 
         let run = AwarenessTestRun(
             results: results,
-            totalScore: results.map(\.score).reduce(0, +) / Double(results.count),
+            // v24: Guard against division by zero when results is empty
+            totalScore: results.isEmpty ? 0.0 : results.map(\.score).reduce(0, +) / Double(results.count),
             timestamp: Date()
         )
         awarenessTestResults.insert(run, at: 0)

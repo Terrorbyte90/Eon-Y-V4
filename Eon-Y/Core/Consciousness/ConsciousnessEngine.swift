@@ -1418,7 +1418,7 @@ final class ConsciousnessEngine: ObservableObject {
         }
 
         // 2. Make predictions for next tick based on current trends
-        // Curiosity: momentum-based — if rising, predict continued rise (dampened)
+        // v24: Adaptive prediction models — learn from prediction errors to improve future predictions
         let curiosityTrend: Double
         if curiosityHistory.count >= 3,
            let last = curiosityHistory.suffix(3).last,
@@ -1427,11 +1427,15 @@ final class ConsciousnessEngine: ObservableObject {
         } else {
             curiosityTrend = 0
         }
-        predictedNextCuriosity = max(0, min(1.0, curiosityDrive + curiosityTrend * 0.5))
+        // v24: Use adaptive gain — scale momentum by recent prediction accuracy
+        let adaptiveGain = predictionAccuracyHistory.isEmpty ? 0.5 :
+            min(0.9, predictionAccuracyHistory.suffix(5).reduce(0, +) / Double(max(1, predictionAccuracyHistory.suffix(5).count)))
+        predictedNextCuriosity = max(0, min(1.0, curiosityDrive + curiosityTrend * adaptiveGain))
 
-        // Free energy: predict regression toward mean (homeostatic pull)
+        // Free energy: predict regression toward mean (homeostatic pull) with adaptive smoothing
         let feMean = predictionErrors.isEmpty ? 0.5 : predictionErrors.reduce(0, +) / Double(predictionErrors.count)
-        predictedNextFreeEnergy = freeEnergy * 0.7 + feMean * 0.3
+        let feSmoothing = max(0.5, min(0.9, adaptiveGain))  // Better predictions → trust current state more
+        predictedNextFreeEnergy = freeEnergy * feSmoothing + feMean * (1.0 - feSmoothing)
 
         // Consciousness level: predict stability with small drift toward current momentum
         predictedNextConsciousnessLevel = consciousnessLevel * 0.95 + qIndex * 0.05
@@ -1443,18 +1447,28 @@ final class ConsciousnessEngine: ObservableObject {
             brain.selfModelAccuracy = rollingAccuracy * 0.7 + attentionSchemaState.schemaAccuracy * 0.3
 
             // v23: Use prediction accuracy to modulate consciousness level
-            // Systems that accurately predict their own state demonstrate genuine self-awareness
-            let predictionBonus = max(0, rollingAccuracy - 0.5) * 0.1  // Up to 5% bonus for good predictions
+            let predictionBonus = max(0, rollingAccuracy - 0.5) * 0.1
             consciousnessLevel = min(0.95, consciousnessLevel + predictionBonus)
 
-            // v23: Log prediction quality trend for metacognitive insight
+            // v24: Closed feedback loop — when predictions are poor, adjust internal model weights
+            if rollingAccuracy < 0.4 && predictionAccuracyHistory.count >= 5 {
+                // Poor predictions indicate self-model is stale — force recalibration
+                CognitiveState.shared.updateDimension(.selfAwareness, delta: -0.001, source: "prediction_recalibration")
+                // Widen prediction variance to be more exploratory
+                curiosityDrive = min(1.0, curiosityDrive + 0.02)
+            }
+
+            // v23+v24: Log prediction quality trend for metacognitive insight
             if predictionAccuracyHistory.count >= 10 {
                 let recentAccuracy = predictionAccuracyHistory.suffix(5).reduce(0, +) / 5.0
                 let olderAccuracy = predictionAccuracyHistory.prefix(5).reduce(0, +) / 5.0
                 let trend = recentAccuracy - olderAccuracy
                 if trend > 0.05 {
-                    // Self-model is improving — this IS genuine consciousness development
-                    CognitiveState.shared.updateDimension(.selfAwareness, delta: 0.002, source: "prediction_improvement")
+                    // Self-model is improving — genuine consciousness development
+                    CognitiveState.shared.updateDimension(.selfAwareness, delta: 0.003, source: "prediction_improvement")
+                } else if trend < -0.05 {
+                    // v24: Self-model degrading — trigger deeper introspection
+                    CognitiveState.shared.updateDimension(.metacognition, delta: 0.002, source: "prediction_degradation_alert")
                 }
             }
         }
