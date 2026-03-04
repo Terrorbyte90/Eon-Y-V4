@@ -78,6 +78,25 @@ final class EchoStateNetwork: ObservableObject {
         }
     }
 
+    // MARK: - Paus/återuppta (används av ChatOrchestrator för att frigöra CPU)
+
+    private var isPaused: Bool = false
+    private var savedState: [Double]?
+
+    /// Pausar ESN — sparar tillståndet så att det kan återupptas exakt
+    func setPaused(_ paused: Bool) {
+        if paused && !isPaused {
+            savedState = state  // Spara exakt tillstånd
+            isPaused = true
+        } else if !paused && isPaused {
+            if let saved = savedState {
+                state = saved   // Återställ exakt tillstånd
+            }
+            isPaused = false
+            savedState = nil
+        }
+    }
+
     // MARK: - Initiera reservoarvikter (gles, skalad till spektralradie)
 
     private func initReservoir() {
@@ -124,6 +143,7 @@ final class EchoStateNetwork: ObservableObject {
 
     /// Kör ett tidssteg. Kan ta extern input (t.ex. sensorisk data) eller köra spontant.
     func tick(externalInput: [Double]? = nil, arousal: Double = 0.5) {
+        guard !isPaused else { return }  // Pausad av ChatOrchestrator
         if tickBuffer.count != N { tickBuffer = [Double](repeating: 0, count: N) }
         if inputBuffer.count != N { inputBuffer = [Double](repeating: 0, count: N) }
 

@@ -80,6 +80,23 @@ final class OscillatorBank: ObservableObject {
         }
     }
 
+    // MARK: - Paus/lågenergiläge (används av ChatOrchestrator för att frigöra CPU)
+
+    private var isLowPower: Bool = false
+    private var savedCouplingStrength: Double = 0
+
+    /// Sätter oscillatorbanken i lågenergiläge — sänker uppdateringskostnaden
+    func setLowPowerMode(_ enabled: Bool) {
+        if enabled && !isLowPower {
+            savedCouplingStrength = couplingStrength
+            couplingStrength *= 0.3  // Sänk koppling → mindre beräkning
+            isLowPower = true
+        } else if !enabled && isLowPower {
+            couplingStrength = savedCouplingStrength  // Återställ exakt
+            isLowPower = false
+        }
+    }
+
     // MARK: - Tick — stega oscillatorerna framåt
 
     /// Kör ett tidssteg av Kuramoto-modellen.
