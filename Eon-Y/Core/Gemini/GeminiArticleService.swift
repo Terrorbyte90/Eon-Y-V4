@@ -112,7 +112,7 @@ final class GeminiArticleService: ObservableObject {
         var counts: [String: Int] = [:]
         for cat in categories { counts[cat] = 0 }
         for article in articles {
-            if counts[article.domain] != nil { counts[article.domain]! += 1 }
+            counts[article.domain, default: 0] += 1
         }
         return counts.min(by: { $0.value < $1.value })?.key ?? categories.first ?? "Historia"
     }

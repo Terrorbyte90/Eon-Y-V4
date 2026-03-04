@@ -37,9 +37,9 @@ struct SettingsView: View {
     @State private var bertStatus = ""
     @State private var gptStatus = ""
 
-    let personalities = ["Standard", "Torr", "Varm", "Formell", "Lekfull"]
-    let cognitiveModes = ["Djup", "Balanserat", "Snabbt"]
-    let proactiveIntervals = ["Dag", "Vecka", "Aldrig"]
+    let personalities = ["Standard", "Torr", "Varm", "Formell", "Lekfull", "Filosofisk", "Poetisk", "Analytisk", "Humoristisk", "Empatisk"]
+    let cognitiveModes = ["Djup", "Balanserat", "Snabbt", "Utforskande", "Fokuserat", "Kreativt"]
+    let proactiveIntervals = ["Timme", "Dag", "Vecka", "Månad", "Aldrig", "Anpassat"]
     let articleIntervalOptions = [15, 30, 60, 120, 240, 480]
 
     var body: some View {

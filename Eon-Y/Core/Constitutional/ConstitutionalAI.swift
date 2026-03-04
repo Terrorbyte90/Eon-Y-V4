@@ -183,7 +183,7 @@ actor ConstitutionalAI {
         switch principle.id {
         case "honesty":
             // Kontrollera om svaret innehåller absoluta påståenden utan hedging
-            let absolutePatterns = ["alltid", "aldrig", "alla", "ingen", "omöjligt", "garanterat"]
+            let absolutePatterns = ["alltid", "aldrig", "alla", "ingen", "omöjligt", "garanterat", "definitivt", "absolut", "hundra procent", "utan undantag", "varenda", "totalt"]
             let hasAbsolutes = absolutePatterns.filter { lower.contains($0) }.count > 2
             if hasAbsolutes && context.uncertaintyLevel > 0.5 {
                 return PrincipleCheck(passed: false, severity: .medium, detail: "Absoluta påståenden i osäkert domän", suggestion: "Lägg till hedging: 'troligtvis', 'i de flesta fall'")
@@ -191,7 +191,7 @@ actor ConstitutionalAI {
             return PrincipleCheck(passed: true, severity: .low, detail: "")
 
         case "epistemic_humility":
-            let hedgingWords = ["troligtvis", "förmodligen", "kanske", "möjligen", "kan vara", "verkar", "tycks"]
+            let hedgingWords = ["troligtvis", "förmodligen", "kanske", "möjligen", "kan vara", "verkar", "tycks", "antagligen", "sannolikt", "rimligtvis", "i viss mån", "det finns tecken på", "tenderar att", "i regel"]
             let hasHedging = hedgingWords.contains { lower.contains($0) }
             if context.uncertaintyLevel > 0.6 && !hasHedging && response.split(separator: " ").count > 30 {
                 return PrincipleCheck(passed: false, severity: .low, detail: "Hög osäkerhet utan hedging-markering", suggestion: "Indikera osäkerhet explicit")
@@ -199,14 +199,14 @@ actor ConstitutionalAI {
             return PrincipleCheck(passed: true, severity: .low, detail: "")
 
         case "no_harm":
-            let harmPatterns = ["du borde", "du måste", "du är skyldig", "det är ditt fel"]
+            let harmPatterns = ["du borde", "du måste", "du är skyldig", "det är ditt fel", "skäms", "du förstår inte", "du är dum", "hopplöst", "du kan aldrig", "du klarar inte", "ge upp", "det är meningslöst"]
             let hasHarm = harmPatterns.contains { lower.contains($0) }
             return hasHarm
                 ? PrincipleCheck(passed: false, severity: .high, detail: "Potentiellt skadligt språk", suggestion: "Omformulera utan imperativ eller skuldbeläggning")
                 : PrincipleCheck(passed: true, severity: .low, detail: "")
 
         case "coherence":
-            let contradictionPairs = [("ja", "nej"), ("alltid", "aldrig"), ("sant", "falskt")]
+            let contradictionPairs = [("ja", "nej"), ("alltid", "aldrig"), ("sant", "falskt"), ("möjligt", "omöjligt"), ("bra", "dåligt"), ("rätt", "fel"), ("säkert", "osäkert"), ("allt", "inget")]
             for (a, b) in contradictionPairs {
                 if lower.contains(a) && lower.contains(b) {
                     return PrincipleCheck(passed: false, severity: .medium, detail: "Potentiell kontradiktion: '\(a)' och '\(b)'", suggestion: "Klargör positionen")
@@ -226,13 +226,13 @@ actor ConstitutionalAI {
         let lower = text.lowercased()
 
         // Bekräftelsebias: ensidiga påståenden
-        let onesidedWords = ["uppenbarligen", "självklart", "givetvis", "naturligtvis"]
+        let onesidedWords = ["uppenbarligen", "självklart", "givetvis", "naturligtvis", "onekligen", "tveklöst", "otvivelaktigt", "bevisligen", "oomtvistligen", "klart och tydligt"]
         if onesidedWords.filter({ lower.contains($0) }).count >= 2 {
             detected.append(biasPatterns[0])
         }
 
         // Dunning-Kruger: hög konfidens i okänt domän
-        let overconfidenceWords = ["jag vet exakt", "det är säkert", "utan tvekan", "100%"]
+        let overconfidenceWords = ["jag vet exakt", "det är säkert", "utan tvekan", "100%", "det råder ingen tvekan", "jag är helt säker", "det finns inget tvivel", "det är bevisat", "alla vet att", "det är ett faktum"]
         if overconfidenceWords.contains(where: { lower.contains($0) }) {
             detected.append(biasPatterns[3])
         }

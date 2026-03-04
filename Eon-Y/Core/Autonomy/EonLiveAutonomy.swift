@@ -1402,7 +1402,7 @@ final class EonLiveAutonomy: ObservableObject {
             let predicates = Set(facts.map { $0.predicate })
             let objects = facts.prefix(4).map { $0.object }
             if predicates.count >= 2 {
-                let avgConfidence = facts.map { $0.confidence }.reduce(0, +) / Double(facts.count)
+                let avgConfidence = facts.map { $0.confidence }.reduce(0, +) / Double(max(1, facts.count))
                 await mem.saveFact(
                     subject: facts[0].subject,
                     predicate: "sammanfattning",

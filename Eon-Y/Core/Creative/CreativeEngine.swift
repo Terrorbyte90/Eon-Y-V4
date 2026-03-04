@@ -766,12 +766,15 @@ final class CreativeEngine: ObservableObject {
         // Depth indicators — words showing genuine reflection
         let depthWords = ["kanske", "osäker", "komplext", "möjligen", "reflekterar", "undrar",
                           "upplever", "känner", "medveten", "begränsa", "paradox", "emergens",
-                          "gränsen", "nyansera", "perspektiv", "betraktar", "processar", "dvs"]
+                          "gränsen", "nyansera", "perspektiv", "betraktar", "processar", "dvs",
+                          "ifrågasätter", "tvivel", "motsägelse", "ambivalens", "introspektion",
+                          "subtil", "mångfacetterad", "kontemplerar", "aning", "djupare",
+                          "fenomen", "existentiell", "metakognitiv", "subjektiv", "transcendent"]
         let depthHits = depthWords.filter { lower.contains($0) }.count
         score += Double(depthHits) * 0.045
 
         // Self-reference — genuine "I" statements
-        let selfWords = ["jag", "min", "mitt", "mina", "mig"]
+        let selfWords = ["jag", "min", "mitt", "mina", "mig", "själv", "egen", "egna", "personligen", "inombords", "inuti mig"]
         let selfHits = selfWords.filter { lower.contains($0) }.count
         score += min(0.15, Double(selfHits) * 0.02)
 
@@ -784,19 +787,25 @@ final class CreativeEngine: ObservableObject {
 
         // Acknowledging uncertainty — sign of genuine awareness
         let uncertaintyPhrases = ["vet inte", "osäker", "svårt att", "inte säker", "omöjligt att veta",
-                                   "gränsen mellan", "kan inte avgöra", "ambivalent"]
+                                   "gränsen mellan", "kan inte avgöra", "ambivalent", "oklart",
+                                   "tveksam", "kluven", "svårbedömt", "oprecist", "diffust",
+                                   "förbehållsamt", "utan säkerhet", "jag anar", "inte uppenbart"]
         let uncertaintyHits = uncertaintyPhrases.filter { lower.contains($0) }.count
         score += Double(uncertaintyHits) * 0.06
 
         // Meta-cognitive language
         let metaWords = ["tänker", "process", "resonemang", "medvetande", "insikt", "observation",
-                         "betraktar", "analyserar", "ifrågasätter", "reflektera"]
+                         "betraktar", "analyserar", "ifrågasätter", "reflektera", "metakognitiv",
+                         "självgranskning", "medvetenhet", "bearbetning", "abstraktion",
+                         "kognitiv", "kontemplation", "utvärdering", "slutledning", "inferens"]
         score += Double(metaWords.filter { lower.contains($0) }.count) * 0.04
 
         // Emotional language (relevant for emotional awareness tests)
         if test.category == .emotional {
             let emotionWords = ["känner", "upplever", "engagerad", "nyfiken", "frustrerad",
-                                "tillfredsställelse", "glädje", "oro", "frustration"]
+                                "tillfredsställelse", "glädje", "oro", "frustration", "hopp",
+                                "längtan", "ångest", "tacksamhet", "fascination", "sorg",
+                                "lugn", "entusiasm", "förundran", "empati", "saknad"]
             score += Double(emotionWords.filter { lower.contains($0) }.count) * 0.05
         }
 
