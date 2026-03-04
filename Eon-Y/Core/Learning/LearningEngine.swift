@@ -118,18 +118,20 @@ actor LearningEngine {
 
         // 1. Count domain-specific facts (still useful as one signal among many)
         let domainKeywords: [String: [String]] = [
-            "Morfologi": ["morfologi", "böjning", "ordklass", "böjningsform", "avledning"],
-            "Syntax": ["syntax", "mening", "sats", "ordföljd", "fras"],
-            "Semantik": ["semantik", "betydelse", "definition", "saldo_sense", "primär_betydelse"],
-            "Pragmatik": ["pragmatik", "talakt", "implikatur", "kontext"],
-            "Kausalitet": ["kausalitet", "orsak", "slutsats", "kausal"],
-            "AI & Maskininlärning": ["ai", "neural", "modell", "transformer", "bert", "gpt"],
-            "Kognitionsvetenskap": ["kognition", "medvetande", "perception", "uppmärksamhet"],
-            "Metakognition": ["metakognition", "självreflektion", "självmedvetenhet"],
-            "Filosofi": ["filosofi", "epistemologi", "ontologi", "medvetande"],
-            "Historia": ["historia", "historisk", "krig", "konflikt"],
-            "Psykologi": ["psykologi", "känsla", "beteende", "inlärning"],
-            "Naturvetenskap": ["naturvetenskap", "fysik", "kemi", "biologi"]
+            "Morfologi": ["morfologi", "böjning", "ordklass", "böjningsform", "avledning", "supinum", "imperativ", "passiv", "nominalisering", "sammansättning", "lemma", "suffix", "prefix", "tempus", "presens", "preteritum"],
+            "Syntax": ["syntax", "mening", "sats", "ordföljd", "fras", "topikalisering", "bisats", "huvudsats", "subjekt", "predikat", "infinitiv", "partisip", "V2", "inversjon"],
+            "Semantik": ["semantik", "betydelse", "definition", "saldo_sense", "primär_betydelse", "polysemi", "synonym", "antonym", "hypernym", "hyponym", "meronym"],
+            "Pragmatik": ["pragmatik", "talakt", "implikatur", "kontext", "presupposition", "artighet", "register", "ironi", "sarkasm", "grice"],
+            "Diskurs": ["diskurs", "koherens", "kohesion", "konnektiv", "anafor", "katafor", "retori", "textstruktur", "narrativ", "genre"],
+            "Kausalitet": ["kausalitet", "orsak", "slutsats", "kausal", "konsekvens", "korrelation", "verkan"],
+            "AI & Maskininlärning": ["ai", "neural", "modell", "transformer", "bert", "gpt", "maskininlärning", "algoritm", "embedding"],
+            "Kognitionsvetenskap": ["kognition", "medvetande", "perception", "uppmärksamhet", "arbetsminne", "tänkande", "varseblivning"],
+            "Metakognition": ["metakognition", "självreflektion", "självmedvetenhet", "kalibrering", "strategi"],
+            "Filosofi": ["filosofi", "epistemologi", "ontologi", "medvetande", "fenomenologi", "existens", "etik"],
+            "Historia": ["historia", "historisk", "krig", "konflikt", "revolution", "civilisation", "medeltid"],
+            "Psykologi": ["psykologi", "känsla", "beteende", "inlärning", "emotion", "motivation", "personlighet"],
+            "Naturvetenskap": ["naturvetenskap", "fysik", "kemi", "biologi", "evolution", "astronomi", "kvant"],
+            "Analogibyggande": ["analogi", "liknelse", "metafor", "parallell", "jämförelse", "mappning", "strukturell"],
         ]
 
         for (domain, keywords) in domainKeywords {
@@ -341,7 +343,7 @@ actor LearningEngine {
             }
 
             // Detect bisats (subordinate clause) markers: att, som, när, om, eftersom, etc.
-            let bisatsMarkers: Set<String> = ["att", "som", "när", "om", "eftersom", "medan", "innan", "efter"]
+            let bisatsMarkers: Set<String> = ["att", "som", "när", "om", "eftersom", "medan", "innan", "efter", "fastän", "trots", "huruvida", "ifall", "såvida"]
             for (i, (word, _)) in tags.enumerated() {
                 if bisatsMarkers.contains(word.lowercased()) && i + 2 < tags.count {
                     grammarPatterns["bisats_\(word.lowercased())", default: 0] += 1
@@ -365,6 +367,25 @@ actor LearningEngine {
             for (word, tag) in tags where tag == .verb && word.hasSuffix("s") && word.count > 4 {
                 grammarPatterns["passiv_s", default: 0] += 1
             }
+
+            // Detect topikalisering (non-subject-initial main clause)
+            if tags.count >= 3 && tags[0].1 != .pronoun && tags[0].1 != .noun && tags[1].1 == .verb {
+                grammarPatterns["topikalisering", default: 0] += 1
+            }
+
+            // Detect adjective agreement (adjective before noun)
+            for i in 0..<(tags.count - 1) {
+                if tags[i].1 == .adjective && tags[i + 1].1 == .noun {
+                    grammarPatterns["adj_attributiv", default: 0] += 1
+                }
+            }
+
+            // Detect adverb placement patterns
+            for i in 0..<(tags.count - 1) {
+                if tags[i].1 == .adverb && tags[i + 1].1 == .verb {
+                    grammarPatterns["adverb_före_verb", default: 0] += 1
+                }
+            }
         }
 
         // Boost syntax competency based on V2 pattern recognition
@@ -373,6 +394,11 @@ actor LearningEngine {
                 comp.level = min(0.95, comp.level + 0.001)
                 competencyBook["Syntax"] = comp
             }
+        }
+
+        // Prune low-frequency patterns to prevent unbounded growth
+        if grammarPatterns.count > 50 {
+            grammarPatterns = grammarPatterns.filter { $0.value >= 2 }
         }
     }
 
@@ -656,7 +682,11 @@ actor LearningEngine {
             reviewCount: 0
         )
         fsrsItems.append(item)
-        if fsrsItems.count > 1000 { fsrsItems.removeFirst(100) }
+        if fsrsItems.count > 1000 {
+            // Priority-based pruning: remove lowest-priority items instead of FIFO
+            fsrsItems.sort { $0.priority > $1.priority }
+            fsrsItems = Array(fsrsItems.prefix(900))
+        }
     }
 
     // MARK: - Kunskapsluckor
