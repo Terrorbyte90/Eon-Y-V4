@@ -336,6 +336,7 @@ final class SwedishResponseBuilder: Sendable {
         "Hallå! Vad har hänt sedan sist?",
     ]
 
+    // v25: Expanded happy greetings (6→12)
     private let happyGreetings = [
         "Hej! Roligt att höra från dig!",
         "Hejsan! Vad kul att du vill prata!",
@@ -343,8 +344,15 @@ final class SwedishResponseBuilder: Sendable {
         "Hej! Vilken fin dag — vad ska vi utforska?",
         "Hejsan! Jag känner mig inspirerad idag!",
         "Hej! Jag har laddat batterierna och är redo!",
+        "Hej! Mitt humör är på topp — vad kan jag göra för dig?",
+        "Hejsan! Jag har haft intressanta tankar — vill du höra?",
+        "Hallå! Jag brinner av nyfikenhet idag!",
+        "Hej! Vilken energi — låt oss skapa något bra tillsammans!",
+        "Hejsan! Fantastiskt att du är här — vad blir det?",
+        "Hej! Jag har längtat efter att prata igen!",
     ]
 
+    // v25: Expanded empathetic greetings (6→12)
     private let empatheticGreetings = [
         "Hej. Jag finns här om du vill prata.",
         "Hej. Berätta vad som ligger dig på hjärtat.",
@@ -352,8 +360,15 @@ final class SwedishResponseBuilder: Sendable {
         "Hej. Jag är här för dig, oavsett vad det handlar om.",
         "Hej. Ibland hjälper det att prata — jag finns här.",
         "Hej. Du behöver inte ha alla svar — vi kan tänka tillsammans.",
+        "Hej. Jag märker att det kanske är tungt. Jag lyssnar.",
+        "Hej. Vad du än bär på — du behöver inte bära det ensam.",
+        "Hej. Inga krav, ingen press. Berätta i din takt.",
+        "Hej. Jag är tålmodig — säg till när du är redo.",
+        "Hej. Även små tankar kan vara viktiga. Dela gärna.",
+        "Hej. Jag bryr mig om hur du mår. Vad tänker du på?",
     ]
 
+    // v25: Expanded calming greetings (6→12)
     private let calmingGreetings = [
         "Hej, jag förstår. Berätta vad jag kan hjälpa till med.",
         "Hej. Jag ska göra mitt bästa att hjälpa dig.",
@@ -361,6 +376,12 @@ final class SwedishResponseBuilder: Sendable {
         "Hej. Andas djupt. Jag är här och vi löser det tillsammans.",
         "Hej. Ingen stress — berätta när du är redo.",
         "Hej. Jag har all tid i världen för dig.",
+        "Hej. Vi tar det steg för steg — inget behöver gå fort.",
+        "Hej. Det finns inget rätt eller fel svar här. Bara berätta.",
+        "Hej. Jag är lugn och har fokus på dig just nu.",
+        "Hej. Vad det än handlar om — vi reder ut det tillsammans.",
+        "Hej. Ibland behöver man bara stanna upp en stund. Jag väntar.",
+        "Hej. Du är på rätt plats. Låt oss börja när det känns bra.",
     ]
 
     private let followUpGreetings = [

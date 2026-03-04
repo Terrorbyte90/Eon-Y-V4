@@ -227,7 +227,12 @@ struct ProfileRootView: View {
     var sessionSummaryCard: some View {
         GlassCard(tint: Color(hex: "#38BDF8")) {
             VStack(alignment: .leading, spacing: 12) {
-                PanelHeader(icon: "clock.badge.checkmark.fill", title: "Sessionsöversikt", color: Color(hex: "#38BDF8")) { EmptyView() }
+                // v25: Replace EmptyView with session status indicator
+                PanelHeader(icon: "clock.badge.checkmark.fill", title: "Sessionsöversikt", color: Color(hex: "#38BDF8")) {
+                    Text("S\(userProfile.totalSessions)")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#38BDF8").opacity(0.6))
+                }
 
                 HStack(spacing: 0) {
                     ProfileStatItem(value: "\(userProfile.totalSessions)", label: "Sessioner", color: Color(hex: "#38BDF8"))
@@ -258,7 +263,13 @@ struct ProfileRootView: View {
     var relationshipCard: some View {
         GlassCard(tint: Color(hex: "#EC4899")) {
             VStack(alignment: .leading, spacing: 12) {
-                PanelHeader(icon: "heart.text.square.fill", title: "Eons relation till dig", color: Color(hex: "#EC4899")) { EmptyView() }
+                // v25: Replace EmptyView with relationship depth indicator
+                PanelHeader(icon: "heart.text.square.fill", title: "Eons relation till dig", color: Color(hex: "#EC4899")) {
+                    let depth = min(1.0, Double(userProfile.totalConversations) / 50.0)
+                    Text("\(Int(depth * 100))%")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#EC4899").opacity(0.6))
+                }
 
                 let depth = min(1.0, Double(userProfile.totalConversations) / 50.0)
                 let trust = min(1.0, depth * 0.6 + userProfile.communicationStyle.directnessPreference * 0.4)
@@ -428,7 +439,12 @@ struct CommunicationProfileView: View {
     var body: some View {
         GlassCard(tint: Color(hex: "#A78BFA")) {
             VStack(alignment: .leading, spacing: 12) {
-                PanelHeader(icon: "person.wave.2.fill", title: "Kommunikationsprofil", color: Color(hex: "#A78BFA")) { EmptyView() }
+                // v25: Replace EmptyView with communication style label
+                PanelHeader(icon: "person.wave.2.fill", title: "Kommunikationsprofil", color: Color(hex: "#A78BFA")) {
+                    Text("Profil")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(Color(hex: "#A78BFA").opacity(0.6))
+                }
 
                 ForEach(bars, id: \.0) { label, value, desc in
                     HStack(spacing: 10) {
@@ -472,7 +488,12 @@ struct InterestRadarCard: View {
     var body: some View {
         GlassCard(tint: accentColor) {
             VStack(alignment: .leading, spacing: 14) {
-                PanelHeader(icon: "chart.bar.xaxis", title: "Intressen & Aktivitet", color: accentColor) { EmptyView() }
+                // v25: Replace EmptyView with conversation count badge
+                PanelHeader(icon: "chart.bar.xaxis", title: "Intressen & Aktivitet", color: accentColor) {
+                    Text("\(conversations)")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(accentColor.opacity(0.6))
+                }
 
                 // Aktivitetsöversikt
                 HStack(spacing: 0) {
@@ -555,7 +576,12 @@ struct ProfileMemoryTimeline: View {
     var body: some View {
         GlassCard(tint: Color(hex: "#FBBF24")) {
             VStack(alignment: .leading, spacing: 12) {
-                PanelHeader(icon: "sparkles", title: "Eons minnen om dig", color: Color(hex: "#FBBF24")) { EmptyView() }
+                // v25: Replace EmptyView with memory count badge
+                PanelHeader(icon: "sparkles", title: "Eons minnen om dig", color: Color(hex: "#FBBF24")) {
+                    Text("\(memories.count)")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#FBBF24").opacity(0.6))
+                }
 
                 if memories.isEmpty {
                     Text("Eon lär känna dig. Minnen byggs upp under konversationer.")

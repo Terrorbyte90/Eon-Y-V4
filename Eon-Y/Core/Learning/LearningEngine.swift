@@ -973,6 +973,9 @@ actor LearningEngine {
                 competency.lastStudied = Date()
                 competencyBook[domain] = competency
                 UserDefaults.standard.set(competency.level, forKey: "competency_\(domain)")
+
+                // v25: Track learning velocity for adaptive scheduling
+                trackLearningVelocity(domain: domain, delta: delta)
             }
         }
 
@@ -986,11 +989,18 @@ actor LearningEngine {
             errorPatterns[topic, default: 0] += 1
             let errorCount = errorPatterns[topic] ?? 1
             if errorCount >= 3 {
-                // Chronic error: boost all FSRS items in this topic's difficulty
+                // Chronic error: boost all FSRS items in this topic's difficulty + review sooner
+                let now = Date()
                 for i in 0..<fsrsItems.count {
                     if fsrsItems[i].topic.contains(topic.prefix(15)) {
                         fsrsItems[i].difficulty = min(0.95, fsrsItems[i].difficulty + 0.05)
-                        fsrsItems[i].interval = max(1, fsrsItems[i].interval / 2)  // Review sooner
+                        // v25: Fix — FSRSItem has no interval; halve remaining time until due instead
+                        let remaining = fsrsItems[i].dueDate.timeIntervalSince(now)
+                        if remaining > 0 {
+                            fsrsItems[i].dueDate = now.addingTimeInterval(remaining / 2.0)
+                        } else {
+                            fsrsItems[i].dueDate = now  // Already overdue — review immediately
+                        }
                     }
                 }
             }
@@ -1033,6 +1043,45 @@ actor LearningEngine {
             let sorted = errorPatterns.sorted { $0.value < $1.value }
             errorPatterns = Dictionary(uniqueKeysWithValues: Array(sorted.suffix(50)))
         }
+    }
+
+    // MARK: - v25: Adaptive Learning Velocity
+    // Tracks learning speed per domain — fast learners get harder material sooner,
+    // slow learners get more repetition and simpler breakdowns.
+
+    private var learningVelocity: [String: [Double]] = [:]  // Domain → recent deltas
+
+    private func trackLearningVelocity(domain: String, delta: Double) {
+        learningVelocity[domain, default: []].append(delta)
+        if learningVelocity[domain]!.count > 20 {
+            learningVelocity[domain]!.removeFirst()
+        }
+    }
+
+    /// Returns learning speed for a domain: >0.02 = fast, <0.005 = slow
+    func domainLearningSpeed(_ domain: String) -> Double {
+        guard let history = learningVelocity[domain], history.count >= 3 else { return 0.01 }
+        return history.suffix(10).reduce(0, +) / Double(history.suffix(10).count)
+    }
+
+    /// v25: Smart study priority — combines FSRS due date, domain weakness, and error history
+    func prioritizedStudyQueue() -> [(topic: String, domain: String, urgency: Double)] {
+        let now = Date()
+        var queue: [(topic: String, domain: String, urgency: Double)] = []
+
+        for item in fsrsItems {
+            let overdueFactor = max(0, now.timeIntervalSince(item.dueDate) / 3600.0) // hours overdue
+            let difficultyFactor = item.difficulty
+            let domainLevel = competencyBook[item.domain ?? ""]?.level ?? 0.3
+            let errorBoost = Double(errorPatterns[item.topic] ?? 0) * 0.1
+            let urgency = overdueFactor * 0.4 + difficultyFactor * 0.3 + (1.0 - domainLevel) * 0.2 + errorBoost * 0.1
+
+            if urgency > 0.1 {
+                queue.append((topic: item.topic, domain: item.domain ?? "Okänt", urgency: urgency))
+            }
+        }
+
+        return queue.sorted { $0.urgency > $1.urgency }
     }
 
     // MARK: - Statistik
