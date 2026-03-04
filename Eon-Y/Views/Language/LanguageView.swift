@@ -122,7 +122,7 @@ struct LanguageView: View {
                     Text("Nivå \(String(format: "%.0f%%", brain.overallLanguageLevel * 100))")
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(accentColor.opacity(0.5))
-                    Text("\(brain.vocabularySize) noder")
+                    Text("\(brain.vocabularySize) ord")
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(Color(hex: "#38BDF8").opacity(0.5))
                     Text("\(brain.idiomKnowledge) idiom")
@@ -179,7 +179,7 @@ struct LanguageView: View {
             // Hero stats row
             HStack(spacing: 8) {
                 langStatBox(label: "Språknivå", value: String(format: "%.0f%%", brain.overallLanguageLevel * 100), color: accentColor)
-                langStatBox(label: "Kunskapsnoder", value: "\(brain.vocabularySize)", color: Color(hex: "#38BDF8"))
+                langStatBox(label: "Ordförråd", value: "\(brain.vocabularySize)", color: Color(hex: "#38BDF8"))
                 langStatBox(label: "Idiom", value: "\(brain.idiomKnowledge)", color: Color(hex: "#FBBF24"))
                 langStatBox(label: "Samtal", value: "\(brain.conversationCount)", color: Color(hex: "#EC4899"))
             }
@@ -346,6 +346,46 @@ struct LanguageView: View {
                 }
             }
 
+            // v16: Language growth metrics
+            GlassCard(tint: accentColor) {
+                VStack(alignment: .leading, spacing: 10) {
+                    PanelHeader(icon: "chart.line.uptrend.xyaxis", title: "Tillväxtmått", color: accentColor) { EmptyView() }
+
+                    HStack(spacing: 12) {
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.1f%%", brain.languageGrowthRate))
+                                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                                .foregroundStyle(brain.languageGrowthRate > 0 ? Color(hex: "#34D399") : .white.opacity(0.4))
+                            Text("Tillväxttakt")
+                                .font(.system(size: 9, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        VStack(spacing: 4) {
+                            Text(String(format: "%.0f%%", brain.sentenceComplexity * 100))
+                                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#A78BFA"))
+                            Text("Meningskomplexitet")
+                                .font(.system(size: 9, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        VStack(spacing: 4) {
+                            Text("\(brain.vocabularySize)")
+                                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#38BDF8"))
+                            Text("Ordförråd")
+                                .font(.system(size: 9, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.4))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
             // Learning cycle info
             GlassCard(tint: Color(hex: "#3B82F6")) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -356,6 +396,7 @@ struct LanguageView: View {
                         ("Domäninteraktion", "Inlärning i en domän accelererar relaterade domäner"),
                         ("Kunskapsluckor", "Systemet identifierar och fyller automatiskt luckor"),
                         ("Metatänkande", "Varje konversation ger feedback till inlärningsprocessen"),
+                        ("Morfologiträning", "Analyserar och lagrar ordformer från konversationer"),
                     ]
                     ForEach(facts, id: \.0) { title, desc in
                         HStack(alignment: .top, spacing: 8) {

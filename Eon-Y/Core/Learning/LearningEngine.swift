@@ -43,10 +43,19 @@ actor LearningEngine {
         }
     }
 
-    // v3 Claude Edition: Improved competency sync with logarithmic scaling
-    // and FSRS review bonuses so competency actually grows over time
+    // v16: Real competency measurement — combines fact knowledge, FSRS mastery,
+    // conversation performance, and active language testing (not just fact counts)
+    private var wordsAnalyzed: Set<String> = []           // Swedish words we've morphologically analyzed
+    private var correctMorphologyTests: Int = 0           // How many morphology tests passed
+    private var totalMorphologyTests: Int = 0
+    private var successfulConversations: Int = 0          // Conversations with confidence > 0.6
+    private var totalConversations: Int = 0
+    private var uniqueSwedishWords: Set<String> = []      // Actual Swedish vocabulary
+
     func syncCompetenciesFromDatabase() async {
         let memory = PersistentMemoryStore.shared
+
+        // 1. Count domain-specific facts (still useful as one signal among many)
         let domainKeywords: [String: [String]] = [
             "Morfologi": ["morfologi", "böjning", "ordklass", "böjningsform", "avledning"],
             "Syntax": ["syntax", "mening", "sats", "ordföljd", "fras"],
@@ -68,34 +77,74 @@ actor LearningEngine {
             for keyword in keywords {
                 let facts = await memory.searchFacts(query: keyword, limit: 30)
                 totalFacts += facts.count
-                for fact in facts {
-                    uniqueSubjects.insert(fact.subject)
-                }
+                for fact in facts { uniqueSubjects.insert(fact.subject) }
             }
 
-            // Logarithmic scaling: many facts = high competency, diminishing returns
-            // This naturally grows as more facts are added to the database
-            let factScore = totalFacts > 0 ? min(0.70, 0.10 * log2(Double(totalFacts) + 1)) : 0.0
+            // Knowledge score: logarithmic from facts (30% weight)
+            let factScore = totalFacts > 0 ? min(0.30, 0.06 * log2(Double(totalFacts) + 1)) : 0.0
 
-            // Diversity bonus: knowing many different subjects in a domain matters
-            let diversityBonus = uniqueSubjects.count > 0 ? min(0.15, 0.03 * log2(Double(uniqueSubjects.count) + 1)) : 0.0
-
-            // FSRS study bonus: active study drives competency
+            // FSRS mastery score: active study (25% weight)
             let domainFSRSItems = fsrsItems.filter { $0.domain == domain }
             let reviewedItems = domainFSRSItems.filter { $0.reviewCount > 0 }
-            let fsrsBonus = min(0.10, Double(reviewedItems.count) * 0.01)
+            let avgStability = reviewedItems.isEmpty ? 0.0 :
+                reviewedItems.reduce(0.0) { $0 + $1.stability } / Double(reviewedItems.count)
+            let fsrsScore = min(0.25, avgStability * 0.05 + Double(reviewedItems.count) * 0.015)
 
-            let newLevel = min(0.90, factScore + diversityBonus + fsrsBonus)
-            if var comp = competencyBook[domain] {
-                // Ratchet: competency can only increase
-                // Plus gradual growth bonus if recently studied
-                let recentlyStudied = comp.lastStudied.timeIntervalSinceNow > -3600
-                let growthBonus = recentlyStudied ? 0.003 : 0.0
-                comp.level = min(0.95, max(comp.level, newLevel) + growthBonus)
-                competencyBook[domain] = comp
-                UserDefaults.standard.set(comp.level, forKey: "competency_\(domain)")
+            // Conversation performance score: how well we use this domain (25% weight)
+            let convScore: Double
+            if totalConversations > 0 {
+                convScore = min(0.25, Double(successfulConversations) / Double(totalConversations) * 0.25)
+            } else {
+                convScore = 0.0
+            }
+
+            // Language-specific bonus: morphology test accuracy (20% weight for language domains)
+            let langBonus: Double
+            if ["Morfologi", "Syntax", "Semantik", "Pragmatik", "Diskurs"].contains(domain) {
+                if totalMorphologyTests > 0 {
+                    let accuracy = Double(correctMorphologyTests) / Double(totalMorphologyTests)
+                    langBonus = min(0.20, accuracy * 0.20)
+                } else {
+                    langBonus = 0.0
+                }
+                // Vocabulary size bonus for language domains
+                let vocabBonus = min(0.05, Double(uniqueSwedishWords.count) / 5000.0 * 0.05)
+                let newLevel = min(0.95, factScore + fsrsScore + convScore + langBonus + vocabBonus)
+                if var comp = competencyBook[domain] {
+                    let recentlyStudied = comp.lastStudied.timeIntervalSinceNow > -3600
+                    let growthBonus = recentlyStudied ? 0.003 : 0.0
+                    comp.level = min(0.95, max(comp.level, newLevel) + growthBonus)
+                    competencyBook[domain] = comp
+                    UserDefaults.standard.set(comp.level, forKey: "competency_\(domain)")
+                }
+            } else {
+                let newLevel = min(0.90, factScore + fsrsScore + convScore)
+                if var comp = competencyBook[domain] {
+                    let recentlyStudied = comp.lastStudied.timeIntervalSinceNow > -3600
+                    let growthBonus = recentlyStudied ? 0.003 : 0.0
+                    comp.level = min(0.95, max(comp.level, newLevel) + growthBonus)
+                    competencyBook[domain] = comp
+                    UserDefaults.standard.set(comp.level, forKey: "competency_\(domain)")
+                }
             }
         }
+    }
+
+    // v16: Record morphology test result (called from EonLiveAutonomy)
+    func recordMorphologyTest(word: String, passed: Bool) {
+        totalMorphologyTests += 1
+        if passed { correctMorphologyTests += 1 }
+        wordsAnalyzed.insert(word.lowercased())
+    }
+
+    // v16: Record a Swedish word in actual vocabulary
+    func recordSwedishWord(_ word: String) {
+        uniqueSwedishWords.insert(word.lowercased())
+    }
+
+    // v16: Get actual Swedish vocabulary count (not knowledge node count)
+    func swedishVocabularyCount() -> Int {
+        uniqueSwedishWords.count
     }
 
     // MARK: - Domain Interaction Matrix

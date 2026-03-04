@@ -304,7 +304,9 @@ final class EonBrain: ObservableObject {
         }
     }
 
-    // v15: Sync language development metrics from LearningEngine
+    // v16: Sync language development metrics from LearningEngine
+    private var previousLanguageLevel: Double = 0.05
+
     private func syncLanguageMetrics() async {
         let learning = LearningEngine.shared
         let snapshot = await learning.competencySnapshot()
@@ -317,20 +319,29 @@ final class EonBrain: ObservableObject {
             default: break
             }
         }
-        self.overallLanguageLevel = await learning.overallCompetencyLevel()
-        self.vocabularySize = await self.memory.knowledgeNodeCount()
+        let newOverall = await learning.overallCompetencyLevel()
 
-        // Language growth rate — based on recent competency changes
-        let langDomains = snapshot.filter { ["Morfologi", "Syntax", "Semantik", "Pragmatik", "Diskurs"].contains($0.domain) }
-        let avgLevel = langDomains.isEmpty ? 0.0 : langDomains.reduce(0.0) { $0 + $1.level } / Double(langDomains.count)
-        let prevLevel = self.overallLanguageLevel
-        self.languageGrowthRate = max(0, (avgLevel - prevLevel) * 100)
+        // v16: Vocabulary = actual Swedish words, not knowledge nodes
+        self.vocabularySize = await learning.swedishVocabularyCount()
+
+        // Language growth rate — compare to previous overall level
+        self.languageGrowthRate = max(0, (newOverall - self.previousLanguageLevel) * 100)
+        self.previousLanguageLevel = newOverall
+        self.overallLanguageLevel = newOverall
 
         // Update language phase from EonLiveAutonomy
         self.languagePhaseActive = EonLiveAutonomy.shared.currentPhase == .language
 
         // Idiom count from SwedishLanguageCore
-        self.idiomKnowledge = 50 // SwedishLanguageCore has ~50 idioms hardcoded
+        self.idiomKnowledge = 50
+
+        // v16: Compute real phiValue from oscillator metrics instead of hardcoded
+        let osc = OscillatorBank.shared
+        let plv = osc.phaseLockingValue(module1: 0, module2: 1, band: 4)  // gamma PLV between modules
+        let kR = osc.orderParameters[4]                                     // gamma coherence
+        let lz = osc.lzComplexity()
+        // Phi-proxy = integration (PLV + Kuramoto) balanced by complexity (LZ)
+        self.phiValue = min(0.95, (plv * 0.35 + kR * 0.35 + lz * 0.30))
     }
 
     // v15: Append to language log (called from engines)
@@ -370,6 +381,19 @@ final class EonBrain: ObservableObject {
                     await MainActor.run {
                         self.lastCleanedResponse = response.response
                         self.confidence = response.confidence
+                    }
+                    // v16: Feed conversation result into learning engine
+                    await LearningEngine.shared.metaLearnFromConversation(
+                        userMessage: userMessage,
+                        eonResponse: response.response,
+                        feedback: response.confidence
+                    )
+                    // v16: Record words from conversation for vocabulary tracking
+                    let words = (userMessage + " " + response.response)
+                        .components(separatedBy: .whitespacesAndNewlines)
+                        .filter { $0.count > 3 }
+                    for word in words {
+                        await LearningEngine.shared.recordSwedishWord(word)
                     }
                 } catch {
                     continuation.yield("Förlåt, något gick fel: \(error.localizedDescription)")

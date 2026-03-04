@@ -89,12 +89,14 @@ final class SleepConsolidationEngine: ObservableObject {
         guard !isAsleep, !isPaused else { return }
         totalAwakeTicks += 1
 
-        // Sömnbehov ökar med tid och kognitiv aktivitet
-        let pressureIncrease = 0.0005 + cognitiveActivity * 0.001
+        // v16: Faster pressure accumulation — sleep should occur within ~20-30 min
+        // Base: 0.003/tick + activity-scaled. At 30s ticks, threshold 0.7 ≈ 233 ticks ≈ ~117 min
+        // With average activity 0.5: 0.003 + 0.003 = 0.006/tick → 117 ticks → ~58 min
+        let pressureIncrease = 0.003 + cognitiveActivity * 0.003
         sleepPressure = min(1.0, sleepPressure + pressureIncrease)
 
         // Synaptisk last ökar under vakenhet (Hebbsk plasticitet ackumuleras)
-        let loadIncrease = cognitiveActivity * 0.0003
+        let loadIncrease = cognitiveActivity * 0.001
         synapticLoad = min(1.0, synapticLoad + loadIncrease)
     }
 

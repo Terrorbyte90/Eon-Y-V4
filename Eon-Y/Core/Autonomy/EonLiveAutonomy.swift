@@ -548,57 +548,118 @@ final class EonLiveAutonomy: ObservableObject {
         CognitionLogger.shared.append(text: langLine.text, type: "SPRÅK")
     }
 
-    // v15: Morphology training — practice Swedish word forms
+    // v16: Morphology training — practice Swedish word forms and STORE results
     private func runMorphologyTraining(brain: EonBrain) async {
         let swedish = SwedishLanguageCore.shared
+        let learning = LearningEngine.shared
 
         // Pick words from recent conversations to analyze morphologically
         let recentFacts = await PersistentMemoryStore.shared.searchFacts(query: "", limit: 10)
         var analyzedCount = 0
+        var storedMorphemes = 0
 
         for fact in recentFacts.prefix(5) {
-            let words = fact.subject.components(separatedBy: .whitespaces)
+            let words = fact.subject.components(separatedBy: .whitespaces) +
+                        fact.object.components(separatedBy: .whitespaces)
             for word in words where word.count > 3 && !morphologyCacheSet.contains(word.lowercased()) {
                 let analysis = await swedish.analyze(word)
                 morphologyCacheSet.insert(word.lowercased())
                 analyzedCount += 1
 
-                if !analysis.morphemes.isEmpty {
+                // v16: Record word in vocabulary tracker
+                await learning.recordSwedishWord(word)
+
+                // v16: Validate morphology and record test result
+                let hasMorphemes = !analysis.morphemes.isEmpty
+                await learning.recordMorphologyTest(word: word, passed: hasMorphemes)
+
+                if hasMorphemes {
+                    storedMorphemes += analysis.morphemes.count
                     brain.appendLanguageLog("Morfologi: '\(word)' → \(analysis.morphemes.count) morfem, register: \(analysis.register.rawValue)")
+
+                    // v16: Store morphological analysis as fact for future reference
+                    let morphDesc = analysis.morphemes.map { $0.form }.joined(separator: "+")
+                    await PersistentMemoryStore.shared.saveFact(
+                        subject: word,
+                        predicate: "morfologisk_analys",
+                        object: morphDesc,
+                        confidence: 0.85,
+                        source: "morphology_training"
+                    )
+
+                    // v16: Add FSRS item for morphologically interesting words
+                    if analysis.morphemes.count >= 2 {
+                        await learning.addFSRSItem(
+                            topic: "\(word): \(morphDesc)",
+                            domain: "Morfologi",
+                            initialDifficulty: min(0.8, Double(analysis.morphemes.count) * 0.2)
+                        )
+                    }
+                }
+
+                // Also record disambiguations as semantic knowledge
+                for disamb in analysis.disambiguations {
+                    await learning.recordSwedishWord(disamb.word)
+                    await PersistentMemoryStore.shared.saveFact(
+                        subject: disamb.word,
+                        predicate: "primär_betydelse",
+                        object: disamb.selectedSense.definition,
+                        confidence: Double(disamb.selectedSense.confidence),
+                        source: "wsd_training"
+                    )
                 }
             }
         }
 
         if analyzedCount > 0 {
-            brain.appendLanguageLog("Morfologiträning: \(analyzedCount) nya ord analyserade")
+            brain.appendLanguageLog("Morfologiträning: \(analyzedCount) ord, \(storedMorphemes) morfem lagrade")
             let state = CognitiveState.shared
-            state.update(dimension: .language, delta: 0.002, source: "MorphologyTraining")
+            state.update(dimension: .language, delta: 0.003 * Double(min(analyzedCount, 5)), source: "MorphologyTraining")
         }
     }
 
-    // v15: Assess sentence complexity from recent outputs
+    // v16: Assess sentence complexity from actual conversation outputs (not keyword search)
     private func runSentenceComplexityCheck(brain: EonBrain) async {
-        let recentConversations = await PersistentMemoryStore.shared.searchFacts(query: "svar", limit: 5)
+        // v16: Use actual recent conversations, not facts containing "svar"
+        let recentHistory = await PersistentMemoryStore.shared.getRecentConversation(limit: 20)
+        let eonResponses = recentHistory.filter { $0.role == "assistant" }
+
         var totalComplexity: Double = 0
         var count = 0
+        var totalUniqueWords: Set<String> = []
 
-        for fact in recentConversations {
-            let text = fact.object
-            let words = text.components(separatedBy: .whitespaces)
-            let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?"))
-            let avgWordsPerSentence = sentences.isEmpty ? 0.0 : Double(words.count) / Double(max(1, sentences.count))
+        for response in eonResponses.prefix(10) {
+            let text = response.content
+            let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+            let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?")).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let avgWordsPerSentence = sentences.isEmpty ? 0.0 : Double(words.count) / Double(sentences.count)
             let uniqueWords = Set(words.map { $0.lowercased() })
             let lexicalDiversity = words.isEmpty ? 0.0 : Double(uniqueWords.count) / Double(words.count)
+            totalUniqueWords.formUnion(uniqueWords)
 
-            // Complexity = f(sentence length, lexical diversity)
-            let complexity = min(1.0, (avgWordsPerSentence / 20.0) * 0.5 + lexicalDiversity * 0.5)
+            // v16: Richer complexity metric
+            let lengthScore = min(1.0, avgWordsPerSentence / 15.0) * 0.35
+            let diversityScore = lexicalDiversity * 0.35
+            let depthScore = min(1.0, Double(sentences.count) / 5.0) * 0.30
+            let complexity = min(1.0, lengthScore + diversityScore + depthScore)
             totalComplexity += complexity
             count += 1
+
+            // Record all words as vocabulary
+            for word in uniqueWords where word.count > 2 {
+                await LearningEngine.shared.recordSwedishWord(word)
+            }
         }
 
         if count > 0 {
             brain.sentenceComplexity = totalComplexity / Double(count)
-            brain.appendLanguageLog("Meningskomplexitet uppdaterad: \(String(format: "%.0f%%", brain.sentenceComplexity * 100))")
+            brain.appendLanguageLog("Meningskomplexitet: \(String(format: "%.0f%%", brain.sentenceComplexity * 100)), unika ord i senaste svar: \(totalUniqueWords.count)")
+
+            // Update syntax competency based on sentence quality
+            let state = CognitiveState.shared
+            if brain.sentenceComplexity > 0.5 {
+                state.update(dimension: .language, delta: 0.002, source: "SentenceComplexity")
+            }
         }
     }
 

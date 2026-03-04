@@ -264,9 +264,13 @@ struct UnifiedLogView: View {
     }
 
     private func copyAllLogs() {
+        let langLog = languageLines.map { $0.text }.joined(separator: "\n")
         let all = """
 === EON KOGNITIONSLOGG ===
 \(CognitionLogger.shared.readAll())
+
+=== EON SPRÅKLOGG ===
+\(langLog)
 
 === EON DIAGNOSTIK ===
 \(ResourceDiagnosticsLogger.shared.readAll())

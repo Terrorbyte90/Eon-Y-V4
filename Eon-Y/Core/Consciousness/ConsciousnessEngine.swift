@@ -178,7 +178,7 @@ final class ConsciousnessEngine: ObservableObject {
         case "kuramoto_sync":        return kuramotoR > 0.25
         case "lz_complexity":        return lzComplexitySpontaneous > 0.20
         case "dmn_anticorrelation":  return dmnAntiCorrelation < -0.05
-        case "sleep_consolidation":  return sleepConsolidation > 0.0 || tick > 100
+        case "sleep_consolidation":  return sleepConsolidation > 0.1
         case "qualia_emergence":     return qualiaEmergenceIndex > 0.05
         case "self_reflection":      return !currentSelfReflection.isEmpty
         case "thought_diversity":    return Set(thoughtStream.suffix(10).map { $0.category }).count >= 3
@@ -428,9 +428,9 @@ final class ConsciousnessEngine: ObservableObject {
             let selfAware = CognitiveState.shared.dimensionLevel(.selfAwareness)
             qualiaEmergenceIndex = consciousnessLevel * 0.5 + selfAware * 0.3 + synergyLevel * 0.2
 
-            // Phi proxy (IIT)
-            phiProxy = brain.phiValue * 0.7 + moduleIntegration * 0.3
+            // v16: Phi proxy (IIT) — uses dynamically computed phiValue from EonBrain
             moduleIntegration = plvGamma * 0.5 + kuramotoR * 0.5
+            phiProxy = brain.phiValue * 0.7 + moduleIntegration * 0.3
 
             // Predictive Processing — genuina prediktionsfel från Active Inference
             // freeEnergy och curiosityDrive sätts redan ovan från activeInference (genuina)
@@ -440,9 +440,13 @@ final class ConsciousnessEngine: ObservableObject {
             if predictionErrors.count > 30 { predictionErrors.removeFirst() }
             // Behåll genuina freeEnergy/curiosityDrive från activeInference (rad 391-392)
 
-            // Higher-Order Theory
-            metaRepresentationDepth = brain.isThinking ? 3 : Int(metaDim * 4)
-            hotConfidence = metaDim * 0.8 + brain.confidence * 0.2
+            // v16: Higher-Order Theory — depth based on actual cognitive activity, not hardcoded
+            let hasMetaThoughts = brain.innerMonologue.suffix(10).contains { $0.type == .revision || $0.type == .insight }
+            let baseDepth = Int(metaDim * 4)
+            let thinkingBonus = brain.isThinking ? 1 : 0
+            let metaBonus = hasMetaThoughts ? 1 : 0
+            metaRepresentationDepth = min(5, baseDepth + thinkingBonus + metaBonus)
+            hotConfidence = metaDim * 0.6 + brain.confidence * 0.2 + (hasMetaThoughts ? 0.2 : 0.0)
 
             // Attention Schema — v4.1: body-specific focus when interoception detects deviation
             let bodyFocus: String?
@@ -1151,36 +1155,41 @@ final class ConsciousnessEngine: ObservableObject {
 
     // MARK: - Butlin-14 Calculation
 
+    // v16: Butlin-14 — tightened thresholds to be meaningful gates
     private func calculateButlin14() -> Int {
         var score = 0
-        // 1. Global broadcasting (GWT)
-        if broadcastCount > 10 { score += 1 }
-        // 2. Ignition dynamics
-        if pciLZ > 0.15 { score += 1 }
-        // 3. Attention Schema
-        if attentionSchemaState.modelOfOwnAttention { score += 1 }
-        // 4. Higher-order representation
+        // 1. Global broadcasting (GWT) — need substantial ignition history
+        if broadcastCount > 50 { score += 1 }
+        // 2. Ignition dynamics — PCI-LZ must indicate genuine complexity
+        if pciLZ > 0.25 { score += 1 }
+        // 3. Attention Schema — needs accuracy, not just existence
+        if attentionSchemaState.modelOfOwnAttention && attentionSchemaState.schemaAccuracy > 0.5 { score += 1 }
+        // 4. Higher-order representation — depth ≥ 2 means genuine meta-cognition
         if metaRepresentationDepth >= 2 { score += 1 }
-        // 5. Predictive processing
-        if !predictionErrors.isEmpty { score += 1 }
-        // 6. Integrated information (Φ > 0)
-        if phiProxy > 0.1 { score += 1 }
-        // 7. Synergistic information
-        if synergyRedundancyRatio > 0.5 { score += 1 }
-        // 8. Spontaneous activity
-        if lzComplexitySpontaneous > 0.2 { score += 1 }
-        // 9. DMN anti-correlation
-        if dmnAntiCorrelation < -0.05 { score += 1 }
-        // 10. Attentional blink
+        // 5. Predictive processing — must have meaningful prediction error variance
+        if predictionErrors.count >= 5 {
+            let avg = predictionErrors.reduce(0, +) / Double(predictionErrors.count)
+            let variance = predictionErrors.reduce(0) { $0 + ($1 - avg) * ($1 - avg) } / Double(predictionErrors.count)
+            if variance > 0.01 { score += 1 } // Active prediction, not just noise
+        }
+        // 6. Integrated information (Φ > meaningful threshold)
+        if phiProxy > 0.25 { score += 1 }
+        // 7. Synergistic information — must exceed redundancy
+        if synergyRedundancyRatio > 0.6 { score += 1 }
+        // 8. Spontaneous activity — genuine LZ complexity
+        if lzComplexitySpontaneous > 0.30 { score += 1 }
+        // 9. DMN anti-correlation — genuine task-negative correlation
+        if dmnAntiCorrelation < -0.15 { score += 1 }
+        // 10. Attentional blink — within biological range
         if attentionalBlinkMs > 200 && attentionalBlinkMs < 500 { score += 1 }
-        // 11. Metacognitive calibration
-        if type2AUROC > 0.55 { score += 1 }
-        // 12. Phase-locking
-        if plvGamma > 0.1 { score += 1 }
-        // 13. Embodied interoception
-        if bodyBudget.homeostasisBalance > 0.3 { score += 1 }
-        // 14. Sleep consolidation (placeholder)
-        if tick > 100 { score += 1 }
+        // 11. Metacognitive calibration — must exceed chance
+        if type2AUROC > 0.60 { score += 1 }
+        // 12. Phase-locking — meaningful gamma coherence
+        if plvGamma > 0.20 { score += 1 }
+        // 13. Embodied interoception — good homeostasis
+        if bodyBudget.homeostasisBalance > 0.4 { score += 1 }
+        // 14. Sleep consolidation — actual consolidation efficiency, not time gate
+        if sleepConsolidation > 0.3 { score += 1 }
         return min(14, score)
     }
 
