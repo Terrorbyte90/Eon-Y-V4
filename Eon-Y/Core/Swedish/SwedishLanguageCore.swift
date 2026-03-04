@@ -939,6 +939,15 @@ struct SwedishAnalysis {
     var clauses: [ClauseSegment] = []
     var anaphoraResolutions: [AnaphoraResolution] = []
 
+    // v16: Empty analysis for fast-path (greetings etc)
+    static let empty = SwedishAnalysis(
+        originalText: "",
+        morphemes: [],
+        disambiguations: [],
+        register: .neutral,
+        modalParticles: []
+    )
+
     /// Quick summary for prompt building
     var analysisSummary: String {
         var parts: [String] = []

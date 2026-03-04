@@ -325,20 +325,28 @@ actor CognitiveCycleEngine {
         onToken: @escaping (String) async -> Void
     ) async throws -> CognitiveCycleResult {
 
-        // v15: Start deadline clock — 5 second budget
+        // v16: Start deadline clock — 5 second budget with enforced checkpoints
         let deadline = ContinuousClock.now + .seconds(5)
 
         var context = CognitiveCycleContext(userInput: input, sessionId: sessionId)
+
+        // v16: Single intent detection up front — reused everywhere (eliminates duplicate)
+        let intent = detectIntent(input: input, history: await memory.getRecentConversation(limit: 5))
+        let complexity = ComplexityEstimator.estimate(input: input, intent: intent)
 
         // Steg 0 (v11): InputAnalyzer — deep question understanding BEFORE anything else
         let inputAnalysis = InputAnalyzer.analyze(input: input)
         context.inputAnalysis = inputAnalysis
         await onMonologue(MonologueLine(text: "Frågeanalys: \(inputAnalysis.questionSummary) [ämne: \(inputAnalysis.coreTopic)]", type: .thought))
 
-        // Steg 1: Morfologianalys (Pelare A)
+        // Steg 1: Morfologianalys (Pelare A) — skip for greetings
         await onStepUpdate(.morphology, .active)
-        await onMonologue(MonologueLine(text: "Analyserar morfologi i '\(input.prefix(40))'...", type: .thought))
-        let analysis = await swedish.analyze(input)
+        let analysis: SwedishAnalysis
+        if intent == .greeting {
+            analysis = SwedishAnalysis.empty
+        } else {
+            analysis = await swedish.analyze(input)
+        }
         context.morphemes = analysis.morphemes
         context.disambiguations = analysis.disambiguations
         await onStepUpdate(.morphology, .completed)
@@ -352,123 +360,129 @@ actor CognitiveCycleEngine {
         context.register = analysis.register
         await onStepUpdate(.wsd, .completed)
 
-        // Steg 3: Minneshämtning (v11: search by input + core topic + named entities)
+        // v16: Compute BERT embedding ONCE — reused for memory ranking, entity extraction, Q-A check
+        let inputEmb: [Float]
+        let bertAvailable: Bool
+        if complexity.skipBERT {
+            inputEmb = []
+            bertAvailable = false
+            await onMonologue(MonologueLine(text: "Enkel fråga — BERT hoppas", type: .thought))
+        } else {
+            inputEmb = await neuralEngine.embed(input)
+            bertAvailable = !inputEmb.allSatisfy({ $0 == 0 })
+        }
+
+        // Steg 3: Minneshämtning (v16: deadline-aware, reduced BERT calls)
         await onStepUpdate(.memoryRetrieval, .active)
         await onMonologue(MonologueLine(text: "Söker i minnet efter '\(inputAnalysis.coreTopic)'...", type: .memory))
-        // v11: Search with original input AND core topic for better recall
-        var rawMemories = await memory.searchConversations(query: input, limit: 30)
-        // Also search by core topic and named entities for broader coverage
+        var rawMemories = await memory.searchConversations(query: input, limit: 20)
         if inputAnalysis.coreTopic.count > 2 {
-            let topicMemories = await memory.searchConversations(query: inputAnalysis.coreTopic, limit: 10)
+            let topicMemories = await memory.searchConversations(query: inputAnalysis.coreTopic, limit: 8)
             for mem in topicMemories where !rawMemories.contains(where: { $0.id == mem.id }) {
                 rawMemories.append(mem)
             }
         }
         for entity in inputAnalysis.namedEntities.prefix(2) {
-            let entityMemories = await memory.searchConversations(query: entity, limit: 5)
+            let entityMemories = await memory.searchConversations(query: entity, limit: 3)
             for mem in entityMemories where !rawMemories.contains(where: { $0.id == mem.id }) {
                 rawMemories.append(mem)
             }
         }
-        // v8: BERT semantic ranking with temporal decay
-        let inputEmb = await neuralEngine.embed(input)
-        let bertAvailable = !inputEmb.allSatisfy({ $0 == 0 })
+        // v16: BERT ranking — limit to top 8 memories (down from all), use cached inputEmb
         if bertAvailable && rawMemories.count > 2 {
             let now = Date()
+            // v16: Pre-filter by keyword relevance before BERT (saves ~50% BERT calls)
+            let inputWords = Set(input.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 3 })
+            let preFiltered = rawMemories.sorted { mem1, mem2 in
+                let words1 = Set(mem1.content.lowercased().prefix(200).components(separatedBy: .whitespacesAndNewlines))
+                let words2 = Set(mem2.content.lowercased().prefix(200).components(separatedBy: .whitespacesAndNewlines))
+                return inputWords.intersection(words1).count > inputWords.intersection(words2).count
+            }
             var scored: [(record: ConversationRecord, score: Double)] = []
-            for mem in rawMemories {
-                let memEmb = await neuralEngine.embed(String(mem.content.prefix(300)))
+            for mem in preFiltered.prefix(8) {  // v16: Max 8 BERT calls (was unlimited)
+                let memEmb = await neuralEngine.embed(String(mem.content.prefix(200)))
                 let rawSim = Double(await neuralEngine.cosineSimilarity(inputEmb, memEmb))
-                // v8: Temporal decay — recent memories weighted higher (24h half-life)
                 let ageHours = now.timeIntervalSince(mem.date) / 3600.0
                 let recencyBoost = exp(-ageHours / 24.0) * 0.15
                 scored.append((mem, rawSim + recencyBoost))
             }
             context.retrievedMemories = scored.sorted { $0.score > $1.score }
-                .filter { $0.score > 0.20 }  // v8: relevance threshold
-                .prefix(6).map { $0.record }
+                .filter { $0.score > 0.20 }
+                .prefix(5).map { $0.record }
         } else {
             context.retrievedMemories = Array(rawMemories.prefix(5))
         }
-        // Hämta senaste konversationsturerna för kontextmedvetenhet
-        let recentHistory = await memory.getRecentConversation(limit: 10)
+        let recentHistory = await memory.getRecentConversation(limit: 8)
         context.conversationHistory = recentHistory
         if !context.retrievedMemories.isEmpty {
             let rankMethod = bertAvailable ? "BERT+tidsvikt" : "nyckelord"
-            await onMonologue(MonologueLine(text: "Hittade \(context.retrievedMemories.count) relevanta minnen (\(rankMethod)), \(recentHistory.count) historikturer laddade", type: .memory))
+            await onMonologue(MonologueLine(text: "Hittade \(context.retrievedMemories.count) relevanta minnen (\(rankMethod))", type: .memory))
         }
         await onStepUpdate(.memoryRetrieval, .completed)
 
-        // Steg 4: Kausalitetsgraf (Pelare B) + BERT-embedding
-        // ComplexityEstimator avgör om BERT ska hoppas (enkla frågor sparar ANE-resurser)
+        // v16: Deadline check — if we've spent > 2s on steps 0-3, skip some enrichment
+        let afterMemoryTime = deadline - .now
+
+        // Steg 4: BERT-embedding (v16: reuse cached inputEmb, no duplicate)
         await onStepUpdate(.causalGraph, .active)
-        let earlyIntent = detectIntent(input: input, history: context.conversationHistory)
-        let earlyComplexity = ComplexityEstimator.estimate(input: input, intent: earlyIntent)
-        if earlyComplexity.skipBERT {
-            await onMonologue(MonologueLine(text: "Enkel fråga — BERT-embedding hoppas för att spara ANE", type: .thought))
-            context.inputEmbedding = []
-            context.entities = []
-        } else {
-            let inputEmbedding = await neuralEngine.embed(input)
-            context.inputEmbedding = inputEmbedding
-            let isModelLoaded = await neuralEngine.isLoaded
-            if isModelLoaded {
-                await onMonologue(MonologueLine(text: "KB-BERT: 768-dim embedding beräknad för semantisk sökning", type: .thought))
-            }
+        context.inputEmbedding = inputEmb  // v16: Reuse from step 3
+        if bertAvailable {
             let entities = await neuralEngine.extractEntities(from: input)
             context.entities = entities
             if !entities.isEmpty {
-                await onMonologue(MonologueLine(text: "Entiteter extraherade: \(entities.map { $0.text }.joined(separator: ", "))", type: .thought))
+                await onMonologue(MonologueLine(text: "Entiteter: \(entities.map { $0.text }.joined(separator: ", "))", type: .thought))
             }
+        } else {
+            context.entities = []
         }
         await onStepUpdate(.causalGraph, .completed)
 
         // Steg 5: Global Workspace + Medvetandetillstånd + SelfKnowledge
         await onStepUpdate(.globalWorkspace, .active)
-        await onMonologue(MonologueLine(text: "Global Workspace aktiveras — koalition bildas...", type: .thought))
 
-        // Samla medvetandetillstånd från alla 6 teorier
+        // v16: Consciousness context + SelfKnowledge in parallel (conceptually)
         let consciousness = await gatherConsciousnessContext()
         context.consciousness = consciousness
         if !consciousness.promptDescription.isEmpty {
-            await onMonologue(MonologueLine(text: "Medvetandekontext: \(String(consciousness.promptDescription.prefix(120)))", type: .insight))
+            await onMonologue(MonologueLine(text: "Medvetandekontext: \(String(consciousness.promptDescription.prefix(100)))", type: .insight))
         }
 
-        // v8: Consciousness narration — express what the system is experiencing
-        if let narration = consciousnessNarration(consciousness) {
-            await onMonologue(narration)
+        // v16: Skip consciousness narration if tight on time
+        if afterMemoryTime > .seconds(3) {
+            if let narration = consciousnessNarration(consciousness) {
+                await onMonologue(narration)
+            }
         }
 
-        // v13: SpecialisedChat — SelfKnowledge + QuestionProfile + ConversationTracker
+        // v13: SpecialisedChat — SelfKnowledge + QuestionProfile
         let selfKnowledge = await SelfKnowledgeBase.shared.queryRelevant(input: input, consciousness: consciousness)
         context.selfKnowledge = selfKnowledge
         if selfKnowledge.isRelevant {
-            await onMonologue(MonologueLine(text: "Självkunskap aktiverad: \(selfKnowledge.relevantFacts.count) fakta om mig själv", type: .insight))
+            await onMonologue(MonologueLine(text: "Självkunskap: \(selfKnowledge.relevantFacts.count) fakta om mig", type: .insight))
         }
-        // QuestionProfile for richer understanding
-        let questionProfile = await QuestionUnderstandingAgent().analyze(
-            input: input,
-            conversationHistory: context.conversationHistory
-        )
-        context.questionProfile = questionProfile
-        // ConversationTracker — resolve context
-        let _ = await ConversationTracker.shared.resolveContext(
-            input: input,
-            history: context.conversationHistory
-        )
+        // v16: QuestionProfile — only for non-trivial queries (saves ~100ms)
+        if !complexity.isSimple() {
+            let questionProfile = await QuestionUnderstandingAgent().analyze(
+                input: input,
+                conversationHistory: context.conversationHistory
+            )
+            context.questionProfile = questionProfile
+            // ConversationTracker
+            let _ = await ConversationTracker.shared.resolveContext(
+                input: input,
+                history: context.conversationHistory
+            )
+        }
 
         let prompt = await buildPrompt(input: input, context: context)
         context.prompt = prompt
         await onStepUpdate(.globalWorkspace, .completed)
 
-        // Steg 6: Intent detection + ComplexityEstimator + Chain-of-Thought
+        // Steg 6: Chain-of-Thought (v16: reuse intent/complexity from step 0)
         await onStepUpdate(.chainOfThought, .active)
-        let intent = detectIntent(input: input, history: context.conversationHistory)
-        let complexity = ComplexityEstimator.estimate(input: input, intent: intent)
         var (maxTokens, temperature) = generationParams(for: intent, inputLength: input.count)
 
         // Medvetandemodulerande parametrar:
-        // Hög nyfikenhet → lite högre temperatur (mer kreativt utforskande)
         if consciousness.epistemicValue > 0.6 {
             temperature = min(0.92, temperature + 0.05)
         }
@@ -540,12 +554,11 @@ actor CognitiveCycleEngine {
         }
         await onStepUpdate(.validation, .completed)
 
-        // v11: BERT Question-Answer Relevance Check (v15: skip if near deadline)
-        // Verify the response actually addresses the user's question
-        let timeForBERT = (deadline - .now) > .seconds(1.5)
+        // v16: BERT Q-A Relevance Check — reuse cached inputEmb (saves one BERT call)
+        let timeForBERT = (deadline - .now) > .seconds(1.2)
         if timeForBERT && bertAvailable && !context.generatedText.isEmpty && context.generatedText.count > 20 {
-            let questionEmb = await neuralEngine.embed(input)
-            let answerEmb = await neuralEngine.embed(String(context.generatedText.prefix(400)))
+            let questionEmb = inputEmb  // v16: Reuse cached embedding
+            let answerEmb = await neuralEngine.embed(String(context.generatedText.prefix(300)))
             let qaRelevance = Double(await neuralEngine.cosineSimilarity(questionEmb, answerEmb))
             context.relevanceScore = qaRelevance
 
