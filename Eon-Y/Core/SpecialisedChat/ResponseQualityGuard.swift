@@ -326,10 +326,16 @@ actor ResponseQualityGuard {
         case .factual, .definition:
             return swedishBuilder.buildUncertainResponse(topic: question.coreTopic)
         default:
+            // v25: Expanded fallback responses (3→8) for more varied responses
             let fallbacks = [
                 "Det är en intressant fråga om \(question.coreTopic). Jag behöver undersöka det närmare.",
                 "Jag funderar på \(question.coreTopic). Kan du ge mig lite mer kontext?",
                 "\(question.coreTopic.capitalized) — det vill jag gärna utforska mer.",
+                "Hmm, \(question.coreTopic) — låt mig tänka på det en stund.",
+                "Bra fråga! \(question.coreTopic.capitalized) har flera intressanta aspekter. Vad vill du fokusera på?",
+                "\(question.coreTopic.capitalized) är ett ämne jag gärna dyker djupare i. Var ska vi börja?",
+                "Jag har några tankar om \(question.coreTopic). Vill du att jag utvecklar?",
+                "Det finns mycket att säga om \(question.coreTopic). Ge mig en vinkel så tar vi det därifrån.",
             ]
             return fallbacks.randomElement() ?? "Jag funderar på det."
         }

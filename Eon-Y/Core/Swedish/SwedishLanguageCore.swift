@@ -208,7 +208,10 @@ actor SwedishLanguageCore {
     private func resolveAnaphora(_ text: String, morphemes: [MorphemeAnalysis]) -> [AnaphoraResolution] {
         let words = text.lowercased().components(separatedBy: .whitespacesAndNewlines)
             .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-        let pronouns: Set<String> = ["den", "det", "han", "hon", "de", "dem", "dessa", "detta"]
+        // v25: Expanded pronouns — reflexive, possessive, demonstrative, interrogative
+        let pronouns: Set<String> = ["den", "det", "han", "hon", "de", "dem", "dessa", "detta",
+                                      "sig", "sitt", "sina", "mig", "dig", "oss", "er",
+                                      "min", "din", "hans", "hennes", "deras", "vår", "ert"]
 
         // Find all nouns as potential antecedents
         let nouns = morphemes.filter { $0.pos == "noun" || $0.pos == "propernoun" }
@@ -247,9 +250,16 @@ actor SwedishLanguageCore {
     // MARK: - Register-detektion
 
     private func detectRegister(_ text: String) -> SwedishRegister {
-        let formalWords = ["emellertid", "således", "härav", "därtill", "beträffande", "avseende", "vederbörande", "härmed", "dock"]
-        let informalWords = ["typ", "liksom", "asså", "ju", "va", "grejen", "kul", "gött", "skit", "jävla", "fett", "soft"]
-        let technicalWords = ["algoritm", "implementation", "konfiguration", "parameter", "funktion", "databas", "server", "api", "framework"]
+        // v25: Doubled register detection arrays
+        let formalWords = ["emellertid", "således", "härav", "därtill", "beträffande", "avseende",
+                           "vederbörande", "härmed", "dock", "icke", "följaktligen", "ändamålsenlig",
+                           "tillförsäkra", "såtillvida", "förvisso", "annorlunda", "tvivelsutan", "oaktat"]
+        let informalWords = ["typ", "liksom", "asså", "ju", "va", "grejen", "kul", "gött", "skit",
+                             "jävla", "fett", "soft", "ba", "skitbra", "najs", "palla", "orka",
+                             "sjukt", "galen", "fyfan", "ascoolt", "sicken", "vilansen", "grabben"]
+        let technicalWords = ["algoritm", "implementation", "konfiguration", "parameter", "funktion",
+                              "databas", "server", "api", "framework", "kompilera", "instans", "modul",
+                              "protokoll", "interface", "pipeline", "arkitektur", "refaktorera", "deploy"]
 
         let lower = text.lowercased()
         let words = lower.components(separatedBy: .whitespaces)
@@ -283,6 +293,7 @@ actor SwedishLanguageCore {
     // MARK: - Modal partiklar (ju, väl, nog, visst)
 
     private func extractModalParticles(_ text: String) -> [ModalParticle] {
+        // v25: Expanded modal particles — doubled with nuanced meanings
         let particles: [(String, ModalParticle.Meaning)] = [
             ("ju", .sharedKnowledge),
             ("väl", .hedging),
@@ -294,6 +305,16 @@ actor SwedishLanguageCore {
             ("ändå", .concession),
             ("liksom", .hedging),
             ("typ", .hedging),
+            ("snarare", .concession),
+            ("förresten", .emphasis),
+            ("tydligen", .probability),
+            ("naturligtvis", .confirmation),
+            ("uppenbarligen", .confirmation),
+            ("kanske", .hedging),
+            ("möjligen", .probability),
+            ("dessvärre", .concession),
+            ("givetvis", .sharedKnowledge),
+            ("sannerligen", .emphasis),
         ]
 
         var found: [ModalParticle] = []

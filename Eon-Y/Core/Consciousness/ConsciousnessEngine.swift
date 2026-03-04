@@ -30,6 +30,11 @@ final class ConsciousnessEngine: ObservableObject {
     private var curiosityHistory: [Double] = []
     private var lastReflectiveInsightTick: Int = 0
 
+    // MARK: - v25: Prediction Confidence Bands
+    // Tracks prediction variance to know HOW uncertain predictions are.
+    // High variance = low self-knowledge, low variance = stable self-model.
+    private var predictionVarianceHistory: [Double] = []
+
     // MARK: - Medvetandeindikatorer (40+ gates från Blueprint)
     @Published var pciLZ: Double = 0.18
     @Published var type2AUROC: Double = 0.52
@@ -176,7 +181,8 @@ final class ConsciousnessEngine: ObservableObject {
         case "ast_voluntary":        return attentionSchemaState.isVoluntary
         case "hot_meta":             return metaRepresentationDepth >= 1
         case "hot_confidence":       return hotConfidence > 0.4
-        case "pp_prediction":        return !predictionErrors.isEmpty && predictionErrors.last ?? 1.0 < 0.5
+        // v25: Fix operator precedence bug — parenthesise ?? before comparison
+        case "pp_prediction":        return !predictionErrors.isEmpty && (predictionErrors.last ?? 1.0) < 0.5
         case "pp_curiosity":         return curiosityDrive > 0.3
         case "pp_free_energy":       return freeEnergy < 0.7
         case "iit_phi":              return phiProxy > 0.25
@@ -1415,6 +1421,11 @@ final class ConsciousnessEngine: ObservableObject {
 
             predictionAccuracyHistory.append(tickAccuracy)
             if predictionAccuracyHistory.count > 50 { predictionAccuracyHistory.removeFirst() }
+
+            // v25: Track prediction variance — measures self-knowledge stability
+            let errorVariance = pow(curiosityError - avgError, 2) + pow(feError - avgError, 2) + pow(clError - avgError, 2)
+            predictionVarianceHistory.append(errorVariance / 3.0)
+            if predictionVarianceHistory.count > 30 { predictionVarianceHistory.removeFirst() }
         }
 
         // 2. Make predictions for next tick based on current trends
@@ -1437,8 +1448,16 @@ final class ConsciousnessEngine: ObservableObject {
         let feSmoothing = max(0.5, min(0.9, adaptiveGain))  // Better predictions → trust current state more
         predictedNextFreeEnergy = freeEnergy * feSmoothing + feMean * (1.0 - feSmoothing)
 
-        // Consciousness level: predict stability with small drift toward current momentum
-        predictedNextConsciousnessLevel = consciousnessLevel * 0.95 + qIndex * 0.05
+        // v25: Multi-step consciousness prediction — blend Q-index trend + oscillator momentum
+        let oscMomentum = oscillators.globalSync > 0.3 ? 0.002 : -0.001
+        let consciousnessTrend: Double
+        if predictionAccuracyHistory.count >= 5 {
+            let recentAvg = predictionAccuracyHistory.suffix(5).reduce(0, +) / 5.0
+            consciousnessTrend = (recentAvg - 0.5) * 0.01  // Better predictions → slight consciousness boost
+        } else {
+            consciousnessTrend = 0
+        }
+        predictedNextConsciousnessLevel = consciousnessLevel * 0.93 + qIndex * 0.05 + oscMomentum + consciousnessTrend
 
         // 3. Update selfModelAccuracy from rolling accuracy window
         if !predictionAccuracyHistory.isEmpty {
@@ -1456,6 +1475,19 @@ final class ConsciousnessEngine: ObservableObject {
                 CognitiveState.shared.updateDimension(.selfAwareness, delta: -0.001, source: "prediction_recalibration")
                 // Widen prediction variance to be more exploratory
                 curiosityDrive = min(1.0, curiosityDrive + 0.02)
+            }
+
+            // v25: Prediction variance → self-knowledge confidence
+            // Low variance = stable self-model = genuine self-awareness signal
+            if predictionVarianceHistory.count >= 10 {
+                let recentVariance = predictionVarianceHistory.suffix(10).reduce(0, +) / 10.0
+                if recentVariance < 0.01 {
+                    // Very stable predictions — strong self-awareness signal
+                    CognitiveState.shared.updateDimension(.selfAwareness, delta: 0.002, source: "stable_self_model")
+                } else if recentVariance > 0.1 {
+                    // Wildly inconsistent — self-model is unreliable
+                    CognitiveState.shared.updateDimension(.selfAwareness, delta: -0.001, source: "unstable_self_model")
+                }
             }
 
             // v23+v24: Log prediction quality trend for metacognitive insight

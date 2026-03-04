@@ -249,8 +249,9 @@ actor MetacognitionCore {
             bestStrategies: best,
             worstStrategies: worst,
             totalStrategiesTracked: strategyEffectiveness.count,
-            averageEffectiveness: strategyEffectiveness.values.isEmpty ? 0.5 :
-                strategyEffectiveness.values.reduce(0, +) / Double(strategyEffectiveness.count)
+            // v25: Guard against empty dictionary division
+            averageEffectiveness: strategyEffectiveness.isEmpty ? 0.5 :
+                strategyEffectiveness.values.reduce(0, +) / Double(max(1, strategyEffectiveness.count))
         )
     }
 

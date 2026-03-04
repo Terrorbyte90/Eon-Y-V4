@@ -608,13 +608,23 @@ struct SemanticAnalysis {
         let remainder = words.dropFirst().joined(separator: " ")
 
         // Självreflektion: "om dig", "om dig själv", "om eon", "om ditt system"
-        let selfPatterns = ["om dig", "om dig själv", "om eon", "om ditt", "om din", "om dina", "om ditt system", "om dig och", "vem du är", "vad du är", "om dina tankar", "om ditt tänkande"]
+        // v25: Expanded self-reference patterns (12→24)
+        let selfPatterns = ["om dig", "om dig själv", "om eon", "om ditt", "om din", "om dina",
+                            "om ditt system", "om dig och", "vem du är", "vad du är", "om dina tankar",
+                            "om ditt tänkande", "hur du fungerar", "ditt medvetande", "din intelligens",
+                            "dina förmågor", "ditt minne", "hur du lär dig", "din personlighet",
+                            "ditt inre", "om dina känslor", "din uppfattning", "ditt resonemang",
+                            "om din utveckling"]
         let isSelf = selfPatterns.contains { remainder.contains($0) }
 
         // Användarreferens: "om mig", "om användaren"
+        // v25: Expanded user-reference patterns (11→22)
         let userPatterns = ["om mig", "om mig själv", "om användaren", "vad du vet om mig",
                             "om min", "om mitt", "mina intressen", "mina preferenser",
-                            "vad jag gillar", "mina vanor", "om mitt liv"]
+                            "vad jag gillar", "mina vanor", "om mitt liv",
+                            "vad vet du om mig", "mitt namn", "mina frågor", "min profil",
+                            "om min historia", "mina önskemål", "vad jag brukar", "mina styrkor",
+                            "mina svagheter", "hur jag skriver", "min stil", "vad jag tycker om"]
         let isUser = userPatterns.contains { remainder.contains($0) }
 
         // Extrahera kärnobjektet
@@ -788,13 +798,22 @@ struct ResponseComposer {
         if a.isImperative { return .executeCommand }
 
         // Frågor om Eon/dig som inte fångas av imperativ-analysen
+        // v25: Expanded self-question words (11→22)
         let selfQuestionWords = ["hur smart", "hur intelligent", "hur klok", "hur bra",
                                   "hur duktig", "vad kan du", "vad vet du", "hur fungerar du",
-                                  "vem är du", "vad är du", "berätta om dig"]
+                                  "vem är du", "vad är du", "berätta om dig",
+                                  "vad tänker du", "hur mår du", "hur lär du dig", "vad drömmer du om",
+                                  "har du känslor", "är du medveten", "vad tycker du om dig själv",
+                                  "hur ser du på dig", "vad är ditt mål", "hur resonerar du",
+                                  "kan du tänka"]
         if selfQuestionWords.contains(where: { input.contains($0) }) { return .selfDescribe }
 
+        // v25: Expanded greeting words (14→28)
         let greetWords = ["hej", "hallå", "tjena", "hi", "hejsan", "god morgon", "god kväll",
-                          "morsning", "god dag", "god natt", "hejhej", "tja", "hej på dig", "yo"]
+                          "morsning", "god dag", "god natt", "hejhej", "tja", "hej på dig", "yo",
+                          "tjenare", "hejsvansen", "goddag", "good morning", "hejdå", "tjo",
+                          "tjabba", "tjenis", "hejhejansen", "hälsningar", "tjosan", "hejigen",
+                          "god förmiddag", "god eftermiddag"]
         if a.tokens.count <= 4 && greetWords.contains(where: { input.contains($0) }) {
             return .greet
         }
@@ -1170,7 +1189,10 @@ struct ResponseComposer {
         let cc = ctx.cognitiveContext
 
         // Adverb som "kortfattat", "snabbt", "enkelt" är modifierare — inte topics
-        let modifiers = ["kortfattat", "snabbt", "enkelt", "kort", "tydligt", "bättre", "mer", "lite", "noggrant", "detaljerat"]
+        // v25: Expanded command modifiers (10→20)
+        let modifiers = ["kortfattat", "snabbt", "enkelt", "kort", "tydligt", "bättre", "mer", "lite",
+                         "noggrant", "detaljerat", "utförligt", "djupare", "bredare", "grundligare",
+                         "långsamt", "stegvis", "övergripande", "summariskt", "kompakt", "förenklat"]
         let isModifier = modifiers.contains(rawTarget.lowercased().trimmingCharacters(in: .whitespaces))
         let target = isModifier ? (a.nouns.first ?? topic) : rawTarget
 

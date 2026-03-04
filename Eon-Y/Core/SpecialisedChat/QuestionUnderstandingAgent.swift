@@ -309,12 +309,19 @@ actor QuestionUnderstandingAgent {
         if lower.hasPrefix("varför ") || lower.contains("varför ") { return .whyExplanation }
 
         // Lista (v14: fler mönster, inte bara prefix)
+        // v25: Expanded list prefix patterns (8→16)
         let listPrefixPatterns = ["lista ", "räkna upp", "ge exempel", "nämn ", "vilka ",
-                                    "samla ihop", "skriv upp", "redovisa "]
+                                    "samla ihop", "skriv upp", "redovisa ", "specificera ",
+                                    "upprätta ", "katalogisera ", "sortera ", "presentera ",
+                                    "identifiera ", "kartlägg ", "beskriv alla "]
         if listPrefixPatterns.contains(where: { lower.hasPrefix($0) }) { return .list }
+        // v25: Expanded list contains patterns (10→20)
         let listContainsPatterns = ["ge mig en lista", "nämn några", "ge exempel på", "vilka typer",
                                      "finns det exempel", "kan du lista", "hur många typer",
-                                     "ge mig tre", "ge mig fem", "vilka finns"]
+                                     "ge mig tre", "ge mig fem", "vilka finns",
+                                     "ge mig tio", "alla sorters", "vilka slags", "skriv en lista",
+                                     "ge mig några", "kan du nämna", "vilka kategorier",
+                                     "ge mig exempel", "alla typer av", "kan du räkna upp"]
         if listContainsPatterns.contains(where: { lower.contains($0) }) { return .list }
 
         // Ja/Nej (v14: fungerar utan frågetecken för informella frågor)
@@ -446,7 +453,9 @@ actor QuestionUnderstandingAgent {
 
     private func splitMultiPartQuestion(_ input: String, type: QuestionProfile.QuestionType) -> [QuestionProfile.QuestionPart] {
         // Dela på "och", "samt", "dessutom", eller frågetecken mitt i
-        let separators = [" och ", " samt ", " dessutom ", "? "]
+        // v25: Expanded multi-part question separators (4→10)
+        let separators = [" och ", " samt ", " dessutom ", "? ", " men också ", " plus ", " därtill ",
+                          " utöver det ", " förutom ", " vidare "]
         var parts: [String] = [input]
 
         for sep in separators {
@@ -526,9 +535,13 @@ actor QuestionUnderstandingAgent {
 
     // MARK: - Hjälpfunktioner
 
+    // v25: Expanded self-reference detection (11→22)
     private func detectSelfReference(_ lower: String) -> Bool {
         let patterns = ["vem är du", "vad är du", "om dig", "hur fungerar du", "vad kan du",
-                        "din ", "ditt ", "dina ", "du är", "är du ", "eon"]
+                        "din ", "ditt ", "dina ", "du är", "är du ", "eon",
+                        "ditt medvetande", "dina tankar", "hur mår du", "har du känslor",
+                        "är du medveten", "din intelligens", "hur tänker du",
+                        "vad drömmer du", "ditt inre", "hur lär du dig", "ditt minne"]
         return patterns.contains(where: { lower.contains($0) })
     }
 
