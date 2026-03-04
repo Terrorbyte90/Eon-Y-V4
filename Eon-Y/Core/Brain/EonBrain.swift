@@ -20,6 +20,8 @@ final class EonBrain: ObservableObject {
     @Published var confidence: Double = 0.75
     @Published var activeLoops: Set<CognitiveLoop> = []
     @Published var engineActivity: [String: Double] = [:]
+    // v12: Cleaned response after post-processing (may differ from streamed tokens)
+    @Published var lastCleanedResponse: String = ""
 
     // MARK: - Consciousness-derived live state (v6: genuine engine signals)
     @Published var isSurprised: Bool = false
@@ -309,7 +311,11 @@ final class EonBrain: ObservableObject {
                             continuation.yield(token)
                         }
                     )
-                    _ = response
+                    // v12: Store cleaned response for UI replacement
+                    await MainActor.run {
+                        self.lastCleanedResponse = response.response
+                        self.confidence = response.confidence
+                    }
                 } catch {
                     continuation.yield("Förlåt, något gick fel: \(error.localizedDescription)")
                 }
@@ -342,7 +348,11 @@ final class EonBrain: ObservableObject {
                             continuation.yield(token)
                         }
                     )
-                    _ = response
+                    // v12: Store cleaned response for UI replacement
+                    await MainActor.run {
+                        self.lastCleanedResponse = response.response
+                        self.confidence = response.confidence
+                    }
                 } catch {
                     continuation.yield("Förlåt, något gick fel i resonerande läge: \(error.localizedDescription)")
                 }

@@ -86,7 +86,7 @@ actor GptSw3Handler {
 
         for _ in 0..<maxNewTokens {
             let context = Array(inputIds.suffix(512))
-            guard let next = await predictNextToken(model: model, inputIds: context, temperature: temperature) else {
+            guard let next = await predictNextToken(model: model, inputIds: context, temperature: temperature, generated: generated) else {
                 failCount += 1
                 if failCount > 3 { break }
                 continue
@@ -108,7 +108,8 @@ actor GptSw3Handler {
         }
     }
 
-    private func predictNextToken(model: MLModel, inputIds: [Int], temperature: Float) async -> Int? {
+    // v12: predictNextToken now takes `generated` history for repetition penalty
+    private func predictNextToken(model: MLModel, inputIds: [Int], temperature: Float, generated: [Int] = []) async -> Int? {
         do {
             let seqLen = inputIds.count
             let shape: [NSNumber] = [1, NSNumber(value: seqLen)]
@@ -133,19 +134,81 @@ actor GptSw3Handler {
             let offset = (seqLen - 1) * vocabSize
             var la = [Float](repeating: 0, count: vocabSize)
             for i in 0..<vocabSize { la[i] = logits[offset + i].floatValue }
-            return sampleFromLogits(la, temperature: temperature)
+            return sampleFromLogits(la, temperature: temperature, generated: generated)
         } catch {
             print("[GPT] predictNextToken fel: \(error)")
             return nil
         }
     }
 
-    private func sampleFromLogits(_ logits: [Float], temperature: Float) -> Int {
-        var scaled = logits.map { $0 / max(temperature, 0.01) }
-        let maxVal = scaled.max() ?? 0
-        scaled = scaled.map { exp($0 - maxVal) }
-        let sum = scaled.reduce(0, +)
-        let probs = scaled.map { $0 / sum }
+    // v12: Advanced sampling with top-k, top-p, and repetition penalty
+    private func sampleFromLogits(_ logits: [Float], temperature: Float, generated: [Int] = []) -> Int {
+        var la = logits
+
+        // --- Step 1: Repetition penalty ---
+        // Penalize tokens that have already been generated (reduces repetition loops)
+        let repetitionPenalty: Float = 1.3  // >1.0 = penalize, 1.0 = no penalty
+        let recentTokens = Set(generated.suffix(100))  // Look at last 100 generated tokens
+        for tokenId in recentTokens {
+            guard tokenId >= 0 && tokenId < la.count else { continue }
+            if la[tokenId] > 0 {
+                la[tokenId] /= repetitionPenalty  // Reduce probability of repeated tokens
+            } else {
+                la[tokenId] *= repetitionPenalty  // Make negative logits more negative
+            }
+        }
+        // Extra penalty for very recently generated tokens (last 20)
+        let veryRecentTokens = Set(generated.suffix(20))
+        for tokenId in veryRecentTokens {
+            guard tokenId >= 0 && tokenId < la.count else { continue }
+            if la[tokenId] > 0 {
+                la[tokenId] /= (repetitionPenalty * 1.3)
+            } else {
+                la[tokenId] *= (repetitionPenalty * 1.3)
+            }
+        }
+
+        // --- Step 2: Temperature scaling ---
+        let temp = max(temperature, 0.01)
+        la = la.map { $0 / temp }
+
+        // --- Step 3: Top-k filtering (keep only top 40 tokens) ---
+        let topK = 40
+        // Find the top-k threshold
+        var sorted = la
+        sorted.sort(by: >)
+        let kthValue = topK < sorted.count ? sorted[topK] : sorted.last ?? 0
+        // Zero out everything below top-k
+        for i in 0..<la.count {
+            if la[i] < kthValue { la[i] = -Float.infinity }
+        }
+
+        // --- Step 4: Top-p (nucleus) filtering (keep tokens summing to 90% probability) ---
+        let topP: Float = 0.90
+        let maxVal = la.max() ?? 0
+        var probs = la.map { exp($0 - maxVal) }
+        let probSum = probs.reduce(0, +)
+        probs = probs.map { $0 / probSum }
+
+        // Sort indices by probability descending
+        let sortedIndices = probs.enumerated().sorted { $0.element > $1.element }.map { $0.offset }
+        var cumProb: Float = 0
+        var allowedSet = Set<Int>()
+        for idx in sortedIndices {
+            cumProb += probs[idx]
+            allowedSet.insert(idx)
+            if cumProb >= topP { break }
+        }
+        // Zero out non-nucleus tokens
+        for i in 0..<probs.count {
+            if !allowedSet.contains(i) { probs[i] = 0 }
+        }
+
+        // --- Step 5: Re-normalize and sample ---
+        let finalSum = probs.reduce(0, +)
+        guard finalSum > 0 else { return probs.count - 1 }
+        probs = probs.map { $0 / finalSum }
+
         var cum: Float = 0
         let r = Float.random(in: 0..<1)
         for (i, p) in probs.enumerated() {
