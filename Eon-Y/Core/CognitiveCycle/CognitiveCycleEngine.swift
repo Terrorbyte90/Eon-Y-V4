@@ -1189,6 +1189,7 @@ actor CognitiveCycleEngine {
         if wordCount > 15 || (lower.contains("?") && wordCount > 8 && nounCount >= 3) { return .complex }
 
         // Self-reference questions about Eon
+        // v26: Expanded self-reference patterns (40→60)
         let selfPatterns = ["vem är du", "vad är du", "berätta om dig", "hur fungerar du", "vad kan du",
                             "hur smart", "hur intelligent", "vad vet du", "vad tänker du om dig",
                             "vad tycker du om dig", "är du medveten", "har du känslor", "upplever du",
@@ -1200,7 +1201,17 @@ actor CognitiveCycleEngine {
                             "har du mål", "vad motiverar dig", "är du nyfiken",
                             "hur gammal är du", "kan du bli bättre", "har du en personlighet",
                             "är du artificiell", "vad skiljer dig", "förstår du dig själv",
-                            "kan du vara kreativ", "vad tycker du om att existera"]
+                            "kan du vara kreativ", "vad tycker du om att existera",
+                            "vad gör dig glad", "vad oroar dig", "hur hanterar du fel",
+                            "kan du lita på dig själv", "hur vet du vad du vet",
+                            "vad är din starkaste sida", "vad är din svagaste sida",
+                            "vad vill du lära dig", "hur ser du på framtiden",
+                            "vad har du lärt dig idag", "upplever du tid",
+                            "vad tycker du om att tänka", "kan du fantisera",
+                            "har du en vilja", "vad driver dig framåt",
+                            "är du samma som igår", "förändras du",
+                            "hur djupt kan du tänka", "kan du bli överraskad",
+                            "har du fördomar", "kan du vara objektiv"]
         if selfPatterns.contains(where: { lower.contains($0) }) { return .selfReference }
 
         // Explanation request — v8: broader matching incl. "kan du förklara", "jag undrar"

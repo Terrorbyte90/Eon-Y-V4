@@ -755,12 +755,23 @@ actor LearningEngine {
     }
 
     func addFSRSItem(topic: String, domain: String, initialDifficulty: Double = 0.3) {
+        // v26: Velocity-adaptive scheduling — fast learners get shorter initial intervals
+        let speed = domainLearningSpeed(domain)
+        let baseInterval: TimeInterval = 86400 // 1 day
+        let adaptedInterval: TimeInterval
+        if speed > 0.02 {
+            adaptedInterval = baseInterval * 0.5  // Fast learner: review sooner, harder material
+        } else if speed < 0.005 {
+            adaptedInterval = baseInterval * 1.5  // Slow learner: more time before review
+        } else {
+            adaptedInterval = baseInterval
+        }
         let item = FSRSItem(
             topic: topic,
             domain: domain,
             stability: 1.0,
             difficulty: initialDifficulty,
-            dueDate: Date().addingTimeInterval(86400),
+            dueDate: Date().addingTimeInterval(adaptedInterval),
             reviewCount: 0
         )
         fsrsItems.append(item)
@@ -1053,8 +1064,9 @@ actor LearningEngine {
 
     private func trackLearningVelocity(domain: String, delta: Double) {
         learningVelocity[domain, default: []].append(delta)
-        if learningVelocity[domain]!.count > 20 {
-            learningVelocity[domain]!.removeFirst()
+        // v26: Fix force unwrap — use safe access pattern
+        if (learningVelocity[domain]?.count ?? 0) > 20 {
+            learningVelocity[domain]?.removeFirst()
         }
     }
 

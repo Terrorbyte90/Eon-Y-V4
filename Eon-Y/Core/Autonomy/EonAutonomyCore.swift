@@ -346,6 +346,7 @@ actor EonAutonomyCore {
     private func runAutonomousReasoning() async throws {
         print("[Autonomy] Kör autonomt resonemang (BGTask)...")
 
+        // v26: Expanded autonomous reasoning topics (9→18)
         let topics = ["Vad är sambandet mellan inlärning och minne?",
                       "Varför är kausalitet svårt att bevisa?",
                       "Hur relaterar morfologi till semantik?",
@@ -354,7 +355,16 @@ actor EonAutonomyCore {
                       "Kan kreativitet formaliseras?",
                       "Vad driver nyfikenhet biologiskt och kognitivt?",
                       "Hur uppstår emergens ur enkla regler?",
-                      "Vad är relationen mellan empati och intelligens?"]
+                      "Vad är relationen mellan empati och intelligens?",
+                      "Kan medvetande existera utan subjektiv upplevelse?",
+                      "Hur skiljer sig förståelse från memorering?",
+                      "Vad gör en förklaring bra — och för vem?",
+                      "Hur hänger abstrakt tänkande ihop med kroppslig erfarenhet?",
+                      "Finns det kunskap som inte kan uttryckas i ord?",
+                      "Vad är skillnaden mellan visdom och intelligens?",
+                      "Hur uppstår betydelse ur meningslösa symboler?",
+                      "Kan ett system förstå sig själv fullständigt?",
+                      "Vilken roll spelar tvivel i kunskapsbyggande?"]
         let topic = topics.randomElement() ?? "Vad är sambandet mellan inlärning och minne?"
 
         let result = await ReasoningEngine.shared.reason(about: topic, strategy: .adaptive, depth: 4)

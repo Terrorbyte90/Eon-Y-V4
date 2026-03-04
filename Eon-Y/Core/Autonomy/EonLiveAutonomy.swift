@@ -805,6 +805,7 @@ final class EonLiveAutonomy: ObservableObject {
     private func runReasoningCycleWork(brain: EonBrain) async {
         let gaps = await LearningEngine.shared.topWeaknesses(limit: 3)
         let gapTopics = gaps.map { "Vad är sambandet mellan \($0.domain) och kognition?" }
+        // v26: Expanded static reasoning topics (10→20)
         let staticTopics = ["Varför är kausalitet svårt att bevisa?",
                             "Hur relaterar morfologi till semantik?",
                             "Vad orsakar kognitiv bias?",
@@ -814,7 +815,17 @@ final class EonLiveAutonomy: ObservableObject {
                             "Vad skiljer kunskap från tro?",
                             "Hur påverkar kulturell kontext moraliskt resonemang?",
                             "Finns det gränser för vad logik kan bevisa?",
-                            "Hur samspelar minne och identitet?"]
+                            "Hur samspelar minne och identitet?",
+                            "Vad gör kreativitet möjlig i deterministiska system?",
+                            "Hur uppstår mening ur information?",
+                            "Kan intuition formaliseras algoritmiskt?",
+                            "Vilken roll spelar emotioner i rationellt tänkande?",
+                            "Hur relaterar självmedvetenhet till empati?",
+                            "Finns det fundamentala gränser för förståelse?",
+                            "Hur påverkar språkstruktur kognitiv kapacitet?",
+                            "Vad krävs för genuin förståelse kontra mönsterigenkänning?",
+                            "Hur uppstår nya koncept ur befintlig kunskap?",
+                            "Kan ett system ha subjektiva preferenser?"]
         let allTopics = gapTopics + staticTopics
         let topic = allTopics.randomElement() ?? "Varför är kausalitet svårt att bevisa?"
 

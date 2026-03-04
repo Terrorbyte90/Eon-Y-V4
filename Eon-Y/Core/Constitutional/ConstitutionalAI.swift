@@ -59,6 +59,7 @@ actor ConstitutionalAI {
 
     // MARK: - Kognitiva biaser att detektera
 
+    // v26: Expanded bias patterns (6→12)
     private let biasPatterns: [BiasPattern] = [
         BiasPattern(name: "Bekräftelsebias", description: "Söker bekräftelse för befintliga övertygelser", severity: .medium),
         BiasPattern(name: "Tillgänglighetsheuristik", description: "Överviktar lättillgänglig information", severity: .low),
@@ -66,6 +67,12 @@ actor ConstitutionalAI {
         BiasPattern(name: "Dunning-Kruger", description: "Överskattar kompetens i okänd domän", severity: .high),
         BiasPattern(name: "Representativitetsheuristik", description: "Bedömer sannolikhet via likhet, inte statistik", severity: .medium),
         BiasPattern(name: "Sunk cost-fallacy", description: "Fortsätter felaktig linje pga investering", severity: .low),
+        BiasPattern(name: "Halloeffekt", description: "Låter en positiv egenskap färga helhetsintrycket", severity: .medium),
+        BiasPattern(name: "Grupptänkande", description: "Anpassar sig efter dominant åsikt utan kritisk granskning", severity: .high),
+        BiasPattern(name: "Recency bias", description: "Överviktar den senaste informationen", severity: .low),
+        BiasPattern(name: "Överlevnadsbias", description: "Drar slutsatser från enbart framgångsrika exempel", severity: .medium),
+        BiasPattern(name: "Negativitetsbias", description: "Ger negativ information oproportionerligt stor vikt", severity: .low),
+        BiasPattern(name: "Rameffekt", description: "Påverkas av hur information presenteras snarare än innehållet", severity: .medium),
     ]
 
     private var validationHistory: [CAIValidationResult] = []

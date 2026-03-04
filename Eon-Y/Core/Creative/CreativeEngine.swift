@@ -795,18 +795,29 @@ final class CreativeEngine: ObservableObject {
         score += Double(uncertaintyHits) * 0.06
 
         // Meta-cognitive language
+        // v26: Expanded meta-cognitive words (20→40)
         let metaWords = ["tänker", "process", "resonemang", "medvetande", "insikt", "observation",
                          "betraktar", "analyserar", "ifrågasätter", "reflektera", "metakognitiv",
                          "självgranskning", "medvetenhet", "bearbetning", "abstraktion",
-                         "kognitiv", "kontemplation", "utvärdering", "slutledning", "inferens"]
+                         "kognitiv", "kontemplation", "utvärdering", "slutledning", "inferens",
+                         "reflektion", "introspektiv", "begrundar", "överväger", "granskar",
+                         "bedömer", "problematiserar", "systematiserar", "kategoriserar",
+                         "syntetiserar", "dekonstruerar", "internaliserar", "konceptualiserar",
+                         "teoretiserar", "hypotiserar", "validerar", "kalibrerar",
+                         "perspektivtagande", "distansering", "omformulerar", "omvärderar"]
         score += Double(metaWords.filter { lower.contains($0) }.count) * 0.04
 
         // Emotional language (relevant for emotional awareness tests)
         if test.category == .emotional {
+            // v26: Expanded emotion words (20→40)
             let emotionWords = ["känner", "upplever", "engagerad", "nyfiken", "frustrerad",
                                 "tillfredsställelse", "glädje", "oro", "frustration", "hopp",
                                 "längtan", "ångest", "tacksamhet", "fascination", "sorg",
-                                "lugn", "entusiasm", "förundran", "empati", "saknad"]
+                                "lugn", "entusiasm", "förundran", "empati", "saknad",
+                                "beundran", "avsky", "vrede", "förvåning", "stolthet",
+                                "skuld", "skam", "medkänsla", "nostalgi", "melankoli",
+                                "eufori", "tillförsikt", "vanmakt", "hänryckning", "vemod",
+                                "otålighet", "förtröstan", "förvirring", "hängivenhet", "lättnad"]
             score += Double(emotionWords.filter { lower.contains($0) }.count) * 0.05
         }
 
