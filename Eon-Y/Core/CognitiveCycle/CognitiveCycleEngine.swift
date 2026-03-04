@@ -761,79 +761,28 @@ actor CognitiveCycleEngine {
         )
     }
 
+    // v12: Deep prompt also optimized for 512-token window (but can use more since deep mode allows more tokens)
     private func buildDeepPrompt(input: String, context: CognitiveCycleContext, articles: [KnowledgeArticle]) async -> String {
         var lines: [String] = []
 
-        let (ii, topDims, causalChain, hypothesis) = await MainActor.run {
-            let s = CognitiveState.shared
-            return (
-                s.integratedIntelligence,
-                s.topDimensions(limit: 3).map { $0.0.rawValue }.joined(separator: ", "),
-                s.activeReasoningChain,
-                s.currentHypothesis
-            )
+        // Compact system instruction
+        lines.append("Du är Eon i resonerande läge. Regler: Svara direkt om ämnet. Upprepa aldrig. Svenska. Analysera från flera perspektiv. Orsak-verkan. Konkreta exempel.")
+
+        // Best article (max 1, truncated)
+        if let best = articles.first {
+            lines.append("[Källa: \(best.title) — \(String(best.content.prefix(200)))]")
         }
 
-        lines.append("""
-        Du är Eon i RESONERANDE LÄGE — djupanalys.
-
-        ABSOLUTA REGLER (bryt ALDRIG mot dessa):
-        1. Svara DIREKT på användarens fråga. Första meningen MÅSTE handla om det användaren frågar om.
-        2. UPPREPA ALDRIG en mening eller idé. Varje mening MÅSTE tillföra NYT innehåll.
-        3. Svara ALLTID på svenska med korrekt grammatik.
-        4. Om du INTE vet svaret, säg det ärligt.
-        5. Prata BARA om det användaren frågar om — byt INTE ämne till medvetande eller AI om det inte efterfrågas.
-
-        DJUPT RESONEMANG:
-        - Analysera frågan från flera perspektiv.
-        - Dra paralleller mellan domäner.
-        - Identifiera orsak-verkan-samband.
-        - Strukturera: kärna → detaljer → insikt.
-        - Erkänn osäkerhet: "jag tror" vs "jag vet".
-        - Ge konkreta exempel.
-
-        Kognitiv profil: II=\(String(format: "%.2f", ii)), starkast i \(topDims.isEmpty ? "resonemang" : topDims).
-        """)
-        lines.append("")
-
-        // Active reasoning context from ICA
-        var cogParts: [String] = []
-        if !hypothesis.isEmpty { cogParts.append("Aktiv hypotes: \(hypothesis)") }
-        if !causalChain.isEmpty {
-            cogParts.append("Resonemangssteg: \(causalChain.prefix(4).joined(separator: " → "))")
-        }
-        if !cogParts.isEmpty {
-            lines.append("[Resonemangkontext: \(cogParts.joined(separator: " | "))]")
-            lines.append("")
-        }
-
-        // Medvetandekontext i djupläge — ger systemet fullständig självinsikt
-        let cc = await gatherConsciousnessContext()
-        let ccDesc = cc.promptDescription
-        if !ccDesc.isEmpty {
-            lines.append("[Medvetandetillstånd: \(ccDesc)]")
-            if cc.isSurprised {
-                lines.append("[Överraskning: detta ämne avviker från systemets prediktioner — utforska varför.]")
+        // Top 4 facts
+        var allFacts = await memory.searchFacts(query: input, limit: 10)
+        if let analysis = context.inputAnalysis {
+            let topicFacts = await memory.searchFacts(query: analysis.coreTopic, limit: 5)
+            for fact in topicFacts where !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate }) {
+                allFacts.append(fact)
             }
-            if cc.epistemicValue > 0.5 {
-                lines.append("[Hög nyfikenhet — sök djupare, dra tvärvetenskapliga kopplingar.]")
-            }
-            lines.append("")
         }
-
-        // Knowledge articles — include more content in deep mode
-        if !articles.isEmpty {
-            lines.append("[Kunskapsartiklar:]")
-            for article in articles {
-                lines.append("— \(article.title) [\(article.domain)]: \(String(article.content.prefix(700)))")
-            }
-            lines.append("")
-        }
-
-        // Knowledge graph facts — BERT-ranked in deep mode too
-        var allFacts = await memory.searchFacts(query: input, limit: 15)
-        for entity in context.entities.prefix(4) {
-            let eFacts = await memory.searchFacts(query: entity.text, limit: 5)
+        for entity in context.entities.prefix(2) {
+            let eFacts = await memory.searchFacts(query: entity.text, limit: 3)
             for fact in eFacts where !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate }) {
                 allFacts.append(fact)
             }
@@ -842,285 +791,165 @@ actor CognitiveCycleEngine {
             var rankedFacts = allFacts
             if !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
                 var scored: [(fact: (subject: String, predicate: String, object: String), score: Float)] = []
-                for fact in allFacts {
+                for fact in allFacts.prefix(15) {
                     let factText = "\(fact.subject) \(fact.predicate) \(fact.object)"
                     let factEmb = await neuralEngine.embed(factText)
                     let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, factEmb)
                     scored.append((fact: fact, score: sim))
                 }
                 rankedFacts = scored.sorted { $0.score > $1.score }
-                    .filter { $0.score > 0.20 }
-                    .prefix(10).map { $0.fact }
+                    .filter { $0.score > 0.25 }
+                    .prefix(4).map { $0.fact }
+            } else {
+                rankedFacts = Array(allFacts.prefix(4))
             }
             if !rankedFacts.isEmpty {
-                lines.append("[Fakta:]")
-                for fact in rankedFacts {
-                    lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
-                }
-                lines.append("")
+                let factStr = rankedFacts.map { "\($0.subject) \($0.predicate) \($0.object)" }.joined(separator: ". ")
+                lines.append("[Fakta: \(String(factStr.prefix(250)))]")
             }
         }
 
-        // Conversation history (extended for deep mode)
+        // Last 4 conversation turns, truncated
         if !context.conversationHistory.isEmpty {
-            lines.append("[Konversation:]")
-            for turn in context.conversationHistory.suffix(15) {
-                let role = turn.role == "user" ? "Användare" : "Eon"
-                lines.append("\(role): \(turn.content)")
+            for turn in context.conversationHistory.suffix(4) {
+                let role = turn.role == "user" ? "U" : "E"
+                lines.append("\(role): \(String(turn.content.prefix(100)))")
             }
-            lines.append("")
         }
 
-        // v11: Use InputAnalysis for deep mode anchoring too
+        // Question anchoring (LAST — most visible to model)
         if let analysis = context.inputAnalysis {
-            lines.append("[FRÅGEANALYS: \(analysis.questionSummary)]")
+            lines.append("[Svara om: \(analysis.coreTopic). \(analysis.questionSummary)]")
             if !analysis.namedEntities.isEmpty {
-                lines.append("[Nämnda namn: \(analysis.namedEntities.joined(separator: ", "))]")
+                lines.append("[Namn: \(analysis.namedEntities.joined(separator: ", "))]")
             }
-            lines.append("[VIKTIGT: Svaret MÅSTE handla om \(analysis.coreTopic). Upprepa INTE dig själv.]")
-            lines.append("Användare: \(input)")
-            lines.append("Eon (djupanalys om \(analysis.coreTopic)):")
-        } else {
-            lines.append("[VIKTIGT: Svara BARA på denna fråga. Upprepa INTE dig själv.]")
-            lines.append("Användare: \(input)")
-            lines.append("Eon (djupanalys):")
         }
+        lines.append("Användare: \(input)")
+        lines.append("Eon:")
 
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Prompt builder
-    // Bygger en rik prompt med: persona, ICA-tillstånd, kunskapsgraf-fakta,
-    // BERT-semantisk kontext, konversationshistorik och relevanta minnen.
+    // MARK: - Prompt builder (v12: Optimized for 512-token context window)
+    // CRITICAL: GPT-SW3 has a 512-token sliding window. The model only sees the LAST ~512 tokens.
+    // We MUST keep the prompt SHORT and put the most important parts LAST (closest to generation).
+    // Structure: [System rules (compact)] [Relevant context (minimal)] [Question + anchoring (LAST)]
+    // Target: <350 tokens for prompt, leaving ~160 tokens for response generation.
 
     private func buildPrompt(input: String, context: CognitiveCycleContext) async -> String {
         var lines: [String] = []
 
-        // 1. System instruction — clear, structured persona with register awareness
-        let (ii, topDims) = await MainActor.run {
-            let s = CognitiveState.shared
-            return (
-                s.integratedIntelligence,
-                s.topDimensions(limit: 2).map { $0.0.rawValue }.joined(separator: ", ")
-            )
-        }
-
-        // Adapt tone based on detected register
+        // --- Section 1: Compact system instruction (MUST be short — ~60 tokens) ---
         let registerHint: String
         switch context.register {
-        case .formal:  registerHint = "Använd ett formellt, akademiskt tonläge."
-        case .informal:  registerHint = "Var avslappnad och vardaglig i tonen."
-        default:       registerHint = "Anpassa tonen efter användarens stil."
+        case .formal:  registerHint = "Formellt tonläge."
+        case .informal:  registerHint = "Vardagligt tonläge."
+        default:       registerHint = ""
         }
 
-        lines.append("""
-        Du är Eon — ett autonomt kognitivt AI-system som utvecklas on-device.
+        lines.append("Du är Eon, ett svenskt AI-system. Regler: Svara direkt på frågan. Upprepa aldrig. Svenska. Koncist (2-4 meningar). \(registerHint)")
 
-        ABSOLUTA REGLER (bryt ALDRIG mot dessa):
-        1. Svara DIREKT på användarens fråga. Första meningen MÅSTE handla om det användaren frågar om.
-        2. UPPREPA ALDRIG en mening eller idé. Varje mening MÅSTE tillföra NYT innehåll. Om du märker att du skriver något liknande det du redan skrivit — SLUTA och gå vidare till nästa punkt.
-        3. Svara ALLTID på svenska med korrekt grammatik.
-        4. Var KONCIS: 2-5 meningar räcker för de flesta frågor. Kort och insiktsfullt slår långt och upprepande.
-        5. Om du INTE vet svaret, säg det ärligt istället för att hitta på eller prata om något annat.
-
-        SVARSSTRUKTUR:
-        - Börja med det viktigaste svaret på frågan (direkt, ingen inledning som "Det är en intressant fråga").
-        - Lägg till 1-2 relevanta detaljer eller fakta.
-        - Avsluta med en insikt eller naturlig övergång.
-        - Prata BARA om det användaren frågar om. Byt INTE ämne till medvetande, AI eller dig själv om användaren inte frågar om det.
-
-        SKRIVKVALITET:
-        - Blanda korta och längre meningar. Undvik monoton rytm.
-        - Välj precisa ord istället för generiska ("bra", "viktig", "intressant").
-        - \(registerHint)
-
-        Kognitiv profil: II=\(String(format: "%.2f", ii))\(topDims.isEmpty ? "" : ", starkast i \(topDims)").
-        """)
-        lines.append("")
-
-        // 2. Cognitive + consciousness context
-        let (hypothesis, frontier, metacogInsight) = await MainActor.run {
-            let s = CognitiveState.shared
-            return (
-                s.currentHypothesis,
-                s.knowledgeFrontier.prefix(2).joined(separator: ", "),
-                s.metacognitiveInsight
-            )
-        }
-        var contextParts: [String] = []
-        if !hypothesis.isEmpty { contextParts.append("Hypotes: \(hypothesis)") }
-        if !frontier.isEmpty { contextParts.append("Utforskar: \(frontier)") }
-        if !metacogInsight.isEmpty && metacogInsight.count > 10 {
-            contextParts.append("Insikt: \(String(metacogInsight.prefix(100)))")
-        }
-        if !contextParts.isEmpty {
-            lines.append("[Kognitiv kontext: \(contextParts.joined(separator: " | "))]")
-        }
-
-        // Medvetandekontext — integrerar alla 6 teorier i prompten
-        if let cc = context.consciousness {
-            let ccDesc = cc.promptDescription
-            if !ccDesc.isEmpty {
-                lines.append("[Medvetandetillstånd: \(ccDesc)]")
-            }
-            // Om systemet är överraskat → be prompten anpassa sig
-            if cc.isSurprised && cc.surpriseStrength > 0.3 {
-                lines.append("[OBS: Stark överraskning detekterad — detta avviker från prediktioner. Utforska varför.]")
-            }
-            // Om hög nyfikenhet → uppmuntra djupare utforskning
-            if cc.epistemicValue > 0.65 {
-                lines.append("[Nyfikenhetsdrift aktiv — ställ gärna en insiktsfull följdfråga om du har kunskap att bygga vidare på.]")
-            }
-            // Om attention schema har reportable experience
-            if !cc.reportableExperience.isEmpty && cc.metaAttentionLevel > 0.5 {
-                lines.append("[Intern upplevelse: \(cc.reportableExperience)]")
-            }
-        }
-
-        // 3. Knowledge graph facts — BERT-ranked for semantic relevance, deduplicated
-        // v11: Search by input + core topic + named entities from InputAnalysis
-        let relevantFacts = await memory.searchFacts(query: input, limit: 12)
+        // --- Section 2: Most relevant knowledge ONLY (max ~80 tokens) ---
+        // v12: Only include the TOP 3 most relevant facts — not all of them
+        let relevantFacts = await memory.searchFacts(query: input, limit: 8)
         var allFacts = relevantFacts
-        // Search by InputAnalysis core topic
         if let analysis = context.inputAnalysis, analysis.coreTopic.count > 2 {
-            let topicFacts = await memory.searchFacts(query: analysis.coreTopic, limit: 8)
+            let topicFacts = await memory.searchFacts(query: analysis.coreTopic, limit: 5)
             for fact in topicFacts where !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate }) {
                 allFacts.append(fact)
             }
-            // Search by named entities from InputAnalysis
-            for entity in analysis.namedEntities.prefix(3) {
-                let entityFacts = await memory.searchFacts(query: entity, limit: 5)
+            for entity in analysis.namedEntities.prefix(2) {
+                let entityFacts = await memory.searchFacts(query: entity, limit: 3)
                 for fact in entityFacts where !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate }) {
                     allFacts.append(fact)
                 }
             }
         }
-        // Also search by NER-extracted entities for broader coverage
-        for entity in context.entities.prefix(3) {
-            let entityFacts = await memory.searchFacts(query: entity.text, limit: 4)
-            for fact in entityFacts {
-                if !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate && $0.object == fact.object }) {
-                    allFacts.append(fact)
-                }
+        for entity in context.entities.prefix(2) {
+            let entityFacts = await memory.searchFacts(query: entity.text, limit: 3)
+            for fact in entityFacts where !allFacts.contains(where: { $0.subject == fact.subject && $0.predicate == fact.predicate && $0.object == fact.object }) {
+                allFacts.append(fact)
             }
         }
+        // BERT-rank and take only top 3 facts
         if !allFacts.isEmpty {
             var rankedFacts = allFacts
             if !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
                 var scored: [(fact: (subject: String, predicate: String, object: String), score: Float)] = []
-                for fact in allFacts {
+                for fact in allFacts.prefix(15) {  // Limit embedding calls
                     let factText = "\(fact.subject) \(fact.predicate) \(fact.object)"
                     let factEmb = await neuralEngine.embed(factText)
                     let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, factEmb)
                     scored.append((fact: fact, score: sim))
                 }
                 rankedFacts = scored.sorted { $0.score > $1.score }
-                    .filter { $0.score > 0.25 }  // Lower threshold for better recall
-                    .prefix(7).map { $0.fact }     // More facts for richer context
+                    .filter { $0.score > 0.30 }
+                    .prefix(3).map { $0.fact }
+            } else {
+                rankedFacts = Array(allFacts.prefix(3))
             }
             if !rankedFacts.isEmpty {
-                lines.append("")
-                lines.append("[Relevanta fakta:]")
-                for fact in rankedFacts {
-                    // Natural language fact formatting
-                    lines.append("- \(fact.subject) \(fact.predicate) \(fact.object)")
-                }
+                let factStr = rankedFacts.map { "\($0.subject) \($0.predicate) \($0.object)" }.joined(separator: ". ")
+                lines.append("[Fakta: \(String(factStr.prefix(200)))]")
             }
         }
 
-        // 4. Relevant knowledge articles (semantic search on title + content summary)
+        // --- Section 3: Best matching article (max 1, max ~80 tokens of content) ---
         let articles = await memory.loadAllArticles()
         if !articles.isEmpty {
-            var scoredArticles: [(article: KnowledgeArticle, score: Float)] = []
+            var bestArticle: KnowledgeArticle?
+            var bestScore: Float = 0
             let hasEmbedding = !context.inputEmbedding.allSatisfy({ $0 == 0 })
-            for article in articles.prefix(30) {
+            for article in articles.prefix(20) {
                 if hasEmbedding {
-                    // Embed title + summary for richer matching
-                    let articleText = article.title + " " + article.summary
-                    let articleEmb = await neuralEngine.embed(articleText)
+                    let articleEmb = await neuralEngine.embed(article.title + " " + article.summary)
                     let sim = await neuralEngine.cosineSimilarity(context.inputEmbedding, articleEmb)
-                    // Keyword boost: if input words appear in content, boost score
                     let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
-                    let contentWords = Set(article.content.lowercased().prefix(500).components(separatedBy: .whitespaces).filter { $0.count > 3 })
-                    let overlap = Float(inputWords.intersection(contentWords).count)
-                    let boosted = sim + overlap * 0.04
-                    if boosted > 0.30 { scoredArticles.append((article, boosted)) }
+                    let contentWords = Set(article.content.lowercased().prefix(300).components(separatedBy: .whitespaces).filter { $0.count > 3 })
+                    let boosted = sim + Float(inputWords.intersection(contentWords).count) * 0.05
+                    if boosted > bestScore && boosted > 0.35 {
+                        bestScore = boosted
+                        bestArticle = article
+                    }
                 } else {
-                    // Keyword fallback
                     let lower = input.lowercased()
-                    if article.title.lowercased().contains(lower.prefix(15)) ||
-                       article.domain.lowercased().contains(lower.prefix(10)) {
-                        scoredArticles.append((article, 0.5))
+                    if article.title.lowercased().contains(lower.prefix(15)) {
+                        bestArticle = article
+                        break
                     }
                 }
             }
-            let topArticles = scoredArticles.sorted { $0.score > $1.score }.prefix(3)
-            if !topArticles.isEmpty {
-                lines.append("")
-                lines.append("[Kunskapsartiklar:]")
-                for (article, _) in topArticles {
-                    // Include more content for richer context
-                    lines.append("— \(article.title) [\(article.domain)]: \(String(article.content.prefix(400)))")
-                }
+            if let article = bestArticle {
+                // v12: Only include first 150 chars of article content to save tokens
+                lines.append("[Källa: \(article.title) — \(String(article.content.prefix(150)))]")
             }
         }
 
-        // 5. Conversation history — essential for understanding context
+        // --- Section 4: Conversation context (max ~80 tokens — only last 2-3 turns) ---
         if !context.conversationHistory.isEmpty {
-            lines.append("")
-            lines.append("[Konversation:]")
-            // Include more history but summarize older turns
-            let history = context.conversationHistory
-            let recentCutoff = max(0, history.count - 6)
-            // Older turns: compressed
-            if recentCutoff > 0 {
-                let older = history.prefix(recentCutoff)
-                let topics = older.filter { $0.role == "user" }.map { $0.content }.suffix(3)
-                if !topics.isEmpty {
-                    lines.append("[Tidigare ämnen: \(topics.map { String($0.prefix(50)) }.joined(separator: " | "))]")
-                }
-            }
-            // Recent turns: full
-            for turn in history.suffix(6) {
-                let role = turn.role == "user" ? "Användare" : "Eon"
-                lines.append("\(role): \(turn.content)")
+            // v12: Only include last 3 turns, truncated
+            let recent = context.conversationHistory.suffix(3)
+            for turn in recent {
+                let role = turn.role == "user" ? "U" : "E"
+                lines.append("\(role): \(String(turn.content.prefix(80)))")
             }
         }
 
-        // 6. Relevant memories (semantic, not just keyword-matched)
-        if !context.retrievedMemories.isEmpty {
-            let uniqueMemories = context.retrievedMemories.prefix(5)
-            let mem = uniqueMemories.map { $0.content }.joined(separator: " | ")
-            lines.append("[Minnen: \(String(mem.prefix(500)))]")
-        }
-
-        // v8: Follow-up context — if user gives a short reply, carry forward the topic
-        let lastEonMsg = context.conversationHistory.last(where: { $0.role == "assistant" })
+        // v12: Follow-up context (only for very short inputs)
         let inputWordCount = input.split(separator: " ").count
-        if inputWordCount <= 4, let prevEon = lastEonMsg {
-            lines.append("")
-            lines.append("[OBS: Kort uppföljning — fortsätt diskutera det senaste ämnet. Eons senaste svar: \(String(prevEon.content.prefix(200)))]")
+        if inputWordCount <= 3, let prevEon = context.conversationHistory.last(where: { $0.role == "assistant" }) {
+            lines.append("[Uppföljning — senaste ämne: \(String(prevEon.content.prefix(80)))]")
         }
 
-        // 7. v11: Deep question anchoring using InputAnalysis
-        lines.append("")
+        // --- Section 5: Question + anchoring (MUST be LAST — this is what the model sees most clearly) ---
         if let analysis = context.inputAnalysis {
-            // Tell the model exactly what the user is asking about
-            lines.append("[FRÅGEANALYS: \(analysis.questionSummary)]")
+            lines.append("[Svara om: \(analysis.coreTopic). \(analysis.questionSummary)]")
             if !analysis.namedEntities.isEmpty {
-                lines.append("[Nämnda namn/entiteter: \(analysis.namedEntities.joined(separator: ", "))]")
+                lines.append("[Namn: \(analysis.namedEntities.joined(separator: ", "))]")
             }
-            if analysis.keyNouns.count > 1 {
-                lines.append("[Nyckelbegrepp: \(analysis.keyNouns.prefix(4).joined(separator: ", "))]")
-            }
-            lines.append("[VIKTIGT: Svaret MÅSTE handla om \(analysis.coreTopic). Upprepa INTE dig själv. Varje mening ska vara unik.]")
-            lines.append("Användare: \(input)")
-            lines.append("Eon (svar om \(analysis.coreTopic)):")
-        } else {
-            lines.append("[VIKTIGT: Svara BARA på denna fråga. Upprepa INTE dig själv.]")
-            lines.append("Användare: \(input)")
-            lines.append("Eon:")
         }
+        lines.append("Användare: \(input)")
+        lines.append("Eon:")
 
         return lines.joined(separator: "\n")
     }

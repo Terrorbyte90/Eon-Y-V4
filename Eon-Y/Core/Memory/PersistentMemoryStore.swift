@@ -663,20 +663,22 @@ actor PersistentMemoryStore {
         return results
     }
 
-    // MARK: - Search facts by keyword
+    // MARK: - Search facts by keyword (v12: improved — lower char threshold, more keywords, also searches predicate)
 
     func searchFacts(query: String, limit: Int = 5) -> [(subject: String, predicate: String, object: String)] {
         guard isReady, let db else { return [] }
         var results: [(String, String, String)] = []
+        // v12: Lower threshold from >3 to >2 chars, allow up to 5 keywords
         let keywords = Array(query.lowercased()
             .split(separator: " ")
-            .filter { $0.count > 3 }
+            .filter { $0.count > 2 }
             .map(String.init)
-            .prefix(3))
+            .prefix(5))
         guard !keywords.isEmpty else { return [] }
 
-        let likeClause = keywords.map { _ in "(subject LIKE ? OR object LIKE ?)" }.joined(separator: " OR ")
-        let sql = "SELECT subject, predicate, object FROM facts WHERE \(likeClause) ORDER BY confidence DESC LIMIT ?"
+        // v12: Also search predicate field + search for the full query as exact match on subject
+        let likeClause = keywords.map { _ in "(subject LIKE ? OR object LIKE ? OR predicate LIKE ?)" }.joined(separator: " OR ")
+        let sql = "SELECT subject, predicate, object FROM facts WHERE (\(likeClause)) OR subject LIKE ? ORDER BY confidence DESC LIMIT ?"
         let patterns: [String] = keywords.map { "%\($0)%" }
 
         var stmt: OpaquePointer?
@@ -689,10 +691,14 @@ actor PersistentMemoryStore {
 
         var idx: Int32 = 1
         for pattern in patterns {
-            bindText(stmt, idx,     pattern)
-            bindText(stmt, idx + 1, pattern)
-            idx += 2
+            bindText(stmt, idx,     pattern)  // subject
+            bindText(stmt, idx + 1, pattern)  // object
+            bindText(stmt, idx + 2, pattern)  // predicate
+            idx += 3
         }
+        // Exact subject match for the full query
+        bindText(stmt, idx, "%\(query.lowercased())%")
+        idx += 1
         sqlite3_bind_int(stmt, idx, Int32(limit))
 
         while sqlite3_step(stmt) == SQLITE_ROW {

@@ -606,6 +606,11 @@ class ChatViewModel: ObservableObject {
         for await token in stream {
             messages[idx].content += token
         }
+        // v12: Replace streamed content with the cleaned/deduplicated version from post-processing
+        // This ensures the user sees the final quality-checked response, not raw streamed tokens
+        if !brain.lastCleanedResponse.isEmpty && brain.lastCleanedResponse != messages[idx].content {
+            messages[idx].content = brain.lastCleanedResponse
+        }
         messages[idx].confidence = brain.confidence
         messages[idx].emotion = brain.currentEmotion
         messages[idx].retrievedMemoryCount = brain.thinkingSteps
