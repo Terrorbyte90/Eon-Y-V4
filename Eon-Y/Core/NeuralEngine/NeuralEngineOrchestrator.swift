@@ -171,9 +171,10 @@ actor NeuralEngineOrchestrator {
             return await fallbackGenerate(prompt)
         }
         let raw = await gpt.generate(prompt: prompt, maxNewTokens: maxTokens, temperature: temperature)
-        // v10: Post-generation deduplication + v11: output cleaning
+        // v10: Post-generation deduplication + v11: output cleaning + v18: final safety dedup
         let deduped = Self.deduplicateSentences(raw)
-        return Self.cleanOutput(deduped)
+        let cleaned = Self.cleanOutput(deduped)
+        return Self.finalSafetyDedup(cleaned)
     }
 
     func generateStream(prompt: String, maxTokens: Int = 200, temperature: Float = 0.7) -> AsyncStream<String> {
@@ -311,6 +312,73 @@ actor NeuralEngineOrchestrator {
                 return firstBlock
             }
         }
+        return text
+    }
+
+    /// v18: Final safety dedup — catches any remaining 2+ repetitions of substantial text blocks
+    /// This runs AFTER sentence and paragraph dedup as a last resort
+    nonisolated static func finalSafetyDedup(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 100 else { return text }
+
+        // Split into sentences and check for any sentence appearing 2+ times
+        let sentences = trimmed
+            .components(separatedBy: CharacterSet(charactersIn: ".!?"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count > 15 }
+
+        var seen: [String: Int] = [:]
+        var uniqueSentences: [String] = []
+        for sentence in sentences {
+            let normalized = sentence.lowercased()
+            let count = seen[normalized, default: 0]
+            if count == 0 {
+                uniqueSentences.append(sentence)
+            }
+            seen[normalized] = count + 1
+        }
+
+        // If we removed duplicates, reconstruct
+        if uniqueSentences.count < sentences.count {
+            return uniqueSentences.joined(separator: ". ") + "."
+        }
+
+        // Also check for repeated 3-word phrases appearing 4+ times
+        let words = trimmed.split(separator: " ").map(String.init)
+        if words.count > 12 {
+            var trigrams: [String: Int] = [:]
+            for i in 0..<(words.count - 2) {
+                let trigram = words[i..<(i+3)].joined(separator: " ").lowercased()
+                trigrams[trigram, default: 0] += 1
+            }
+            // If any trigram appears 4+ times, the text is degenerate
+            if let maxRepeat = trigrams.values.max(), maxRepeat >= 4 {
+                // Keep text up to the second occurrence of the most-repeated trigram
+                guard let offender = trigrams.first(where: { $0.value >= 4 })?.key else { return text }
+                let offenderWords = offender.split(separator: " ").map(String.init)
+                var occurrences = 0
+                var cutIndex = words.count
+                for i in 0..<(words.count - 2) {
+                    let current = words[i..<(i+3)].map { $0.lowercased() }
+                    if current == offenderWords {
+                        occurrences += 1
+                        if occurrences == 2 {
+                            cutIndex = i
+                            break
+                        }
+                    }
+                }
+                if cutIndex < words.count {
+                    let truncated = words[0..<cutIndex].joined(separator: " ")
+                    // Try to end at a sentence boundary
+                    if let lastPeriod = truncated.lastIndex(where: { ".!?".contains($0) }) {
+                        return String(truncated[...lastPeriod])
+                    }
+                    return truncated + "."
+                }
+            }
+        }
+
         return text
     }
 

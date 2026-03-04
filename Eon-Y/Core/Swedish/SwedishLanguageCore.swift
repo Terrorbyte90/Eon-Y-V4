@@ -474,13 +474,13 @@ actor SwedishMorphologyEngine {
 
             if prefixKnown && suffixKnown {
                 let score = Double(prefix.count + suffix.count) / Double(word.count) // Longer parts = better
-                if bestSplit == nil || score > bestSplit!.score {
+                if score > (bestSplit?.score ?? -1) {
                     bestSplit = (prefix, suffix, score)
                 }
             } else if prefixKnown && suffix.count > 4 {
                 // Known prefix + unknown but long suffix (might be an unlexed word)
                 let score = Double(prefix.count) / Double(word.count) * 0.7
-                if bestSplit == nil || score > bestSplit!.score {
+                if score > (bestSplit?.score ?? -1) {
                     bestSplit = (prefix, suffix, score)
                 }
             }
@@ -491,7 +491,7 @@ actor SwedishMorphologyEngine {
                     let actualSuffix = String(suffix.dropFirst(link.count))
                     if prefixKnown && lexicon[actualSuffix] != nil {
                         let score = Double(prefix.count + actualSuffix.count) / Double(word.count) + 0.1
-                        if bestSplit == nil || score > bestSplit!.score {
+                        if score > (bestSplit?.score ?? -1) {
                             bestSplit = (prefix, actualSuffix, score)
                         }
                     }

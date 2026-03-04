@@ -331,7 +331,7 @@ actor ResponseQualityGuard {
                 "Jag funderar på \(question.coreTopic). Kan du ge mig lite mer kontext?",
                 "\(question.coreTopic.capitalized) — det vill jag gärna utforska mer.",
             ]
-            return fallbacks.randomElement() ?? fallbacks[0]
+            return fallbacks.randomElement() ?? "Jag funderar på det."
         }
     }
 }

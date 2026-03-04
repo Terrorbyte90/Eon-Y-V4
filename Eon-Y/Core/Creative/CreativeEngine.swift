@@ -1142,7 +1142,7 @@ final class CreativeEngine: ObservableObject {
                       let timestamp = row[6] as? Double else { continue }
 
                 let replyToStr = row[5] as? String
-                let replyTo = (replyToStr?.isEmpty == false) ? UUID(uuidString: replyToStr!) : nil
+                let replyTo = replyToStr.flatMap { $0.isEmpty ? nil : UUID(uuidString: $0) }
 
                 loaded.append(EonLetter(
                     from: senderType,

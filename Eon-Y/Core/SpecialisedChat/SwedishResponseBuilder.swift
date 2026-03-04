@@ -264,6 +264,6 @@ final class SwedishResponseBuilder: Sendable {
     // MARK: - Hjälpmetod
 
     private func pickRandom(from options: [String]) -> String {
-        options.randomElement() ?? options[0]
+        options.randomElement() ?? ""
     }
 }

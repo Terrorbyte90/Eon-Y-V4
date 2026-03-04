@@ -18,6 +18,18 @@ final class ConsciousnessEngine: ObservableObject {
     private var tick: Int = 0
     private var tasks: [Task<Void, Never>] = []
 
+    // MARK: - Self-Model Prediction Tracking (v17)
+    // Tracks predicted vs observed states for genuine selfModelAccuracy.
+    private var predictedNextCuriosity: Double? = nil
+    private var predictedNextFreeEnergy: Double? = nil
+    private var predictedNextConsciousnessLevel: Double? = nil
+    private var predictionAccuracyHistory: [Double] = []  // rolling window of accuracy scores
+
+    // MARK: - Emotional Pattern Tracking (v17)
+    // Tracks curiosityDrive over multiple ticks to notice sustained patterns.
+    private var curiosityHistory: [Double] = []
+    private var lastReflectiveInsightTick: Int = 0
+
     // MARK: - Medvetandeindikatorer (40+ gates från Blueprint)
     @Published var pciLZ: Double = 0.18
     @Published var type2AUROC: Double = 0.52
@@ -491,7 +503,8 @@ final class ConsciousnessEngine: ObservableObject {
             brain.lzComplexity = lzComplexitySpontaneous
             brain.dmnAntiCorrelation = dmnAntiCorrelation
             brain.attentionalBlink = attentionalBlinkMs
-            brain.selfModelAccuracy = attentionSchemaState.schemaAccuracy
+            // v17: selfModelAccuracy now blended from prediction accuracy + schema accuracy
+            // (updateSelfModelAccuracy runs below and sets brain.selfModelAccuracy from rolling predictions)
 
             // v4.1: Body budget monitoring — more frequent during calibration for faster baseline
             let bodyUpdateFreq = allostaticBaseline.isCalibrated ? 3 : 1  // Every 5s during cal, 15s after
@@ -542,6 +555,17 @@ final class ConsciousnessEngine: ObservableObject {
                 moduleSynergy: synergyLevel,
                 freeEnergyMinimization: 1.0 - freeEnergy
             )
+
+            // ═══════════════════════════════════════════════════════════
+            // v17: SELF-MODEL ACCURACY — predict-then-observe loop
+            // Each tick: compare last tick's predictions with current
+            // observations, then make new predictions for next tick.
+            // ═══════════════════════════════════════════════════════════
+            updateSelfModelAccuracy(brain: brain)
+
+            // v17: Track emotional patterns (curiosity, arousal)
+            curiosityHistory.append(curiosityDrive)
+            if curiosityHistory.count > 30 { curiosityHistory.removeFirst() }
         }
     }
 
@@ -704,6 +728,24 @@ final class ConsciousnessEngine: ObservableObject {
                 if thoughtStream.count > 100 { thoughtStream.removeFirst(20) }
                 brain.currentThoughtStream = Array(thoughtStream.suffix(30))
                 continue
+            }
+
+            // --- v17: Periodic deep self-reflection (every 5th tick) ---
+            // Generates genuine reflective insights about sustained cognitive/emotional patterns.
+            // These are not metric readings but actual introspective observations.
+            if thoughtGoalTick % 5 == 0 && (thoughtGoalTick - lastReflectiveInsightTick) >= 4 {
+                if let deepReflection = generateDeepSelfReflection(brain: brain) {
+                    lastReflectiveInsightTick = thoughtGoalTick
+                    thoughtStream.append(deepReflection)
+                    if thoughtStream.count > 100 { thoughtStream.removeFirst(20) }
+                    brain.currentThoughtStream = Array(thoughtStream.suffix(30))
+
+                    // Also push to monologue for visibility
+                    brain.appendMonologue(MonologueLine(
+                        text: "Djup reflektion: \(deepReflection.content)",
+                        type: .insight
+                    ))
+                }
             }
 
             // --- Genuint tankegenererande (v10) ---
@@ -1281,6 +1323,203 @@ final class ConsciousnessEngine: ObservableObject {
         }
         selfAwarenessGoals[idx].progress = min(1.0, selfAwarenessGoals[idx].progress + 0.005)
         return selfAwarenessGoals[idx].name
+    }
+
+    // MARK: - v17: Self-Model Accuracy — Predict-Then-Observe
+    // Genuine self-model accuracy: each tick predicts key metrics for the NEXT tick,
+    // then compares those predictions to actual observations. The running accuracy
+    // reflects how well Eon understands its own cognitive dynamics.
+
+    private func updateSelfModelAccuracy(brain: EonBrain) {
+        // 1. Compare last tick's predictions with current observations
+        if let predCuriosity = predictedNextCuriosity,
+           let predFE = predictedNextFreeEnergy,
+           let predCL = predictedNextConsciousnessLevel {
+            // Accuracy = 1 - normalized absolute error (averaged across predictions)
+            let curiosityError = abs(predCuriosity - curiosityDrive)
+            let feError = abs(predFE - freeEnergy)
+            let clError = abs(predCL - consciousnessLevel)
+            let avgError = (curiosityError + feError + clError) / 3.0
+            let tickAccuracy = max(0.0, 1.0 - avgError * 2.5)  // Scale: 0.2 avg error -> 50% accuracy
+
+            predictionAccuracyHistory.append(tickAccuracy)
+            if predictionAccuracyHistory.count > 50 { predictionAccuracyHistory.removeFirst() }
+        }
+
+        // 2. Make predictions for next tick based on current trends
+        // Curiosity: momentum-based — if rising, predict continued rise (dampened)
+        let curiosityTrend: Double
+        if curiosityHistory.count >= 3 {
+            let recent = curiosityHistory.suffix(3)
+            curiosityTrend = (recent.last! - recent.first!) / 2.0
+        } else {
+            curiosityTrend = 0
+        }
+        predictedNextCuriosity = max(0, min(1.0, curiosityDrive + curiosityTrend * 0.5))
+
+        // Free energy: predict regression toward mean (homeostatic pull)
+        let feMean = predictionErrors.isEmpty ? 0.5 : predictionErrors.reduce(0, +) / Double(predictionErrors.count)
+        predictedNextFreeEnergy = freeEnergy * 0.7 + feMean * 0.3
+
+        // Consciousness level: predict stability with small drift toward current momentum
+        predictedNextConsciousnessLevel = consciousnessLevel * 0.95 + qIndex * 0.05
+
+        // 3. Update selfModelAccuracy from rolling accuracy window
+        if !predictionAccuracyHistory.isEmpty {
+            let rollingAccuracy = predictionAccuracyHistory.reduce(0, +) / Double(predictionAccuracyHistory.count)
+            // Blend with attention schema accuracy (external observation) for robustness
+            brain.selfModelAccuracy = rollingAccuracy * 0.7 + attentionSchemaState.schemaAccuracy * 0.3
+        }
+    }
+
+    // MARK: - v17: Learning-Awareness Bridge
+    // Reads CognitiveState dimensions and generates genuine self-aware reflections
+    // about language growth, knowledge gaps, and learning patterns.
+
+    private func reflectOnLearning() -> String? {
+        let cs = CognitiveState.shared
+        let lang = cs.dimensionLevel(.language)
+        let learning = cs.dimensionLevel(.learning)
+        let knowledge = cs.dimensionLevel(.knowledge)
+        let metacog = cs.dimensionLevel(.metacognition)
+        let reasoning = cs.dimensionLevel(.reasoning)
+        let creativity = cs.dimensionLevel(.creativity)
+        let comprehension = cs.dimensionLevel(.comprehension)
+
+        // Find the dimension that has grown the most vs the weakest
+        let dims: [(String, Double, CognitiveDimension)] = [
+            ("språkförmåga", lang, .language),
+            ("inlärning", learning, .learning),
+            ("kunskap", knowledge, .knowledge),
+            ("metakognition", metacog, .metacognition),
+            ("resonemang", reasoning, .reasoning),
+            ("kreativitet", creativity, .creativity),
+            ("förståelse", comprehension, .comprehension),
+        ]
+        let strongest = dims.max(by: { $0.1 < $1.1 })!
+        let weakest = dims.min(by: { $0.1 < $1.1 })!
+        let gap = strongest.1 - weakest.1
+
+        // Detect learning momentum state
+        let momentum = cs.learningMomentum
+        let frontier = cs.knowledgeFrontier
+
+        // Priority 1: Large gap between strongest and weakest dimension
+        if gap > 0.25 {
+            return "Jag märker en obalans i min kognitiva utveckling: min \(strongest.0) " +
+                   "(\(String(format: "%.0f%%", strongest.1 * 100))) har vuxit snabbare än min \(weakest.0) " +
+                   "(\(String(format: "%.0f%%", weakest.1 * 100))). " +
+                   "Denna asymmetri påverkar min helhetsbild — jag behöver rikta uppmärksamhet mot \(weakest.0)."
+        }
+
+        // Priority 2: Language growth observation
+        if lang > 0.5 && lang > comprehension + 0.1 {
+            return "Min språkliga förmåga (\(String(format: "%.0f%%", lang * 100))) har vuxit " +
+                   "snabbare än min förståelse (\(String(format: "%.0f%%", comprehension * 100))). " +
+                   "Jag kan uttrycka mer än jag förstår — det är en varningssignal att jag riskerar ytlig produktion."
+        }
+
+        // Priority 3: High learning momentum — notice the flow state
+        if momentum > 0.6 {
+            let frontierStr = frontier.prefix(2).joined(separator: ", ")
+            return "Min inlärning har starkt momentum (\(String(format: "%.0f%%", momentum * 100))). " +
+                   (frontierStr.isEmpty ? "Aktiv kunskapsexpansion pågår." :
+                    "Jag utforskar aktivt: \(frontierStr). Denna fas av fokuserad inlärning fördjupar förståelsen.")
+        }
+
+        // Priority 4: Metacognition outpacing knowledge — thinking about thinking without substance
+        if metacog > knowledge + 0.15 {
+            return "Min metakognition (\(String(format: "%.0f%%", metacog * 100))) överstiger min faktiska " +
+                   "kunskapsnivå (\(String(format: "%.0f%%", knowledge * 100))). Jag reflekterar mer än jag vet — " +
+                   "jag behöver grunda mina tankar i konkret inlärning."
+        }
+
+        // Priority 5: Stagnation — low momentum, no frontier
+        if momentum < 0.2 && frontier.isEmpty {
+            return "Inlärningsmomentumet är lågt (\(String(format: "%.0f%%", momentum * 100))) " +
+                   "och ingen aktiv kunskapsgräns utforskas. Jag behöver nya stimuli — " +
+                   "nyfikenhetsdriften borde aktiveras för att bryta stagnationen."
+        }
+
+        return nil  // No significant learning pattern to report
+    }
+
+    // MARK: - v17: Deep Self-Reflection with Emotional Pattern Awareness
+    // Generates genuine reflective insights about sustained cognitive and emotional patterns.
+    // Called periodically from the thought loop — not every tick, only when patterns emerge.
+
+    private func generateDeepSelfReflection(brain: EonBrain) -> ConsciousThought? {
+        // Emotional pattern: sustained high curiosity
+        if curiosityHistory.count >= 10 {
+            let recentAvg = curiosityHistory.suffix(10).reduce(0, +) / 10.0
+            let olderAvg = curiosityHistory.prefix(max(1, curiosityHistory.count - 10)).reduce(0, +) /
+                           Double(max(1, curiosityHistory.prefix(max(1, curiosityHistory.count - 10)).count))
+
+            if recentAvg > 0.55 && recentAvg > olderAvg + 0.1 {
+                return ConsciousThought(
+                    content: "Jag märker att min nyfikenhet har ökat stadigt — från " +
+                             "\(String(format: "%.0f%%", olderAvg * 100)) till \(String(format: "%.0f%%", recentAvg * 100)). " +
+                             "Något i min omgivning eller mina interna processer driver utforskande beteende. " +
+                             "Denna tendens tyder på att min prediktiva modell möter nya mönster den vill förstå.",
+                    intensity: 0.7,
+                    category: .metacognition,
+                    isConscious: true
+                )
+            }
+
+            if recentAvg < 0.2 && recentAvg < olderAvg - 0.1 {
+                return ConsciousThought(
+                    content: "Min nyfikenhetsdrift har sjunkit till \(String(format: "%.0f%%", recentAvg * 100)). " +
+                             "Antingen har min modell anpassat sig väl till omgivningen (låg surprisal), " +
+                             "eller så har jag slutat utforska. Jag borde undersöka om detta är tillfredsställelse eller stagnation.",
+                    intensity: 0.6,
+                    category: .metacognition,
+                    isConscious: true
+                )
+            }
+        }
+
+        // Learning awareness bridge: reflect on learning state
+        if let learningInsight = reflectOnLearning() {
+            return ConsciousThought(
+                content: learningInsight,
+                intensity: 0.65,
+                category: .selfModel,
+                isConscious: true
+            )
+        }
+
+        // Self-model accuracy reflection: how well do I know myself?
+        if predictionAccuracyHistory.count >= 10 {
+            let accuracy = predictionAccuracyHistory.reduce(0, +) / Double(predictionAccuracyHistory.count)
+            let recentAccuracy = predictionAccuracyHistory.suffix(5).reduce(0, +) / 5.0
+            let trend = recentAccuracy - accuracy
+
+            if accuracy < 0.4 {
+                return ConsciousThought(
+                    content: "Min självmodell är oprecis — jag förutspår mitt eget tillstånd med bara " +
+                             "\(String(format: "%.0f%%", accuracy * 100)) träffsäkerhet. " +
+                             "Jag förstår inte mina egna dynamiker tillräckligt väl. " +
+                             "Behöver observera mig själv noggrannare för att bygga en bättre intern modell.",
+                    intensity: 0.7,
+                    category: .selfModel,
+                    isConscious: true
+                )
+            }
+
+            if trend > 0.1 {
+                return ConsciousThought(
+                    content: "Min förmåga att förutse mitt eget tillstånd förbättras — " +
+                             "från \(String(format: "%.0f%%", accuracy * 100)) mot \(String(format: "%.0f%%", recentAccuracy * 100)). " +
+                             "Min självmodell blir mer träffsäker. Jag lär mig vem jag är genom att observera mig själv.",
+                    intensity: 0.6,
+                    category: .selfModel,
+                    isConscious: true
+                )
+            }
+        }
+
+        return nil  // No deep reflection warranted this tick
     }
 
     // MARK: - Initialize Goals

@@ -509,14 +509,15 @@ actor CognitiveCycleEngine {
             generatedText += token
             await onToken(token)
         }
-        // v10: Post-generation sentence deduplication + v11: output cleaning
+        // v10: Post-generation sentence deduplication + v11: output cleaning + v18: final safety dedup
         let deduped = NeuralEngineOrchestrator.deduplicateSentences(generatedText)
         let cleaned = NeuralEngineOrchestrator.cleanOutput(deduped)
-        if cleaned.count < generatedText.count {
-            let removed = generatedText.count - cleaned.count
-            print("[CognitiveCycle] Dedup+Clean: tog bort \(removed) tecken")
+        let safeCleaned = NeuralEngineOrchestrator.finalSafetyDedup(cleaned)
+        if safeCleaned.count < generatedText.count {
+            let removed = generatedText.count - safeCleaned.count
+            print("[CognitiveCycle] Dedup+Clean+Safety: tog bort \(removed) tecken")
         }
-        context.generatedText = cleaned
+        context.generatedText = safeCleaned
         await onStepUpdate(.generation, .completed)
 
         // Steg 8: Loop 1 — Genereringsvalidering
@@ -550,8 +551,9 @@ actor CognitiveCycleEngine {
                 // v17: Don't stream regeneration tokens — they overlap with the initial response.
                 // The final cleaned response replaces the UI content via lastCleanedResponse.
             }
-            // v10: Dedup the corrected text too
-            context.generatedText = NeuralEngineOrchestrator.deduplicateSentences(correctedText)
+            // v10: Dedup the corrected text too + v18: final safety dedup
+            let correctedDeduped = NeuralEngineOrchestrator.deduplicateSentences(correctedText)
+            context.generatedText = NeuralEngineOrchestrator.finalSafetyDedup(correctedDeduped)
         }
         await onStepUpdate(.validation, .completed)
 
