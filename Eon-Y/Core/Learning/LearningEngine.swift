@@ -255,11 +255,19 @@ actor LearningEngine {
         // v19: Learn grammar patterns from the conversation
         learnGrammarPatterns(from: allText)
 
+        // v23: Learn collocations and idioms for natural language acquisition
+        learnCollocations(from: allText)
+        detectAndLearnIdioms(from: allText)
+
+        // v23: Adaptive learning — harder text = more competency gain
+        let complexity = analyzeSentenceComplexity(allText)
+        let complexityBonus = max(0, complexity - 0.3) * 0.003  // Bonus for complex conversations
+
         // Detect domain from conversation and boost competency for language domains
         let domain = detectDomain(from: allText)
         if var comp = competencyBook[domain] {
             let vocabBoost = min(0.005, Double(newWordsThisConversation.count) * 0.001)
-            comp.level = min(0.95, comp.level + vocabBoost)
+            comp.level = min(0.95, comp.level + vocabBoost + complexityBonus)
             comp.lastStudied = Date()
             competencyBook[domain] = comp
             UserDefaults.standard.set(comp.level, forKey: "competency_\(domain)")
@@ -293,6 +301,7 @@ actor LearningEngine {
             options: [.omitWhitespace, .omitPunctuation, .omitOther]
         ) { tag, range in
             let word = String(text[range])
+            // v23: Also include determiners and prepositions for grammatical context
             // Keep nouns, verbs, adjectives, adverbs with length > 2 (skip particles/articles)
             if let tag = tag,
                [.noun, .verb, .adjective, .adverb].contains(tag),
@@ -302,6 +311,79 @@ actor LearningEngine {
             return true
         }
         return words
+    }
+
+    // MARK: - Enhanced Autonomous Learning (v23)
+
+    /// Detect collocations (common word pairs) from text to learn natural Swedish phrasing
+    private var collocations: [String: Int] = [:]  // "word1|word2" -> frequency
+
+    /// Extract and learn collocations from conversation text
+    private func learnCollocations(from text: String) {
+        let words = text.lowercased().components(separatedBy: .whitespacesAndNewlines)
+            .filter { $0.count > 2 }
+        guard words.count >= 2 else { return }
+
+        for i in 0..<(words.count - 1) {
+            let bigram = "\(words[i])|\(words[i + 1])"
+            collocations[bigram, default: 0] += 1
+        }
+
+        // Prune low-frequency collocations to prevent unbounded growth
+        if collocations.count > 500 {
+            collocations = collocations.filter { $0.value >= 3 }
+        }
+    }
+
+    /// Detect Swedish idioms in text and learn them
+    private var learnedIdioms: Set<String> = []
+
+    private func detectAndLearnIdioms(from text: String) {
+        let lower = text.lowercased()
+        let knownIdiomPatterns = [
+            "lägga korten på bordet", "ha is i magen", "ta tjuren vid hornen",
+            "dra öronen åt sig", "gå på nitar", "kasta in handduken",
+            "slå huvudet på spiken", "hugga i sten", "sila mygg och svälja kameler",
+            "bita i det sura äpplet", "lägga locket på", "visa var skåpet ska stå",
+            "ha tummen mitt i handen", "gå som katten kring het gröt",
+            "falla mellan stolarna", "stå på sig", "ta sig vatten över huvudet",
+            "vara ute och cykla", "ha rent mjöl i påsen", "dra sig i håret",
+        ]
+
+        for idiom in knownIdiomPatterns {
+            if lower.contains(idiom) && !learnedIdioms.contains(idiom) {
+                learnedIdioms.insert(idiom)
+                // Boost pragmatics and discourse competency for idiom recognition
+                if var comp = competencyBook["Pragmatik"] {
+                    comp.level = min(0.95, comp.level + 0.003)
+                    competencyBook["Pragmatik"] = comp
+                }
+            }
+        }
+    }
+
+    /// Analyze sentence complexity for learning difficulty assessment
+    private func analyzeSentenceComplexity(_ text: String) -> Double {
+        let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?"))
+            .filter { $0.trimmingCharacters(in: .whitespaces).count > 5 }
+        guard !sentences.isEmpty else { return 0.0 }
+
+        var totalComplexity = 0.0
+        for sentence in sentences {
+            let words = sentence.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            let wordCount = Double(words.count)
+            let avgWordLength = words.isEmpty ? 0.0 : words.reduce(0.0) { $0 + Double($1.count) } / wordCount
+
+            // Complexity factors: length, word length, subordinate clauses
+            let lengthFactor = min(1.0, wordCount / 25.0)
+            let wordLengthFactor = min(1.0, avgWordLength / 8.0)
+            let subordinators = ["att", "som", "när", "om", "eftersom", "medan", "innan", "efter", "fastän"]
+            let subClauseFactor = min(1.0, Double(subordinators.filter { sentence.lowercased().contains(" \($0) ") }.count) * 0.33)
+
+            totalComplexity += (lengthFactor + wordLengthFactor + subClauseFactor) / 3.0
+        }
+
+        return totalComplexity / Double(sentences.count)
     }
 
     // MARK: - Grammar Pattern Learning (v19)

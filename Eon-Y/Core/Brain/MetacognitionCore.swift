@@ -54,13 +54,22 @@ actor MetacognitionCore {
         await state.update(dimension: .metacognition, delta: 0.004, source: "metacognition_core") // Reduced from 0.008
         await state.update(dimension: .selfAwareness, delta: 0.003, source: "metacognition_core") // Reduced from 0.005
 
-        // v3 Claude Edition: When stagnation is detected, ACTUALLY intervene
-        // by boosting the weakest stagnated dimensions directly
+        // v23: Enhanced stagnation intervention — stronger, strategy-aware
+        // When many dimensions are stagnating, force a cognitive pivot
         if audit.stagnatedDimensions.count > 3 {
-            for dim in audit.stagnatedDimensions.prefix(3) {
+            for dim in audit.stagnatedDimensions.prefix(4) {
                 let level = await state.dimensionLevel(dim)
-                let interventionDelta = 0.008 * (0.7 - level) // Proportional to gap
-                await state.update(dimension: dim, delta: max(0.002, interventionDelta), source: "stagnation_intervention")
+                // v23: Doubled intervention strength + adaptive scaling based on how far behind
+                let gap = max(0.1, 0.7 - level)
+                let interventionDelta = 0.015 * gap  // Stronger than before (was 0.008)
+                await state.update(dimension: dim, delta: max(0.004, interventionDelta), source: "stagnation_intervention")
+            }
+            // v23: Force diversity — if stagnation is widespread, boost the weakest dimension extra
+            if let weakest = audit.stagnatedDimensions.first {
+                let weakestLevel = await state.dimensionLevel(weakest)
+                if weakestLevel < 0.3 {
+                    await state.update(dimension: weakest, delta: 0.01, source: "forced_pivot")
+                }
             }
         }
 

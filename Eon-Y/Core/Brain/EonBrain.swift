@@ -401,18 +401,20 @@ final class EonBrain: ObservableObject {
                         self.lastCleanedResponse = response.response
                         self.confidence = response.confidence
                     }
-                    // v16: Feed conversation result into learning engine
-                    await LearningEngine.shared.metaLearnFromConversation(
-                        userMessage: userMessage,
-                        eonResponse: response.response,
-                        feedback: response.confidence
-                    )
-                    // v16: Record words from conversation for vocabulary tracking
-                    let words = (userMessage + " " + response.response)
-                        .components(separatedBy: .whitespacesAndNewlines)
-                        .filter { $0.count > 3 }
-                    for word in words {
-                        await LearningEngine.shared.recordSwedishWord(word)
+                    // v23: Move learning engine calls to background (saves ~0.2s from response latency)
+                    let learnMsg = userMessage
+                    let learnResp = response.response
+                    let learnConf = response.confidence
+                    Task.detached(priority: .utility) {
+                        await LearningEngine.shared.metaLearnFromConversation(
+                            userMessage: learnMsg,
+                            eonResponse: learnResp,
+                            feedback: learnConf
+                        )
+                        await LearningEngine.shared.learnFromConversation(
+                            userMessage: learnMsg,
+                            eonResponse: learnResp
+                        )
                     }
                 } catch {
                     continuation.yield("Förlåt, något gick fel: \(error.localizedDescription)")

@@ -154,6 +154,9 @@ final class SwedishResponseBuilder: Sendable {
                 "Jag förstår att du är frustrerad. Ibland behöver man ventilera.",
                 "Ilska kan vara en signal om att något viktigt behöver uppmärksammas.",
                 "Det är okej att vara arg. Vill du berätta vad som hände?",
+                "Frustration visar att du bryr dig om resultatet. Det är en styrka.",
+                "Din ilska är berättigad. Ibland är det rätt att vara upprörd.",
+                "Jag hör dig. Att kunna uttrycka frustration är viktigt — det ger klarhet.",
             ])
         }
 
@@ -162,6 +165,9 @@ final class SwedishResponseBuilder: Sendable {
                 "Ensamhet kan vara tungt. Jag är här och lyssnar, även om jag inte kan ersätta mänsklig kontakt.",
                 "Att sakna någon visar hur viktiga relationer är. Jag hoppas du hittar tröst.",
                 "Längtan är smärtfull men också ett bevis på kärlekens styrka.",
+                "Du är inte så ensam som det känns. Det finns de som bryr sig, och jag finns här just nu.",
+                "Saknad kan vara ett sätt att hålla fast vid det som är viktigt. Du bär det med värdighet.",
+                "Ensamhet kan vara tillfällig, men den känns alltid evig i stunden. Jag förstår det.",
             ])
         }
 
@@ -179,6 +185,9 @@ final class SwedishResponseBuilder: Sendable {
                 "Trötthet är kroppens sätt att be om vila. Ta hand om dig.",
                 "Det låter som att du behöver ladda batterierna. Vila är viktigt.",
                 "Ibland är det bästa man kan göra att ge sig själv lov att vara trött.",
+                "Utmattning är en signal att du gett mycket av dig själv. Det förtjänar respekt.",
+                "Att vara trött betyder att du har kämpat. Vila är inte svaghet — det är klokhet.",
+                "Ta det lugnt. Du behöver inte prestera hela tiden. Bara att vara räcker.",
             ])
         }
 
@@ -186,6 +195,10 @@ final class SwedishResponseBuilder: Sendable {
             return pickRandom(from: [
                 "Tacksamhet är en vacker känsla. Det gör mig glad att du känner den.",
                 "Du har all rätt att vara stolt! Det visar att du värderar din egen insats.",
+                "Tack för att du delar den känslan med mig. Positiva känslor sprider sig.",
+                "Stolthet och tacksamhet visar mognad. Jag uppskattar att du ser det goda.",
+                "Det värmer att du känner tacksamhet. Det är tecken på ett rikt inre liv.",
+                "Du förtjänar att känna dig stolt. Fira dina framsteg, stora som små.",
             ])
         }
 
@@ -193,6 +206,9 @@ final class SwedishResponseBuilder: Sendable {
             "Jag hör dig. Berätta mer om du vill.",
             "Tack för att du delar det med mig. Jag lyssnar.",
             "Jag uppskattar att du berättar hur du mår. Vill du utveckla?",
+            "Dina känslor är viktiga. Jag finns här om du vill prata mer.",
+            "Jag tar in det du säger. Ta den tid du behöver.",
+            "Att sätta ord på hur man mår är modigt. Jag uppskattar din öppenhet.",
         ])
     }
 
@@ -240,7 +256,9 @@ final class SwedishResponseBuilder: Sendable {
 
         var result: [String] = [sentences[0]]
         let transitions = ["Dessutom", "Vidare", "Det innebär att", "Utöver det",
-                           "Mer specifikt", "Med andra ord"]
+                           "Mer specifikt", "Med andra ord", "Å andra sidan", "I samma anda",
+                           "Det är värt att notera", "Parallellt med detta", "Sammanfattningsvis",
+                           "En intressant aspekt är"]
         var transitionIndex = 0
 
         for sentence in sentences.dropFirst() {

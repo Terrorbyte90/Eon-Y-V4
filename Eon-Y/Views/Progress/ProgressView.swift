@@ -284,7 +284,11 @@ struct AEROHistoryPanel: View {
         GlassCard(tint: Color(hex: "#F59E0B")) {
             VStack(alignment: .leading, spacing: 12) {
                 PanelHeader(icon: "arrow.triangle.2.circlepath.circle.fill", title: "AERO Self-Evolution", color: Color(hex: "#F59E0B")) {
-                    EmptyView()
+                    if let lastCycle = cycles.last {
+                        Text(lastCycle.timestamp.formatted(.relative(presentation: .named)))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#F59E0B").opacity(0.6))
+                    }
                 }
 
                 if cycles.isEmpty {

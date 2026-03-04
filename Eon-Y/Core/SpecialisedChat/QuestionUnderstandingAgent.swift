@@ -299,9 +299,12 @@ actor QuestionUnderstandingAgent {
         if lower.hasPrefix("varför ") || lower.contains("varför ") { return .whyExplanation }
 
         // Lista (v14: fler mönster, inte bara prefix)
-        let listPrefixPatterns = ["lista ", "räkna upp", "ge exempel", "nämn ", "vilka "]
+        let listPrefixPatterns = ["lista ", "räkna upp", "ge exempel", "nämn ", "vilka ",
+                                    "samla ihop", "skriv upp", "redovisa "]
         if listPrefixPatterns.contains(where: { lower.hasPrefix($0) }) { return .list }
-        let listContainsPatterns = ["ge mig en lista", "nämn några", "ge exempel på", "vilka typer"]
+        let listContainsPatterns = ["ge mig en lista", "nämn några", "ge exempel på", "vilka typer",
+                                     "finns det exempel", "kan du lista", "hur många typer",
+                                     "ge mig tre", "ge mig fem", "vilka finns"]
         if listContainsPatterns.contains(where: { lower.contains($0) }) { return .list }
 
         // Ja/Nej (v14: fungerar utan frågetecken för informella frågor)
@@ -312,18 +315,26 @@ actor QuestionUnderstandingAgent {
 
         // Förklaring (v14: fler mönster)
         let explainPatterns = ["förklara", "berätta om", "beskriv", "hur fungerar", "redogör",
-                               "berätta mer om", "vad innebär", "hur ser", "vad handlar"]
+                               "berätta mer om", "vad innebär", "hur ser", "vad handlar",
+                               "kan du förklara", "kan du beskriva", "utveckla", "klargör",
+                               "vad är poängen med", "hur kan man förstå", "på vilket sätt",
+                               "vad menas med", "vad ligger bakom", "vad beror"]
         if explainPatterns.contains(where: { lower.contains($0) }) { return .explanation }
 
         // Åsikt (v14: fler mönster)
         let opinionPatterns = ["tycker du", "anser du", "tror du", "din åsikt", "vad tänker du",
                                "vad anser du om", "hur ser du på", "gillar du", "föredrar du",
-                               "är du för eller emot"]
+                               "är du för eller emot", "vad är din uppfattning", "har du en åsikt",
+                               "håller du med", "instämmer du", "vad tycker du om", "vad är ditt intryck",
+                               "hur upplever du", "vad har du för tankar om", "sympatiserar du",
+                               "vad rekommenderar du"]
         if opinionPatterns.contains(where: { lower.contains($0) }) { return .opinion }
 
         // Kreativ (v14: fler mönster)
         let creativePatterns = ["skriv en", "hitta på", "dikt", "berättelse", "fantisera",
-                                "komponera", "formulera", "översätt", "fortsätt", "avsluta mening"]
+                                "komponera", "formulera", "översätt", "fortsätt", "avsluta mening",
+                                "skapa en", "dikta", "rim", "saga", "novell", "improvisera",
+                                "uppfinn", "fabulera", "låtsas", "rolespela"]
         if creativePatterns.contains(where: { lower.contains($0) }) { return .creative }
 
         // Personlig/emotionell (v14: fler mönster)
@@ -335,7 +346,8 @@ actor QuestionUnderstandingAgent {
 
         // Kort uppföljning (v14: kräver ingen fråga + längre ord-gräns)
         // Men inte om det är ett imperativ som "berätta om bitcoin"
-        let imperativeStarters = ["berätta", "förklara", "visa", "lista", "ge", "sök"]
+        let imperativeStarters = ["berätta", "förklara", "visa", "lista", "ge", "sök", "definiera",
+                                    "analysera", "jämför", "beskriv", "sammanfatta", "undersök"]
         let isImperative = imperativeStarters.contains(where: { lower.hasPrefix($0) })
         if wordCount <= 3 && !lower.contains("?") && !isImperative { return .followUp }
 
