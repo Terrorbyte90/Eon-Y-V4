@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 // MARK: - SleepConsolidationEngine: NREM/REM Sömncykler med synaptisk nedskaling
 // README §1.4: "Under NREM-sömn 'driftar' hjärnan genom dagens minnen i
@@ -167,9 +168,8 @@ final class SleepConsolidationEngine: ObservableObject {
 
         // 2. Sharp-wave ripple replay: återaktivera starka minnen
         // v9: Selective replay — high-confidence facts get stronger consolidation
-        let recentFacts = await memoryStore.recentFacts(limit: 10)
+        let recentFacts = await memoryStore.recentFactsWithConfidence(limit: 10)
         for fact in recentFacts {
-            // v9: Replay probability scales with fact confidence (important memories first)
             let replayProb = 0.15 + fact.confidence * 0.25  // 15-40% based on confidence
             if Double.random(in: 0...1) < replayProb {
                 // Scale learning rate by confidence — important facts get stronger
@@ -184,15 +184,16 @@ final class SleepConsolidationEngine: ObservableObject {
     }
 
     // MARK: - REM: Kreativ rekombination (v9: genuine memory-based associations)
+    // Enhanced with Qwen3 memory summarization for efficient storage.
 
     /// REM-sömn: sampla 2-4 minnen, blanda dem för kreativ insikt.
+    /// Qwen3 generates compressed summaries of related memories.
     private func runREM(esn: EchoStateNetwork, memoryStore: PersistentMemoryStore) async {
         // 1. Sampla slumpmässiga minnen
         let randomFacts = await memoryStore.randomFacts(limit: 4)
 
         // 2. v9: Convert actual fact content to numerical representation for ESN
         if randomFacts.count >= 2 {
-            // Genuine memory-based input: hash actual fact strings to deterministic values
             var mixedInput = [Double](repeating: 0, count: 32)
             for (fi, fact) in randomFacts.enumerated() {
                 let combined = "\(fact.subject)_\(fact.predicate)_\(fact.object)"
@@ -202,9 +203,8 @@ final class SleepConsolidationEngine: ObservableObject {
                     mixedInput[fi * 8 + ch] = shifted
                 }
             }
-            esn.tick(externalInput: mixedInput, arousal: 0.3) // Låg arousal under REM
+            esn.tick(externalInput: mixedInput, arousal: 0.3)
 
-            // v9: If ESN generates a spontaneous thought during REM, create new association
             if let spontaneous = esn.spontaneousThoughts.last,
                spontaneous.salience > 0.4,
                randomFacts.count >= 2 {
@@ -219,10 +219,47 @@ final class SleepConsolidationEngine: ObservableObject {
                 )
                 dreamsGenerated += 1
             }
+
+            // Qwen3 memory compression: summarize related facts into a single condensed fact
+            if !ThermalSleepManager.shared.shouldPauseWork() && randomFacts.count >= 3 {
+                await compressMemoriesWithQwen(facts: randomFacts, memoryStore: memoryStore)
+            }
         }
 
         // 3. Minska sömnbehov (långsammare under REM)
         sleepPressure = max(0, sleepPressure - 0.008)
+    }
+
+    /// Uses Qwen3 to create compressed summary facts from multiple related memories.
+    private func compressMemoriesWithQwen(
+        facts: [(subject: String, predicate: String, object: String, confidence: Double)],
+        memoryStore: PersistentMemoryStore
+    ) async {
+        let factDescriptions = facts.prefix(4).map { "\($0.subject) \($0.predicate) \($0.object)" }
+        let prompt = """
+        Sammanfatta dessa relaterade fakta till en enda koncis mening (max 30 ord, svenska):
+        \(factDescriptions.joined(separator: "\n"))
+        Sammanfattning:
+        """
+
+        let summary = await NeuralEngineOrchestrator.shared.generate(
+            prompt: prompt,
+            maxTokens: 50,
+            temperature: 0.3
+        )
+
+        let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let avgConfidence = facts.map(\.confidence).reduce(0, +) / Double(facts.count)
+        await memoryStore.saveFact(
+            subject: "konsoliderat_minne",
+            predicate: "sammanfattar",
+            object: trimmed,
+            confidence: min(0.9, avgConfidence + 0.1),
+            source: "rem_consolidation"
+        )
+        memoriesConsolidated += 1
     }
 
     /// v9: Count of dream-like associations generated during REM

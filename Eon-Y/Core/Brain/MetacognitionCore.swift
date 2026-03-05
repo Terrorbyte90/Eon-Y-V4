@@ -141,9 +141,13 @@ actor MetacognitionCore {
         let values = Array(dimensions.values)
         guard !values.isEmpty else {
             return CognitiveAudit(
-                integratedIntelligence: 0, coherence: 0,
-                strongestDimensions: [], growingDimensions: [],
-                weaknesses: [], dimensionCount: 0
+                integratedIntelligence: 0,
+                growthVelocity: 0,
+                stagnatedDimensions: [],
+                growingDimensions: [],
+                coherenceScore: 0,
+                activeProcessCount: 0,
+                timestamp: Date()
             )
         }
         let mean = values.reduce(0, +) / Double(values.count)

@@ -43,6 +43,43 @@ actor SwedishLanguageCore {
         )
     }
 
+    // MARK: - Qwen3-Enriched Deep Analysis
+
+    /// Uses Qwen3 to produce a deeper linguistic analysis of Swedish text,
+    /// identifying grammar patterns, clause structure, and linguistic features
+    /// beyond what rule-based NLP can detect.
+    func enrichAnalysis(text: String) async -> String {
+        guard !ThermalSleepManager.shared.shouldPauseWork() else {
+            return "Termisk begränsning — djupanalys pausad"
+        }
+
+        let basicAnalysis = await analyze(text)
+        let registerLabel = basicAnalysis.register.label
+        let clauseCount = basicAnalysis.clauses.count
+        let unknownCount = basicAnalysis.morphemes.filter { $0.pos == "unknown" }.count
+        let idiomSummary = basicAnalysis.detectedIdioms.map { $0.phrase }.joined(separator: ", ")
+
+        let prompt = """
+        Du är en expert på svensk lingvistik. Analysera denna svenska text djupgående:
+        "\(text)"
+
+        Grundläggande analys visar: register=\(registerLabel), \(clauseCount) satser, \(unknownCount) okända ord\(idiomSummary.isEmpty ? "" : ", idiom: \(idiomSummary)")
+
+        Ge en djupare analys som inkluderar:
+        1. GRAMMATIK: Identifiera satstyper (huvudsats/bisats), tempus, modus
+        2. ORDFÖLJD: Följer texten V2-regeln? Finns inversioner?
+        3. STILISTIK: Vilken stilnivå? Finns retoriska figurer?
+        4. KOMPLEXITET: Bedöm textens svårighetsgrad (A1-C2)
+        Svara koncist på svenska.
+        """
+
+        let response = await NeuralEngineOrchestrator.shared.generate(
+            prompt: prompt, maxTokens: 300, temperature: 0.4
+        )
+
+        return response.isEmpty ? "Ingen analys tillgänglig" : response
+    }
+
     // MARK: - Idiom Detection
     // Swedish idioms change meaning of the whole phrase — crucial for understanding
 

@@ -192,6 +192,12 @@ struct SmartDashView: View {
 
     var overviewContent: some View {
         VStack(spacing: 12) {
+            // Row 0: Eon's Inner Thoughts — live narrative stream
+            eonsThoughtsCard
+
+            // Row 0.5: Learning Progress
+            learningProgressCard
+
             // Row 1: Live Kognition + Live Självmedvetenhet
             HStack(spacing: 10) {
                 liveCognitionCard
@@ -225,6 +231,152 @@ struct SmartDashView: View {
             // Row 8: Active motors summary
             activeMotorsSummaryCard
         }
+    }
+
+    // MARK: - Eon's Thoughts Card (live from ConsciousnessEngine)
+
+    var eonsThoughtsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color(hex: "#A78BFA"))
+                Text("EONS TANKAR")
+                    .font(.system(size: 7, weight: .black, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+                Spacer()
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(Color(hex: "#34D399"))
+                        .frame(width: 4, height: 4)
+                        .shadow(color: Color(hex: "#34D399").opacity(0.8), radius: 2)
+                        .scaleEffect(orbPulse)
+                    Text("LIVE")
+                        .font(.system(size: 6, weight: .black, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#34D399"))
+                }
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(Capsule().fill(Color(hex: "#34D399").opacity(0.12)))
+            }
+
+            if !consciousness.innerNarrative.isEmpty {
+                Text(consciousness.innerNarrative)
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(Color(hex: "#A78BFA").opacity(0.85))
+                    .lineLimit(3)
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = consciousness.innerNarrative
+                        } label: {
+                            Label("Kopiera narrativ", systemImage: "doc.on.doc")
+                        }
+                    }
+            }
+
+            if !consciousness.currentSelfReflection.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "quote.bubble.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color(hex: "#F472B6").opacity(0.5))
+                    Text(consciousness.currentSelfReflection)
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(2)
+                }
+                .contextMenu {
+                    Button {
+                        UIPasteboard.general.string = consciousness.currentSelfReflection
+                    } label: {
+                        Label("Kopiera reflektion", systemImage: "doc.on.doc")
+                    }
+                }
+            }
+
+            let recentThoughts = consciousness.thoughtStream.suffix(3)
+            ForEach(Array(recentThoughts.reversed().enumerated()), id: \.offset) { idx, thought in
+                HStack(alignment: .top, spacing: 5) {
+                    Circle()
+                        .fill(Color(hex: "#A78BFA").opacity(0.35))
+                        .frame(width: 3, height: 3)
+                        .padding(.top, 5)
+                    Text(thought.content)
+                        .font(.system(size: 9, design: .rounded))
+                        .foregroundStyle(.white.opacity(idx == 0 ? 0.7 : 0.35))
+                        .lineLimit(1)
+                }
+                .contextMenu {
+                    Button {
+                        UIPasteboard.general.string = thought.content
+                    } label: {
+                        Label("Kopiera", systemImage: "doc.on.doc")
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(dashGlass(accent: Color(hex: "#A78BFA")))
+    }
+
+    // MARK: - Learning Progress Card
+
+    var learningProgressCard: some View {
+        let proxy = LearningEngine.observableProxy
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color(hex: "#FBBF24"))
+                Text("INLÄRNINGSFRAMSTEG")
+                    .font(.system(size: 7, weight: .black, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+                Spacer()
+            }
+
+            HStack(spacing: 0) {
+                VStack(spacing: 2) {
+                    Text("\(proxy.wordsLearnedToday)")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#34D399"))
+                    Text("Ord idag")
+                        .font(.system(size: 7, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+                .frame(maxWidth: .infinity)
+                VStack(spacing: 2) {
+                    Text("\(proxy.vocabularyCount)")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#38BDF8"))
+                    Text("Totalt ordförråd")
+                        .font(.system(size: 7, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+                .frame(maxWidth: .infinity)
+                VStack(spacing: 2) {
+                    Text("\(proxy.conversationsToday)")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#EC4899"))
+                    Text("Samtal idag")
+                        .font(.system(size: 7, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            if !proxy.latestLearnedWords.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(proxy.latestLearnedWords.suffix(5), id: \.self) { word in
+                        Text(word)
+                            .font(.system(size: 8, weight: .medium, design: .rounded))
+                            .foregroundStyle(Color(hex: "#FBBF24"))
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Capsule().fill(Color(hex: "#FBBF24").opacity(0.1)))
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(dashGlass(accent: Color(hex: "#FBBF24")))
+        .onAppear { proxy.refresh() }
     }
 
     // MARK: - Consciousness Engines Card
@@ -331,10 +483,18 @@ struct SmartDashView: View {
                     .foregroundStyle(.white.opacity(0.2))
             }
             ForEach(Array(lines.reversed().enumerated()), id: \.element.id) { idx, line in
-                Text(cleanThought(line.text))
+                let cleaned = cleanThought(line.text)
+                Text(cleaned)
                     .font(.system(size: 9, design: .rounded))
                     .foregroundStyle(.white.opacity(idx == 0 ? 0.85 : 0.4))
                     .lineLimit(1)
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = cleaned
+                        } label: {
+                            Label("Kopiera", systemImage: "doc.on.doc")
+                        }
+                    }
             }
         }
         .padding(10)
@@ -364,12 +524,26 @@ struct SmartDashView: View {
                     .font(.system(size: 9, design: .rounded))
                     .foregroundStyle(Color(hex: "#A78BFA").opacity(0.8))
                     .lineLimit(2)
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = consciousness.currentSelfReflection
+                        } label: {
+                            Label("Kopiera", systemImage: "doc.on.doc")
+                        }
+                    }
             }
             ForEach(Array(thoughts.reversed().enumerated()), id: \.offset) { idx, thought in
                 Text(thought.content)
                     .font(.system(size: 9, design: .rounded))
                     .foregroundStyle(.white.opacity(idx == 0 ? 0.75 : 0.35))
                     .lineLimit(1)
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = thought.content
+                        } label: {
+                            Label("Kopiera", systemImage: "doc.on.doc")
+                        }
+                    }
             }
         }
         .padding(10)
@@ -443,15 +617,15 @@ struct SmartDashView: View {
                         .foregroundStyle(Color(hex: "#38BDF8"))
                 }
             }
-            // BERT/GPT status
+            // Qwen3 status
             HStack(spacing: 8) {
                 HStack(spacing: 3) {
                     Circle().fill(brain.bertLoaded ? Color(hex: "#34D399") : Color(hex: "#6B7280")).frame(width: 4, height: 4)
-                    Text("BERT").font(.system(size: 7, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.4))
+                    Text("Qwen").font(.system(size: 7, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.4))
                 }
                 HStack(spacing: 3) {
                     Circle().fill(brain.gptLoaded ? Color(hex: "#34D399") : Color(hex: "#6B7280")).frame(width: 4, height: 4)
-                    Text("GPT").font(.system(size: 7, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.4))
+                    Text("LLM").font(.system(size: 7, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.4))
                 }
                 HStack(spacing: 3) {
                     Circle().fill(Color(hex: "#F59E0B")).frame(width: 4, height: 4)
@@ -514,7 +688,6 @@ struct SmartDashView: View {
                         .foregroundStyle(Color(hex: "#A78BFA"))
                 }
             }
-            // Inner narrative
             if !brain.metacognitiveInsight.isEmpty {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "quote.bubble.fill")
@@ -525,8 +698,14 @@ struct SmartDashView: View {
                         .foregroundStyle(.white.opacity(0.7))
                         .lineLimit(2)
                 }
+                .contextMenu {
+                    Button {
+                        UIPasteboard.general.string = brain.metacognitiveInsight
+                    } label: {
+                        Label("Kopiera insikt", systemImage: "doc.on.doc")
+                    }
+                }
             }
-            // Attention focus
             if !brain.attentionFocus.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "eye.fill")

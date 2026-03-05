@@ -20,6 +20,7 @@ struct EonPulseHomeView: View {
     @State private var showCognitionLog = false
     @State private var showFullLog = false
     @State private var showSmartDash = false
+    @State private var showSuperView = false
 
     // Flip meter states
     @State private var autonomFlipped = false
@@ -270,6 +271,7 @@ struct EonPulseHomeView: View {
                         LinearGradient(colors: [Color(hex: "#38BDF8"), Color(hex: "#06B6D4")], startPoint: .top, endPoint: .bottom)
                     )
                     .shadow(color: dominant.opacity(0.4), radius: 16)
+                    .onTapGesture { showSuperView = true }
                 Text("N")
                     .font(.system(size: 54, weight: .black, design: .rounded))
                     .foregroundStyle(
@@ -280,6 +282,9 @@ struct EonPulseHomeView: View {
             .shadow(color: dominant.opacity(0.5), radius: 24)
             .fullScreenCover(isPresented: $showSmartDash) {
                 SmartDashView().environmentObject(brain)
+            }
+            .fullScreenCover(isPresented: $showSuperView) {
+                SuperView().environmentObject(brain)
             }
 
             HStack(spacing: 10) {
@@ -458,15 +463,13 @@ struct EonPulseHomeView: View {
 
     var monologueSection: some View {
         ZStack {
-            // Kognition-sidan
             cognitionPanel
                 .opacity(showingSelfAwareness ? 0 : 1)
-                .rotation3DEffect(.degrees(showingSelfAwareness ? -90 : 0), axis: (x: 0, y: 1, z: 0))
+                .rotation3DEffect(.degrees(showingSelfAwareness ? -90 : 0), axis: (x: 0, y: 1, z: 0), perspective: 0)
 
-            // Självmedvetenhet-sidan
             selfAwarenessPanel
                 .opacity(showingSelfAwareness ? 1 : 0)
-                .rotation3DEffect(.degrees(showingSelfAwareness ? 0 : 90), axis: (x: 0, y: 1, z: 0))
+                .rotation3DEffect(.degrees(showingSelfAwareness ? 0 : 90), axis: (x: 0, y: 1, z: 0), perspective: 0)
         }
         .animation(.easeInOut(duration: 0.6), value: showingSelfAwareness)
     }
@@ -965,11 +968,11 @@ struct FlipMeterView: View {
                     .foregroundStyle(frontColor.opacity(0.7))
             }
             .opacity(isFlipped ? 0 : 1)
-            .rotation3DEffect(.degrees(isFlipped ? 180 : 0), axis: (x: 1, y: 0, z: 0))
+            .rotation3DEffect(.degrees(isFlipped ? 180 : 0), axis: (x: 1, y: 0, z: 0), perspective: 0)
 
             backContent
                 .opacity(isFlipped ? 1 : 0)
-                .rotation3DEffect(.degrees(isFlipped ? 0 : -180), axis: (x: 1, y: 0, z: 0))
+                .rotation3DEffect(.degrees(isFlipped ? 0 : -180), axis: (x: 1, y: 0, z: 0), perspective: 0)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)

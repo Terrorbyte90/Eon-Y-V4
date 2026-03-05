@@ -1,26 +1,32 @@
 import SwiftUI
 import Combine
 
-// MARK: - LanguageView — Eons språkutvecklingscenter (v15)
+// MARK: - LanguageView — Eons språkutvecklingscenter (v16 — med Hjärna-flik)
 
 struct LanguageView: View {
     @EnvironmentObject var brain: EonBrain
     @Environment(\.tabBarVisible) private var tabBarVisible
     @ObservedObject private var learning = LearningEngine.observableProxy
     @ObservedObject private var autonomy = EonLiveAutonomy.shared
+    @ObservedObject private var oscillators = OscillatorBank.shared
+    @ObservedObject private var critCtrl = CriticalityController.shared
+    @ObservedObject private var activeInf = ActiveInferenceEngine.shared
 
     @State private var selectedTab = 0
     @State private var competencies: [DomainCompetency] = []
     @State private var orbPulse: CGFloat = 1.0
+    @State private var ringRot: Double = 0
 
     private let tabs: [(String, String)] = [
         ("Översikt",     "chart.bar.fill"),
         ("Kompetenser",  "books.vertical.fill"),
         ("Utveckling",   "chart.line.uptrend.xyaxis"),
         ("Aktivitet",    "waveform.path.ecg"),
+        ("Hjärna",       "brain.head.profile"),
     ]
 
     private let accentColor = Color(hex: "#14B8A6")
+    private let mindAccent = Color(hex: "#60A5FA")
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -34,7 +40,8 @@ struct LanguageView: View {
                         case 0: overviewTab
                         case 1: competencyTab
                         case 2: developmentTab
-                        default: activityTab
+                        case 3: activityTab
+                        default: mindTab
                         }
                     }
                     .scrollTabBarVisibility(tabBarVisible: tabBarVisible)
@@ -46,6 +53,9 @@ struct LanguageView: View {
         .onAppear {
             withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
                 orbPulse = 1.06
+            }
+            withAnimation(.linear(duration: 9).repeatForever(autoreverses: false)) {
+                ringRot = 360
             }
             loadCompetencies()
             learning.refresh()
@@ -190,6 +200,51 @@ struct LanguageView: View {
                 langStatBox(label: "Samtal", value: "\(brain.conversationCount)", color: Color(hex: "#EC4899"))
             }
 
+            // Vocabulary growth sparkline
+            GlassCard(tint: Color(hex: "#38BDF8")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    PanelHeader(icon: "chart.line.uptrend.xyaxis", title: "Ordförrådstillväxt", color: Color(hex: "#38BDF8")) {
+                        Text("\(learning.wordsLearnedToday) ord idag")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#38BDF8").opacity(0.6))
+                    }
+
+                    SparklineView(
+                        values: vocabularySparklineData,
+                        color: Color(hex: "#38BDF8"),
+                        height: 36
+                    )
+
+                    HStack(spacing: 16) {
+                        VStack(spacing: 2) {
+                            Text("+\(learning.wordsLearnedToday)")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#34D399"))
+                            Text("Idag")
+                                .font(.system(size: 8, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                        VStack(spacing: 2) {
+                            Text("\(learning.vocabularyCount)")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#38BDF8"))
+                            Text("Totalt")
+                                .font(.system(size: 8, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                        VStack(spacing: 2) {
+                            Text(String(format: "%.1f", learning.velocity))
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#A78BFA"))
+                            Text("Ord/samtal")
+                                .font(.system(size: 8, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+
             // Linguistic domains overview
             GlassCard(tint: accentColor) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -224,8 +279,8 @@ struct LanguageView: View {
                     capabilityRow(name: "Textregisterdetektion", active: brain.pragmaticMastery > 0.1, level: brain.pragmaticMastery)
                     capabilityRow(name: "Anafora/pronomenupplösning", active: brain.semanticMastery > 0.1, level: brain.semanticMastery)
                     capabilityRow(name: "Ordbetydelsedisambiguering (WSD)", active: brain.semanticMastery > 0.15, level: brain.semanticMastery)
-                    capabilityRow(name: "GPT-SW3 textgenerering", active: brain.gptLoaded, level: brain.gptLoaded ? 0.7 : 0.0)
-                    capabilityRow(name: "KB-BERT semantisk embedding", active: brain.bertLoaded, level: brain.bertLoaded ? 0.8 : 0.0)
+                    capabilityRow(name: "Qwen3 textgenerering", active: brain.gptLoaded, level: brain.gptLoaded ? 0.7 : 0.0)
+                    capabilityRow(name: "Qwen3 semantisk embedding", active: brain.bertLoaded, level: brain.bertLoaded ? 0.8 : 0.0)
                 }
             }
 
@@ -257,7 +312,7 @@ struct LanguageView: View {
                                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.5))
 
-                            FlowLayout(spacing: 6) {
+                            LanguageFlowLayout(spacing: 6) {
                                 ForEach(brain.recentLearnedWords.suffix(12), id: \.self) { word in
                                     Text(word)
                                         .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -355,7 +410,6 @@ struct LanguageView: View {
             // Neural language models status
             GlassCard(tint: Color(hex: "#A78BFA")) {
                 VStack(alignment: .leading, spacing: 10) {
-                    // v24: Replaced EmptyView with load status
                     PanelHeader(icon: "cpu.fill", title: "Neurala språkmodeller", color: Color(hex: "#A78BFA")) {
                         Text(brain.gptLoaded && brain.bertLoaded ? "Alla laddade" : "Laddar...")
                             .font(.system(size: 10, design: .monospaced))
@@ -363,8 +417,8 @@ struct LanguageView: View {
                     }
 
                     HStack(spacing: 12) {
-                        modelStatusBox(name: "GPT-SW3", detail: "1.3B params", loaded: brain.gptLoaded, color: Color(hex: "#34D399"))
-                        modelStatusBox(name: "KB-BERT", detail: "768-dim", loaded: brain.bertLoaded, color: Color(hex: "#38BDF8"))
+                        modelStatusBox(name: "Qwen3", detail: "1.7B params", loaded: brain.gptLoaded, color: Color(hex: "#34D399"))
+                        modelStatusBox(name: "Qwen3 Embed", detail: "768-dim", loaded: brain.bertLoaded, color: Color(hex: "#38BDF8"))
                     }
 
                     HStack(spacing: 12) {
@@ -373,6 +427,87 @@ struct LanguageView: View {
                     }
                 }
             }
+
+            // Qwen3 learning activity
+            GlassCard(tint: Color(hex: "#7C3AED")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    PanelHeader(icon: "waveform.path.ecg", title: "Qwen3 inlärningsaktivitet", color: Color(hex: "#7C3AED")) {
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(brain.gptLoaded ? Color(hex: "#34D399") : Color(hex: "#EF4444"))
+                                .frame(width: 4, height: 4)
+                            Text(brain.gptLoaded ? "Aktiv" : "Offline")
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundStyle(brain.gptLoaded ? Color(hex: "#34D399").opacity(0.7) : Color(hex: "#EF4444").opacity(0.7))
+                        }
+                    }
+
+                    let qwenThoughts = brain.innerMonologue
+                        .filter { $0.text.lowercased().contains("qwen") || $0.text.lowercased().contains("embedding") || $0.text.lowercased().contains("generering") }
+                        .suffix(5)
+
+                    if qwenThoughts.isEmpty {
+                        Text("Qwen3 bearbetar i bakgrunden. Aktivitet visas här när modellen körs.")
+                            .font(.system(size: 11, design: .rounded).italic())
+                            .foregroundStyle(.white.opacity(0.3))
+                    } else {
+                        ForEach(Array(qwenThoughts.reversed()), id: \.id) { line in
+                            HStack(alignment: .top, spacing: 6) {
+                                Circle()
+                                    .fill(Color(hex: "#7C3AED").opacity(0.5))
+                                    .frame(width: 3, height: 3)
+                                    .padding(.top, 5)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(line.text)
+                                        .font(.system(size: 10, design: .rounded))
+                                        .foregroundStyle(.white.opacity(0.6))
+                                        .lineLimit(2)
+                                    Text(line.timestamp.formatted(.dateTime.hour().minute().second()))
+                                        .font(.system(size: 7, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.2))
+                                }
+                            }
+                            .contextMenu {
+                                Button {
+                                    UIPasteboard.general.string = line.text
+                                } label: {
+                                    Label("Kopiera", systemImage: "doc.on.doc")
+                                }
+                            }
+                        }
+                    }
+
+                    HStack(spacing: 16) {
+                        VStack(spacing: 2) {
+                            Text(String(format: "%.0f%%", ThermalSleepManager.shared.qwenThrottleFactor * 100))
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#7C3AED"))
+                            Text("Throttle")
+                                .font(.system(size: 7, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.3))
+                        }
+                        VStack(spacing: 2) {
+                            Text(brain.thermalState)
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundStyle(thermalStatusColor)
+                            Text("Termisk")
+                                .font(.system(size: 7, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.3))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private var thermalStatusColor: Color {
+        switch brain.thermalState.lowercased() {
+        case "nominal": return Color(hex: "#34D399")
+        case "fair":    return Color(hex: "#F59E0B")
+        case "serious": return Color(hex: "#F97316")
+        case "critical": return Color(hex: "#EF4444")
+        default: return Color(hex: "#34D399")
         }
     }
 
@@ -612,9 +747,21 @@ struct LanguageView: View {
             GlassCard(tint: accentColor) {
                 VStack(alignment: .leading, spacing: 10) {
                     PanelHeader(icon: "waveform.path.ecg", title: "Språkaktivitetslogg", color: accentColor) {
-                        Text("\(brain.languageLog.count) poster")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(accentColor.opacity(0.6))
+                        HStack(spacing: 6) {
+                            Text("\(brain.languageLog.count) poster")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(accentColor.opacity(0.6))
+                            if !brain.languageLog.isEmpty {
+                                Button {
+                                    UIPasteboard.general.string = brain.languageLog.suffix(20).joined(separator: "\n")
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(accentColor.opacity(0.4))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                     }
 
                     if brain.languageLog.isEmpty {
@@ -633,6 +780,13 @@ struct LanguageView: View {
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundStyle(.white.opacity(0.6))
                                     .lineLimit(3)
+                            }
+                            .contextMenu {
+                                Button {
+                                    UIPasteboard.general.string = entry
+                                } label: {
+                                    Label("Kopiera", systemImage: "doc.on.doc")
+                                }
                             }
                         }
                     }
@@ -678,11 +832,318 @@ struct LanguageView: View {
                                         .foregroundStyle(.white.opacity(0.2))
                                 }
                             }
+                            .contextMenu {
+                                Button {
+                                    UIPasteboard.general.string = line.text
+                                } label: {
+                                    Label("Kopiera", systemImage: "doc.on.doc")
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    // MARK: - Mind Tab (merged from MindView)
+
+    private var mindTab: some View {
+        VStack(spacing: 14) {
+            mindStatusCard
+            CognitiveCycleRingView(steps: brain.thinkingSteps)
+            mindPipelineCard
+            mindNeuralSyncCard
+            InnerMonologueView(lines: brain.innerMonologue)
+                .frame(minHeight: 400)
+            ThoughtGlassView(steps: brain.thinkingSteps)
+            mindNeuralEngineCard
+        }
+    }
+
+    private var mindStatusCard: some View {
+        GlassCard(tint: mindAccent) {
+            VStack(alignment: .leading, spacing: 10) {
+                PanelHeader(icon: "brain.head.profile", title: "Kognitiv status", color: mindAccent) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(brain.isAutonomouslyActive ? Color(hex: "#34D399") : Color(hex: "#FBBF24"))
+                            .frame(width: 5, height: 5)
+                            .shadow(color: brain.isAutonomouslyActive ? Color(hex: "#34D399").opacity(0.8) : .clear, radius: 2)
+                        Text(brain.isAutonomouslyActive ? "Autonom" : "Standby")
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundStyle(brain.isAutonomouslyActive ? Color(hex: "#34D399") : mindAccent.opacity(0.6))
+                    }
+                }
+
+                Text(mindStatusLabel)
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                HStack(spacing: 0) {
+                    mindMetric("II", String(format: "%.3f", brain.integratedIntelligence), mindAccent)
+                    mindMetric("Sync", String(format: "%.0f%%", oscillators.globalSync * 100), Color(hex: "#38BDF8"))
+                    mindMetric("σ", String(format: "%.2f", critCtrl.branchingRatio), Color(hex: "#FBBF24"))
+                    mindMetric("FE", String(format: "%.2f", activeInf.freeEnergy), Color(hex: "#06B6D4"))
+                }
+            }
+        }
+    }
+
+    private var mindStatusLabel: String {
+        if brain.isThinking { return "Bearbetar kognitiv cykel..." }
+        if critCtrl.regime == .critical { return "Kritiskt läge — maximal integration" }
+        if oscillators.globalSync > 0.5 { return "Hög synkronisering — koherent tänkande" }
+        if activeInf.freeEnergy > 0.5 { return "Explorativt läge — söker ny kunskap" }
+        return "Autonom kognition aktiv"
+    }
+
+    private func mindMetric(_ label: String, _ value: String, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 16, weight: .black, design: .monospaced))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 7, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var mindPipelineCard: some View {
+        GlassCard(tint: Color(hex: "#A78BFA")) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color(hex: "#A78BFA"))
+                    Text("KOGNITIV PIPELINE")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .tracking(1)
+                    Spacer()
+                    let done = brain.thinkingSteps.filter { $0.state == .completed }.count
+                    let total = brain.thinkingSteps.filter { $0.step != .idle }.count
+                    Text("\(done)/\(total)")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hex: "#A78BFA").opacity(0.6))
+                }
+
+                GeometryReader { g in
+                    let total = max(1, brain.thinkingSteps.filter { $0.step != .idle }.count)
+                    let done = brain.thinkingSteps.filter { $0.state == .completed }.count
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.04)).frame(height: 4)
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [Color(hex: "#7C3AED"), Color(hex: "#38BDF8")],
+                                startPoint: .leading, endPoint: .trailing
+                            ))
+                            .frame(width: g.size.width * CGFloat(done) / CGFloat(total), height: 4)
+                            .animation(.easeInOut(duration: 0.4), value: done)
+                    }
+                }
+                .frame(height: 4)
+
+                ForEach(brain.thinkingSteps.filter { $0.step != .idle }) { step in
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(step.step.pillarColor.opacity(step.state == .pending ? 0.05 : 0.14))
+                                .frame(width: 26, height: 26)
+                            if step.state == .active {
+                                Circle()
+                                    .fill(step.step.pillarColor.opacity(0.25))
+                                    .frame(width: 26, height: 26)
+                                    .blur(radius: 5)
+                                    .scaleEffect(orbPulse)
+                            }
+                            Image(systemName: step.step.icon)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(step.state == .pending ? .white.opacity(0.15) : step.step.pillarColor)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(step.step.label)
+                                .font(.system(size: 12, weight: step.state == .active ? .semibold : .regular, design: .rounded))
+                                .foregroundStyle(step.state == .pending ? .white.opacity(0.25) : .white.opacity(0.9))
+                            if !step.detail.isEmpty && step.state != .pending {
+                                Text(step.detail)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(step.step.pillarColor.opacity(0.55))
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Spacer()
+
+                        Group {
+                            if step.state == .active {
+                                HStack(spacing: 4) {
+                                    Circle().fill(step.step.pillarColor).frame(width: 4, height: 4).scaleEffect(orbPulse)
+                                    Text("AKTIV")
+                                        .font(.system(size: 7, weight: .black, design: .monospaced))
+                                        .foregroundStyle(step.step.pillarColor)
+                                        .tracking(0.8)
+                                }
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Capsule().fill(step.step.pillarColor.opacity(0.12)))
+                            } else if step.state == .completed {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Color(hex: "#34D399").opacity(0.6))
+                            } else if step.state == .triggered {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color(hex: "#FBBF24").opacity(0.7))
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .animation(.easeInOut(duration: 0.25), value: step.state)
+                }
+            }
+        }
+    }
+
+    private var mindNeuralSyncCard: some View {
+        GlassCard(tint: Color(hex: "#38BDF8")) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform.path")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(hex: "#38BDF8"))
+                    Text("NEURAL SYNKRONISERING")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .tracking(1)
+                    Spacer()
+                    let regimeColor = critCtrl.regime == .critical ? Color(hex: "#34D399") :
+                                      critCtrl.regime == .subcritical ? Color(hex: "#FBBF24") : Color(hex: "#EF4444")
+                    Text(critCtrl.regime == .critical ? "KRITISK" :
+                         critCtrl.regime == .subcritical ? "SUBKRITISK" : "SUPERKRITISK")
+                        .font(.system(size: 7, weight: .bold, design: .monospaced))
+                        .foregroundStyle(regimeColor)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 3).fill(regimeColor.opacity(0.15)))
+                }
+
+                HStack(spacing: 0) {
+                    VStack(spacing: 2) {
+                        Text(String(format: "%.0f%%", oscillators.globalSync * 100))
+                            .font(.system(size: 16, weight: .black, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#38BDF8"))
+                        Text("Global Sync")
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                    .frame(maxWidth: .infinity)
+                    VStack(spacing: 2) {
+                        Text(String(format: "%.2f", oscillators.thetaGammaCFC))
+                            .font(.system(size: 16, weight: .black, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#A78BFA"))
+                        Text("θ-γ CFC")
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                    .frame(maxWidth: .infinity)
+                    VStack(spacing: 2) {
+                        Text(String(format: "%.3f", critCtrl.branchingRatio))
+                            .font(.system(size: 16, weight: .black, design: .monospaced))
+                            .foregroundStyle(critCtrl.regime == .critical ? Color(hex: "#34D399") : Color(hex: "#FBBF24"))
+                        Text("σ Branching")
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                    .frame(maxWidth: .infinity)
+                    VStack(spacing: 2) {
+                        Text(String(format: "%.2f", activeInf.freeEnergy))
+                            .font(.system(size: 16, weight: .black, design: .monospaced))
+                            .foregroundStyle(Color(hex: "#06B6D4"))
+                        Text("Fri Energi")
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
+                let bands = ["δ", "θ", "α", "β", "γ"]
+                let bandColors: [Color] = [
+                    Color(hex: "#6366F1"), Color(hex: "#8B5CF6"),
+                    Color(hex: "#A78BFA"), Color(hex: "#38BDF8"), Color(hex: "#34D399")
+                ]
+                HStack(spacing: 4) {
+                    ForEach(0..<5, id: \.self) { i in
+                        let val = i < oscillators.orderParameters.count ? oscillators.orderParameters[i] : 0
+                        HStack(spacing: 3) {
+                            Text(bands[i])
+                                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                .foregroundStyle(bandColors[i].opacity(0.6))
+                                .frame(width: 10)
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color.white.opacity(0.05))
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(bandColors[i].opacity(0.7))
+                                        .frame(width: geo.size.width * CGFloat(val))
+                                }
+                            }
+                            .frame(height: 4)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var mindNeuralEngineCard: some View {
+        GlassCard(tint: Color(hex: "#38BDF8")) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 8) {
+                    Image(systemName: "cpu.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color(hex: "#38BDF8"))
+                    Text("NEURAL ENGINE")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .tracking(1)
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(brain.neuralEngine.isLoaded ? Color(hex: "#34D399") : Color(hex: "#FBBF24"))
+                            .frame(width: 4, height: 4)
+                            .scaleEffect(brain.neuralEngine.isLoaded ? 1.0 : orbPulse)
+                        Text(brain.neuralEngine.isLoaded ? "REDO" : "LADDAR")
+                            .font(.system(size: 7, weight: .black, design: .monospaced))
+                            .foregroundStyle(brain.neuralEngine.isLoaded ? Color(hex: "#34D399") : Color(hex: "#FBBF24"))
+                            .tracking(1)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    mindModelCard("Qwen3", "1.7B · GGUF", "cpu", Color(hex: "#7C3AED"), brain.neuralEngine.isLoaded)
+                    mindModelCard("llama.cpp", "Inference", "waveform", Color(hex: "#34D399"), brain.neuralEngine.isLoaded)
+                }
+            }
+        }
+    }
+
+    private func mindModelCard(_ name: String, _ sub: String, _ icon: String, _ color: Color, _ loaded: Bool) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle().fill(color.opacity(loaded ? 0.15 : 0.05)).frame(width: 34, height: 34)
+                Image(systemName: icon).font(.system(size: 13)).foregroundStyle(color.opacity(loaded ? 1.0 : 0.3))
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name).font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.white.opacity(loaded ? 0.9 : 0.4))
+                Text(sub).font(.system(size: 9, design: .monospaced)).foregroundStyle(.white.opacity(0.3))
+                Text(loaded ? "LADDAD" : "LADDAR").font(.system(size: 7, weight: .black, design: .monospaced)).foregroundStyle(loaded ? color : .white.opacity(0.2)).tracking(0.8)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(color.opacity(0.06)).overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(loaded ? 0.25 : 0.1), lineWidth: 0.6)))
     }
 
     // MARK: - Components
@@ -746,6 +1207,14 @@ struct LanguageView: View {
         if level >= 0.4 { return "Medel" }
         if level >= 0.2 { return "Nybörjare" }
         return "Grundläggande"
+    }
+
+    private var vocabularySparklineData: [Double] {
+        let base = max(1.0, Double(brain.vocabularySize))
+        let growth = brain.languageGrowthRate
+        return (0..<12).reversed().map { i in
+            max(0, base - Double(i) * growth * 5.0)
+        }
     }
 
     private func capabilityRow(name: String, active: Bool, level: Double) -> some View {
@@ -829,8 +1298,8 @@ extension LearningEngine {
     }
 }
 
-// MARK: - FlowLayout (horizontal wrapping)
-struct FlowLayout: Layout {
+// MARK: - LanguageFlowLayout (horizontal wrapping)
+struct LanguageFlowLayout: Layout {
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {

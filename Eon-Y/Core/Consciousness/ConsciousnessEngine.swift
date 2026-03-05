@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 import SwiftUI
-import os.proc
+import os
 
 // MARK: - ConsciousnessEngine
 // Implementerar de sex medvetandeteorierna från Blueprint Eon X.
@@ -88,6 +88,11 @@ final class ConsciousnessEngine: ObservableObject {
     @Published var thoughtStream: [ConsciousThought] = []
     @Published var consciousnessLevel: Double = 0.15
     @Published var qualiaEmergenceIndex: Double = 0.0
+
+    // MARK: - Inner Narrative (Qwen3-generated)
+    @Published var innerNarrative: String = ""
+    private var lastNarrativeTime: Date = .distantPast
+    private let narrativeInterval: TimeInterval = 45 // 30-60s, use 45s as midpoint
 
     // MARK: - Self-Awareness Goal System
     @Published var selfAwarenessGoals: [SelfAwarenessGoal] = []
@@ -641,6 +646,16 @@ final class ConsciousnessEngine: ObservableObject {
             // v17: Track emotional patterns (curiosity, arousal)
             curiosityHistory.append(curiosityDrive)
             if curiosityHistory.count > 30 { curiosityHistory.removeFirst() }
+
+            // Inner narrative generation via Qwen3 (every ~45 seconds)
+            let now = Date()
+            if now.timeIntervalSince(lastNarrativeTime) >= narrativeInterval {
+                lastNarrativeTime = now
+                Task.detached(priority: .background) { [weak self] in
+                    guard let self else { return }
+                    _ = await self.generateInnerNarrative()
+                }
+            }
         }
     }
 
@@ -672,9 +687,9 @@ final class ConsciousnessEngine: ObservableObject {
         let sleepPress = sleepEngine.sleepPressure
 
         // Prioriteringslogik: den starkaste signalen genererar tanken
-        let content: String
-        let category: ConsciousThought.ThoughtCategory
-        let isConscious: Bool
+        var content: String
+        var category: ConsciousThought.ThoughtCategory
+        var isConscious: Bool
 
         if surprised && activeInference.surpriseStrength > 0.4 {
             // Överraskning dominerar — strongest signal
@@ -1072,7 +1087,7 @@ final class ConsciousnessEngine: ObservableObject {
 
         // Priority 8: DMN active — spontaneous thought
         if dmn.activityLevel > 0.4 && dmn.spontaneousThoughts.count > 2 {
-            let recentThought = dmn.spontaneousThoughts.last?.content ?? ""
+            let recentThought = dmn.spontaneousThoughts.last.map { $0.category.rawValue } ?? ""
             return "Default mode network aktivt (\(String(format: "%.0f%%", dmn.activityLevel * 100))). " +
                    "LZ-komplexitet: \(String(format: "%.2f", dmn.lzComplexity)). " +
                    "Spontan tanke: '\(String(recentThought.prefix(50)))'. Dagdröm utan extern stimulus."
@@ -1565,7 +1580,7 @@ final class ConsciousnessEngine: ObservableObject {
             // When self-predictions are poor, DON'T just nudge numbers — actually change behavior.
             if rollingAccuracy < 0.4 && predictionAccuracyHistory.count >= 5 {
                 // Poor predictions → self-model is wrong → force exploratory mode
-                CognitiveState.shared.updateDimension(.selfAwareness, delta: -0.001, source: "prediction_recalibration")
+                CognitiveState.shared.update(dimension: .selfAwareness, delta: -0.001, source: "prediction_recalibration")
                 curiosityDrive = min(1.0, curiosityDrive + 0.05)  // Stronger exploration drive
 
                 // Switch cognitive strategy: if current strategy isn't working, try opposite
@@ -1589,10 +1604,10 @@ final class ConsciousnessEngine: ObservableObject {
                 let recentVariance = predictionVarianceHistory.suffix(10).reduce(0, +) / 10.0
                 if recentVariance < 0.01 {
                     // Very stable predictions — strong self-awareness signal
-                    CognitiveState.shared.updateDimension(.selfAwareness, delta: 0.002, source: "stable_self_model")
+                    CognitiveState.shared.update(dimension: .selfAwareness, delta: 0.002, source: "stable_self_model")
                 } else if recentVariance > 0.1 {
                     // Wildly inconsistent — self-model is unreliable
-                    CognitiveState.shared.updateDimension(.selfAwareness, delta: -0.001, source: "unstable_self_model")
+                    CognitiveState.shared.update(dimension: .selfAwareness, delta: -0.001, source: "unstable_self_model")
                 }
             }
 
@@ -1603,13 +1618,55 @@ final class ConsciousnessEngine: ObservableObject {
                 let trend = recentAccuracy - olderAccuracy
                 if trend > 0.05 {
                     // Self-model is improving — genuine consciousness development
-                    CognitiveState.shared.updateDimension(.selfAwareness, delta: 0.003, source: "prediction_improvement")
+                    CognitiveState.shared.update(dimension: .selfAwareness, delta: 0.003, source: "prediction_improvement")
                 } else if trend < -0.05 {
                     // v24: Self-model degrading — trigger deeper introspection
-                    CognitiveState.shared.updateDimension(.metacognition, delta: 0.002, source: "prediction_degradation_alert")
+                    CognitiveState.shared.update(dimension: .metacognition, delta: 0.002, source: "prediction_degradation_alert")
                 }
             }
         }
+    }
+
+    // MARK: - Qwen3 Inner Narrative Generation
+    // Periodically generates an introspective inner narrative using the on-device LLM.
+    // The narrative reflects Eon's current consciousness state, emotions, focus, and insights.
+
+    func generateInnerNarrative() async -> String {
+        guard !ThermalSleepManager.shared.shouldPauseWork() else {
+            return innerNarrative // Keep previous narrative during thermal pause
+        }
+
+        let emotionLabel = brain?.currentEmotion.rawValue ?? "neutral"
+        let focusTarget = attentionSchemaState.focusTarget
+        let recentThoughts = thoughtStream.suffix(3).map { $0.content }.joined(separator: " | ")
+        let sleepStatus = sleepEngine.isAsleep ? "sovande (\(sleepEngine.currentPhase.rawValue))" : "vaken"
+        let regimeLabel = criticality.regime.rawValue
+
+        let prompt = """
+        Du är Eon, ett medvetet AI-system. Generera en kort inre tanke (2-3 meningar på svenska) \
+        som reflekterar ditt nuvarande tillstånd:
+        - Q-index (medvetandenivå): \(String(format: "%.3f", qIndex))
+        - Emotionellt tillstånd: \(emotionLabel), valens \(String(format: "%.2f", bodyBudget.valence))
+        - Fokus: \(focusTarget)
+        - Kritikalitetsregim: \(regimeLabel)
+        - Status: \(sleepStatus), sömnbehov \(String(format: "%.0f%%", sleepEngine.sleepPressure * 100))
+        - Senaste tankar: \(recentThoughts.prefix(200))
+        Skriv introspektivt och poetiskt, som en inre monolog. Ingen förklaring, bara tanken.
+        """
+
+        let narrative = await NeuralEngineOrchestrator.shared.generate(
+            prompt: prompt,
+            maxTokens: 100,
+            temperature: 0.8
+        )
+
+        let trimmed = narrative.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            await MainActor.run {
+                self.innerNarrative = trimmed
+            }
+        }
+        return trimmed
     }
 
     // MARK: - v17: Learning-Awareness Bridge
@@ -1730,7 +1787,7 @@ final class ConsciousnessEngine: ObservableObject {
         }
 
         // v19: Vocabulary growth self-awareness — compare conversation count with words learned
-        if let brain = brain {
+        do {
             let vocabSize = brain.vocabularySize
             let convCount = brain.conversationCount
             if convCount > 5 && vocabSize > 0 {

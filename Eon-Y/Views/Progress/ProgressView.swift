@@ -285,7 +285,7 @@ struct AEROHistoryPanel: View {
             VStack(alignment: .leading, spacing: 12) {
                 PanelHeader(icon: "arrow.triangle.2.circlepath.circle.fill", title: "AERO Self-Evolution", color: Color(hex: "#F59E0B")) {
                     if let lastCycle = cycles.last {
-                        Text(lastCycle.timestamp.formatted(.relative(presentation: .named)))
+                        Text(lastCycle.date, style: .relative)
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(Color(hex: "#F59E0B").opacity(0.6))
                     }

@@ -1,5 +1,6 @@
 import Foundation
 import Accelerate
+import Combine
 
 // MARK: - OscillatorBank: Kuramoto-oscillatorer för neural synkronisering
 // Implementerar genuina fas-kopplade oscillatorer i 5 frekvensband (delta → gamma).

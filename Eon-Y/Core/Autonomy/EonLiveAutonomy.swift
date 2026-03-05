@@ -586,10 +586,9 @@ final class EonLiveAutonomy: ObservableObject {
 
                 if hasMorphemes {
                     storedMorphemes += analysis.morphemes.count
-                    brain.appendLanguageLog("Morfologi: '\(word)' → \(analysis.morphemes.count) morfem, register: \(analysis.register.rawValue)")
+                    brain.appendLanguageLog("Morfologi: '\(word)' → \(analysis.morphemes.count) morfem, register: \(analysis.register.label)")
 
-                    // v16: Store morphological analysis as fact for future reference
-                    let morphDesc = analysis.morphemes.map { $0.form }.joined(separator: "+")
+                    let morphDesc = analysis.morphemes.map { $0.description }.joined(separator: "+")
                     await PersistentMemoryStore.shared.saveFact(
                         subject: word,
                         predicate: "morfologisk_analys",
@@ -2744,7 +2743,7 @@ struct LanguageExperimentEngine {
             ("tanke", "tankefull", "Sammansättning+adj", "Hon var tankefull och tyst."),
         ]
 
-        let pair = wordPairs.randomElement() ?? ""
+        let pair = wordPairs.randomElement() ?? ("", "", "", "")
         let isNovel = existingExperiments.filter { $0.baseWord == pair.0 }.isEmpty
 
         return LanguageExperiment(
@@ -2785,7 +2784,7 @@ struct HypothesisEngine {
             ("Transfer learning mellan domäner ökar som funktion av abstrakt begreppslig likhet snarare än ytstruktur", "AI & Teknik"),
         ]
 
-        let template = templates.randomElement() ?? ""
+        let template = templates.randomElement() ?? ("", "")
         return EonHypothesis(
             statement: template.0,
             domain: template.1,
@@ -3437,7 +3436,7 @@ extension Int {
 
 struct AutonomousThought {
     let text: String
-    let category: ThoughtCategory
+    let category: AutonomousThoughtCategory
     var monologueType: MonologueLine.MonologueType {
         switch category {
         case .insight:      return .insight
@@ -3449,7 +3448,7 @@ struct AutonomousThought {
     }
 }
 
-enum ThoughtCategory {
+enum AutonomousThoughtCategory {
     case insight, reflection, learning, uncertainty, satisfaction
 }
 

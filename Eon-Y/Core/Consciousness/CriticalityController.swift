@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 // MARK: - CriticalityController: Edge-of-Chaos Homeostas
 // README §1.4: "Din hjärna opererar på gränsen mellan ordning och kaos...

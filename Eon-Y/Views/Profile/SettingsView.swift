@@ -31,8 +31,10 @@ struct SettingsView: View {
     @AppStorage("eon_bert_auto_unload")  private var bertAutoUnload = true
     @AppStorage("eon_gpt_auto_unload")   private var gptAutoUnload = true
     @AppStorage("eon_rest_extra_pct")    private var restExtraPct = 50
+    @AppStorage("eon_verbose_logging")   private var verboseLogging = false
 
     @State private var showResetAlert = false
+    @State private var showClearLogsAlert = false
     @State private var showAutomationSettings = false
     @State private var bertStatus = ""
     @State private var gptStatus = ""
@@ -197,33 +199,95 @@ struct SettingsView: View {
                 Divider().background(Color.white.opacity(0.06))
                 settingToggle("Konfidenspoäng", icon: "shield.fill", binding: $showConfidence, color: Color(hex: "#EC4899"))
                 Divider().background(Color.white.opacity(0.06))
+                settingToggle("Verbose loggning", icon: "text.alignleft", binding: $verboseLogging, color: Color(hex: "#EC4899"))
+                if verboseLogging {
+                    Divider().background(Color.white.opacity(0.06))
+                    settingRow {
+                        Text("Utökad loggning visar alla interna tankar, motorändringar och kognitiva beslut i realtid.")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Divider().background(Color.white.opacity(0.06))
                 settingToggle("Utvecklarläge", icon: "terminal", binding: $devMode, color: Color(hex: "#EC4899"))
             }
 
-            // BERT & GPT — lazy unload-inställningar
-            settingsGroup(title: "BERT & GPT", icon: "cpu.fill", color: Color(hex: "#38BDF8")) {
-                settingToggle("Auto-avlasta BERT efter 5 min", icon: "memorychip", binding: $bertAutoUnload, color: Color(hex: "#38BDF8"))
-                Divider().background(Color.white.opacity(0.06))
-                settingToggle("Auto-avlasta GPT efter 10 min", icon: "cpu", binding: $gptAutoUnload, color: Color(hex: "#38BDF8"))
-                Divider().background(Color.white.opacity(0.06))
+            // Qwen3 — model info & unload settings
+            settingsGroup(title: "QWEN3 MODELL", icon: "cpu.fill", color: Color(hex: "#38BDF8")) {
                 settingRow {
-                    HStack(spacing: 6) {
-                        Label("BERT", systemImage: "square.fill")
-                            .font(.system(size: 12, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.6))
-                        Spacer()
-                        Text(brain.bertLoaded ? "Laddad" : "Avlastad")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(brain.bertLoaded ? Color(hex: "#34D399") : Color.white.opacity(0.3))
-                        Divider().frame(height: 12).background(Color.white.opacity(0.1))
-                        Label("GPT", systemImage: "square.fill")
-                            .font(.system(size: 12, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.6))
-                        Text(brain.gptLoaded ? "Laddad" : "Avlastad")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(brain.gptLoaded ? Color(hex: "#34D399") : Color.white.opacity(0.3))
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Qwen3-1.7B")
+                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                Text("1.7B parametrar · GGUF · llama.cpp")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.4))
+                            }
+                            Spacer()
+                            VStack(spacing: 2) {
+                                Circle()
+                                    .fill(brain.gptLoaded ? Color(hex: "#34D399") : Color(hex: "#EF4444"))
+                                    .frame(width: 8, height: 8)
+                                    .shadow(color: brain.gptLoaded ? Color(hex: "#34D399").opacity(0.6) : .clear, radius: 4)
+                                Text(brain.gptLoaded ? "Aktiv" : "Av")
+                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(brain.gptLoaded ? Color(hex: "#34D399") : Color(hex: "#EF4444"))
+                            }
+                        }
+                        HStack(spacing: 16) {
+                            HStack(spacing: 4) {
+                                Text("Embed:")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.35))
+                                Text(brain.bertLoaded ? "Laddad" : "Av")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(brain.bertLoaded ? Color(hex: "#34D399") : .white.opacity(0.3))
+                            }
+                            HStack(spacing: 4) {
+                                Text("LLM:")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.35))
+                                Text(brain.gptLoaded ? "Laddad" : "Av")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(brain.gptLoaded ? Color(hex: "#34D399") : .white.opacity(0.3))
+                            }
+                            HStack(spacing: 4) {
+                                Text("Termisk:")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.35))
+                                Text(brain.thermalState)
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(thermalLabelColor)
+                            }
+                        }
+                        HStack(spacing: 4) {
+                            Text("Throttle:")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.35))
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color(hex: "#38BDF8").opacity(0.1))
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color(hex: "#38BDF8"))
+                                        .frame(width: geo.size.width * ThermalSleepManager.shared.qwenThrottleFactor)
+                                }
+                            }
+                            .frame(height: 4)
+                            Text(String(format: "%.0f%%", ThermalSleepManager.shared.qwenThrottleFactor * 100))
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color(hex: "#38BDF8"))
+                                .frame(width: 30, alignment: .trailing)
+                        }
                     }
                 }
+                Divider().background(Color.white.opacity(0.06))
+                settingToggle("Auto-avlasta Embed efter 5 min", icon: "memorychip", binding: $bertAutoUnload, color: Color(hex: "#38BDF8"))
+                Divider().background(Color.white.opacity(0.06))
+                settingToggle("Auto-avlasta LLM efter 10 min", icon: "cpu", binding: $gptAutoUnload, color: Color(hex: "#38BDF8"))
             }
 
             // Vila-inställningar
@@ -295,6 +359,54 @@ struct SettingsView: View {
                     .presentationDragIndicator(.visible)
             }
 
+            // Clear Logs (preserves memories)
+            Button {
+                showClearLogsAlert = true
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(hex: "#F59E0B").opacity(0.15))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "text.badge.minus")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(hex: "#F59E0B"))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Rensa loggar")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("Rensar alla loggar. Minnen och inlärning bevaras.")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(hex: "#F59E0B").opacity(0.04)))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color(hex: "#F59E0B").opacity(0.2), lineWidth: 0.6))
+                )
+            }
+            .alert("Rensa alla loggar?", isPresented: $showClearLogsAlert) {
+                Button("Avbryt", role: .cancel) {}
+                Button("Rensa", role: .destructive) {
+                    brain.languageLog.removeAll()
+                    brain.consciousnessThoughts.removeAll()
+                    brain.innerMonologue.removeAll()
+                }
+            } message: {
+                Text("Alla loggar rensas. Minnen, inlärning och personalisering bevaras intakt.")
+            }
+
             // Reset
             Button {
                 showResetAlert = true
@@ -360,6 +472,16 @@ struct SettingsView: View {
         HStack { content() }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
+    }
+
+    private var thermalLabelColor: Color {
+        switch brain.thermalState.lowercased() {
+        case "nominal": return Color(hex: "#34D399")
+        case "fair":    return Color(hex: "#F59E0B")
+        case "serious": return Color(hex: "#F97316")
+        case "critical": return Color(hex: "#EF4444")
+        default: return Color(hex: "#34D399")
+        }
     }
 
     func settingToggle(_ label: String, icon: String, binding: Binding<Bool>, color: Color) -> some View {

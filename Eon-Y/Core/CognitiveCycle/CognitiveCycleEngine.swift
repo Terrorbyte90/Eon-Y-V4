@@ -196,7 +196,7 @@ struct InputAnalyzer {
 
 // MARK: - ComplexityEstimator
 // Klassificerar en fråga som simple/medium/complex för att anpassa pipeline.
-// Enkla frågor hoppar över BERT-embedding (steg 4) och grafberikning (steg 9) — sparar ANE-resurser.
+// Enkla frågor hoppar över embedding (steg 4) och grafberikning (steg 9) — sparar resurser.
 
 struct ComplexityEstimate: Sendable {
     enum Level: Equatable, Sendable { case simple, medium, complex }
@@ -360,19 +360,19 @@ actor CognitiveCycleEngine {
         context.register = analysis.register
         await onStepUpdate(.wsd, .completed)
 
-        // v16: Compute BERT embedding ONCE — reused for memory ranking, entity extraction, Q-A check
+        // v16: Compute embedding ONCE — reused for memory ranking, entity extraction, Q-A check
         let inputEmb: [Float]
         let bertAvailable: Bool
         if complexity.skipBERT {
             inputEmb = []
             bertAvailable = false
-            await onMonologue(MonologueLine(text: "Enkel fråga — BERT hoppas", type: .thought))
+            await onMonologue(MonologueLine(text: "Enkel fråga — embedding hoppas", type: .thought))
         } else {
             inputEmb = await neuralEngine.embed(input)
             bertAvailable = !inputEmb.allSatisfy({ $0 == 0 })
         }
 
-        // Steg 3: Minneshämtning (v16: deadline-aware, reduced BERT calls)
+        // Steg 3: Minneshämtning (v16: deadline-aware, reduced embed calls)
         await onStepUpdate(.memoryRetrieval, .active)
         await onMonologue(MonologueLine(text: "Söker i minnet efter '\(inputAnalysis.coreTopic)'...", type: .memory))
         var rawMemories = await memory.searchConversations(query: input, limit: 20)
@@ -388,10 +388,10 @@ actor CognitiveCycleEngine {
                 rawMemories.append(mem)
             }
         }
-        // v16: BERT ranking — limit to top 8 memories (down from all), use cached inputEmb
+        // v16: Semantic ranking — limit to top 8 memories (down from all), use cached inputEmb
         if bertAvailable && rawMemories.count > 2 {
             let now = Date()
-            // v16: Pre-filter by keyword relevance before BERT (saves ~50% BERT calls)
+            // v16: Pre-filter by keyword relevance before embedding (saves ~50% embed calls)
             let inputWords = Set(input.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 3 })
             let preFiltered = rawMemories.sorted { mem1, mem2 in
                 let words1 = Set(mem1.content.lowercased().prefix(200).components(separatedBy: .whitespacesAndNewlines))
@@ -399,11 +399,11 @@ actor CognitiveCycleEngine {
                 return inputWords.intersection(words1).count > inputWords.intersection(words2).count
             }
             var scored: [(record: ConversationRecord, score: Double)] = []
-            // v23: Parallelize BERT embedding calls with TaskGroup (was sequential, ~1-2s savings)
+            // v23: Parallelize embedding calls with TaskGroup (was sequential, ~1-2s savings)
             let topCandidates = Array(preFiltered.prefix(8))
             await withTaskGroup(of: (Int, Double).self) { group in
                 for (i, mem) in topCandidates.enumerated() {
-                    group.addTask {
+                    group.addTask { [neuralEngine] in
                         let memEmb = await neuralEngine.embed(String(mem.content.prefix(200)))
                         let rawSim = Double(await neuralEngine.cosineSimilarity(inputEmb, memEmb))
                         return (i, rawSim)
@@ -415,7 +415,6 @@ actor CognitiveCycleEngine {
                     scored.append((topCandidates[i], rawSim + recencyBoost))
                 }
             }
-            }
             context.retrievedMemories = scored.sorted { $0.score > $1.score }
                 .filter { $0.score > 0.20 }
                 .prefix(5).map { $0.record }
@@ -425,7 +424,7 @@ actor CognitiveCycleEngine {
         let recentHistory = await memory.getRecentConversation(limit: 8)
         context.conversationHistory = recentHistory
         if !context.retrievedMemories.isEmpty {
-            let rankMethod = bertAvailable ? "BERT+tidsvikt" : "nyckelord"
+            let rankMethod = bertAvailable ? "Qwen3+tidsvikt" : "nyckelord"
             await onMonologue(MonologueLine(text: "Hittade \(context.retrievedMemories.count) relevanta minnen (\(rankMethod))", type: .memory))
         }
         await onStepUpdate(.memoryRetrieval, .completed)
@@ -433,7 +432,7 @@ actor CognitiveCycleEngine {
         // v16: Deadline check — if we've spent > 2s on steps 0-3, skip some enrichment
         let afterMemoryTime = deadline - .now
 
-        // Steg 4: BERT-embedding (v16: reuse cached inputEmb, no duplicate)
+        // Steg 4: Embedding (v16: reuse cached inputEmb, no duplicate)
         await onStepUpdate(.causalGraph, .active)
         context.inputEmbedding = inputEmb  // v16: Reuse from step 3
         if bertAvailable {
@@ -506,15 +505,15 @@ actor CognitiveCycleEngine {
         }
 
         let complexityLabel = complexity.isSimple() ? "enkel" : complexity.isMedium() ? "medel" : "komplex"
-        await onMonologue(MonologueLine(text: "Intention: \(intent.rawValue) · \(complexityLabel) · tokens: \(maxTokens) · temp: \(String(format: "%.2f", temperature))\(complexity.skipBERT ? " [BERT hoppas]" : "")", type: .thought))
+        await onMonologue(MonologueLine(text: "Intention: \(intent.rawValue) · \(complexityLabel) · tokens: \(maxTokens) · temp: \(String(format: "%.2f", temperature))\(complexity.skipBERT ? " [embedding hoppas]" : "")", type: .thought))
         await onStepUpdate(.chainOfThought, .completed)
 
-        // Steg 7: Generering (GPT-SW3) med adaptiva parametrar
+        // Steg 7: Generering (Qwen3 /no_think) med adaptiva parametrar
         await onStepUpdate(.generation, .active)
-        await onMonologue(MonologueLine(text: "GPT-SW3 genererar svar (\(intent.rawValue), \(complexityLabel))...", type: .thought))
+        await onMonologue(MonologueLine(text: "Qwen3 genererar svar (\(intent.rawValue), \(complexityLabel))...", type: .thought))
 
         var generatedText = ""
-        let stream = await neuralEngine.generateStream(prompt: prompt, maxTokens: maxTokens, temperature: Float(temperature))
+        let stream = await neuralEngine.generateStream(prompt: prompt, maxTokens: maxTokens, temperature: Float(temperature), enableThinking: false)
         for await token in stream {
             generatedText += token
             await onToken(token)
@@ -541,7 +540,7 @@ actor CognitiveCycleEngine {
                 neuralEngine: neuralEngine
             )
         } else {
-            validationResult = ValidationResult(needsRegeneration: false, correctionHint: "", mismatchScore: 0)
+            validationResult = ValidationResult(isValid: true, needsRegeneration: false, correctionHint: "", confidence: 0.85)
         }
         context.validationResult = validationResult
 
@@ -561,7 +560,7 @@ actor CognitiveCycleEngine {
             // v10: Stronger correction prompt — explicitly forbid repetition
             let correctedPrompt = prompt + "\n[KORRIGERING: \(validationResult.correctionHint). Skriv NYTT innehåll, upprepa INGENTING från det befintliga svaret.]"
             var correctedText = keepPart
-            let correctedStream = await neuralEngine.generateStream(prompt: correctedPrompt, maxTokens: 150, temperature: 0.62)
+            let correctedStream = await neuralEngine.generateStream(prompt: correctedPrompt, maxTokens: 150, temperature: 0.62, enableThinking: false)
             for await token in correctedStream {
                 correctedText += token
                 // v17: Don't stream regeneration tokens — they overlap with the initial response.
@@ -573,7 +572,7 @@ actor CognitiveCycleEngine {
         }
         await onStepUpdate(.validation, .completed)
 
-        // v16: BERT Q-A Relevance Check — reuse cached inputEmb (saves one BERT call)
+        // v16: Q-A Relevance Check — reuse cached inputEmb (saves one embed call)
         let timeForBERT = (deadline - .now) > .seconds(1.2)
         if timeForBERT && bertAvailable && !context.generatedText.isEmpty && context.generatedText.count > 20 {
             let questionEmb = inputEmb  // v16: Reuse cached embedding
@@ -586,13 +585,14 @@ actor CognitiveCycleEngine {
                 await onMonologue(MonologueLine(text: "Relevans \(String(format: "%.0f%%", qaRelevance * 100)) — svaret verkar inte handla om \(inputAnalysis.coreTopic), regenererar...", type: .loopTrigger))
                 // Regenerate with a much more focused prompt
                 let focusedPrompt = """
-                Svara KORT och DIREKT på svenska om: \(inputAnalysis.coreTopic)
+                Svara varmt och direkt på svenska om: \(inputAnalysis.coreTopic)
                 \(inputAnalysis.questionSummary)
                 \(inputAnalysis.namedEntities.isEmpty ? "" : "Det handlar om: \(inputAnalysis.namedEntities.joined(separator: ", "))")
+                Börja ALDRIG med "det du frågar om". Börja direkt med innehåll.
                 Användare: \(input)
-                Eon (kort svar om \(inputAnalysis.coreTopic)):
+                Eon:
                 """
-                let focusedText = await neuralEngine.generate(prompt: focusedPrompt, maxTokens: 200, temperature: 0.55)
+                let focusedText = await neuralEngine.generate(prompt: focusedPrompt, maxTokens: 200, temperature: 0.55, enableThinking: false)
                 if !focusedText.isEmpty {
                     context.generatedText = focusedText
                     // Check relevance of the new answer
@@ -694,7 +694,7 @@ actor CognitiveCycleEngine {
 
         await onStepUpdate(.memoryRetrieval, .active)
         await onMonologue(MonologueLine(text: "Söker djupt i minnet och kunskapsbanken...", type: .memory))
-        // v8: Wider search + BERT re-ranking in deep mode too
+        // v8: Wider search + semantic re-ranking in deep mode too
         let rawDeepMemories = await memory.searchConversations(query: input, limit: 40)
         let deepInputEmb = await neuralEngine.embed(input)
         let deepBertAvail = !deepInputEmb.allSatisfy({ $0 == 0 })
@@ -716,10 +716,10 @@ actor CognitiveCycleEngine {
         }
         let recentHistory = await memory.getRecentConversation(limit: 20)
         context.conversationHistory = recentHistory
-        await onMonologue(MonologueLine(text: "Hittade \(context.retrievedMemories.count) relevanta minnen (\(deepBertAvail ? "BERT+tidsvikt" : "nyckelord")), \(recentHistory.count) historikturer", type: .memory))
+        await onMonologue(MonologueLine(text: "Hittade \(context.retrievedMemories.count) relevanta minnen (\(deepBertAvail ? "Qwen3+tidsvikt" : "nyckelord")), \(recentHistory.count) historikturer", type: .memory))
         await onStepUpdate(.memoryRetrieval, .completed)
 
-        // Compute BERT embedding early — used for both article ranking and fact ranking
+        // Compute embedding early — used for both article ranking and fact ranking
         await onStepUpdate(.causalGraph, .active)
         let inputEmbedding = await neuralEngine.embed(input)
         context.inputEmbedding = inputEmbedding
@@ -743,7 +743,7 @@ actor CognitiveCycleEngine {
             await onMonologue(MonologueLine(text: "Självkunskap: \(selfKnowledge.relevantFacts.count) relevanta fakta om mig", type: .insight))
         }
 
-        // Semantic article retrieval — rank ALL articles by BERT similarity, not substring match
+        // Semantic article retrieval — rank ALL articles by embedding similarity, not substring match
         await onStepUpdate(.globalWorkspace, .active)
         await onMonologue(MonologueLine(text: "Bygger djup kontext med kunskapsbanken...", type: .thought))
         let knowledgeArticles = await memory.loadAllArticles()
@@ -801,11 +801,11 @@ actor CognitiveCycleEngine {
         await onMonologue(MonologueLine(text: "Resonemang steg 4: slutsats (konfidens \(String(format: "%.0f%%", reasoningResult.confidence * 100))) — formulerar svar...", type: .insight))
         await onStepUpdate(.chainOfThought, .completed)
 
-        // Steg 7: Generering med högre token-budget och lägre temperatur
+        // Steg 7: Generering med Qwen3 /think (djupt resonemang) och högre token-budget
         await onStepUpdate(.generation, .active)
-        await onMonologue(MonologueLine(text: "Genererar djupt resonerande svar (max 800 tokens)...", type: .thought))
+        await onMonologue(MonologueLine(text: "Qwen3 /think — djupt resonerande svar (max 800 tokens)...", type: .thought))
         var generatedText = ""
-        let stream = await neuralEngine.generateStream(prompt: deepPrompt, maxTokens: 800, temperature: 0.65)
+        let stream = await neuralEngine.generateStream(prompt: deepPrompt, maxTokens: 800, temperature: 0.65, enableThinking: true)
         for await token in stream {
             generatedText += token
             await onToken(token)
@@ -854,12 +854,12 @@ actor CognitiveCycleEngine {
         )
     }
 
-    // v12: Deep prompt also optimized for 512-token window (but can use more since deep mode allows more tokens)
+    // v12: Deep prompt optimized for compact context (deep mode uses Qwen3 /think for reasoning)
     private func buildDeepPrompt(input: String, context: CognitiveCycleContext, articles: [KnowledgeArticle]) async -> String {
         var lines: [String] = []
 
         // Compact system instruction
-        lines.append("Du är Eon i resonerande läge. Regler: Svara direkt om ämnet. Upprepa aldrig. Svenska. Analysera från flera perspektiv. Orsak-verkan. Konkreta exempel.")
+        lines.append("Du är Eon i resonerande läge. Regler: Börja direkt med insikter — eka aldrig frågan. Upprepa aldrig. Svenska. Var varm och personlig. Orsak-verkan. Konkreta exempel.")
 
         // Best article (max 1, truncated)
         if let best = articles.first {
@@ -932,12 +932,11 @@ actor CognitiveCycleEngine {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Prompt builder (v14: Token-budgeted for 512-token context window)
-    // CRITICAL: GPT-SW3 has a 512-token sliding window. The model only sees the LAST ~512 tokens.
+    // MARK: - Prompt builder (v14: Token-budgeted, compact prompt)
+    // Qwen3-1.7B has a larger context window but compact prompts still improve quality.
     // v14: Strict character budget (900 chars ≈ 350 tokens). Each section gets a budget.
     // Sections are filled by PRIORITY — if we run out of budget, lower-priority sections are cut.
     // Priority (highest=last, closest to generation): Question > Self-knowledge > Facts > Article > History
-    // Target: ≤900 chars for prompt, leaving ~160 tokens for response generation.
 
     private func buildPrompt(input: String, context: CognitiveCycleContext) async -> String {
         // Token budget: ~350 tokens ≈ 900 Swedish chars
@@ -951,7 +950,7 @@ actor CognitiveCycleEngine {
         case .informal:  registerHint = " Vardagligt."
         default:       registerHint = ""
         }
-        let sysLine = "Du är Eon, svenskt AI. Svara direkt. Upprepa aldrig. Koncist.\(registerHint)"
+        let sysLine = "Du är Eon, en varm och personlig AI-kompanjon. Svara direkt med substans — eka aldrig frågan. Var som en klok vän.\(registerHint)"
 
         // Section Z: Question anchoring (MUST be last — most visible to model)
         var anchorLines: [String] = []
@@ -986,7 +985,7 @@ actor CognitiveCycleEngine {
             }
         }
 
-        // Priority 2: Facts (BERT-ranked)
+        // Priority 2: Facts (semantically ranked)
         if remaining > 60 {
             let factBudget = min(remaining / 2, 200)
             let factLine = await buildFactSection(input: input, context: context, maxChars: factBudget)
@@ -1033,7 +1032,7 @@ actor CognitiveCycleEngine {
         return allLines.joined(separator: "\n")
     }
 
-    /// BERT-ranked facts section builder with strict budget
+    /// Semantically-ranked facts section builder with strict budget
     private func buildFactSection(input: String, context: CognitiveCycleContext, maxChars: Int) async -> String {
         var allFacts = await memory.searchFacts(query: input, limit: 8)
         if let analysis = context.inputAnalysis, analysis.coreTopic.count > 2 {
@@ -1056,7 +1055,7 @@ actor CognitiveCycleEngine {
         }
         guard !allFacts.isEmpty else { return "" }
 
-        // BERT-rank
+        // Semantic rank
         var rankedFacts = allFacts
         if !context.inputEmbedding.allSatisfy({ $0 == 0 }) {
             var scored: [(fact: (subject: String, predicate: String, object: String), score: Float)] = []
@@ -1128,7 +1127,7 @@ actor CognitiveCycleEngine {
         return lines
     }
 
-    private func buildBERTContext(input: String, entities: [ExtractedEntity]) -> String {
+    private func buildSemanticContext(input: String, entities: [ExtractedEntity]) -> String {
         var parts: [String] = []
         if !entities.isEmpty {
             let entityStr = entities.prefix(4).map { "\($0.text)(\($0.type.rawValue))" }.joined(separator: ", ")
@@ -1532,7 +1531,7 @@ actor CognitiveCycleEngine {
     }
 }
 
-// MARK: - GenerationValidator (Loop 1) — BERT cosine similarity
+    // MARK: - GenerationValidator (Loop 1) — cosine similarity validation
 
 actor GenerationValidator {
     func validate(generated: String, disambiguations: [DisambiguationResult], neuralEngine: NeuralEngineOrchestrator) async -> ValidationResult {
@@ -1562,11 +1561,11 @@ actor GenerationValidator {
             }
         }
 
-        // BERT-baserad semantisk validering: mät koherens mellan input och output
+        // Semantisk validering: mät koherens mellan input och output
         let inputEmb = await neuralEngine.embed(generated.prefix(256).description)
         let isLoaded = await neuralEngine.isLoaded
 
-        // Om BERT är laddad: använd cosine similarity för koherensmätning
+        // Om modellen är laddad: använd cosine similarity för koherensmätning
         if isLoaded && !inputEmb.allSatisfy({ $0 == 0 }) {
             // Validera att svaret är semantiskt koherent (inte repetitivt/tomt)
             let firstHalf = String(generated.prefix(generated.count / 2))
@@ -1759,7 +1758,7 @@ struct CognitiveCycleContext {
     var finalConfidence: Double = 0.75
     var consciousness: ConsciousnessContext? = nil
     var inputAnalysis: InputAnalysis? = nil  // v11: deep question understanding
-    var relevanceScore: Double = 0.0        // v11: BERT question-answer relevance
+    var relevanceScore: Double = 0.0        // v11: question-answer relevance score
     var selfKnowledge: SelfKnowledge? = nil // v13: SpecialisedChat self-knowledge
     var questionProfile: QuestionProfile? = nil // v13: deep question profile
 }

@@ -1,5 +1,6 @@
 import Foundation
 import Accelerate
+import Combine
 
 // MARK: - ActiveInferenceEngine: Prediktiv Processing & Fri Energiminimering
 // README §1.3 Teori 4: "Din hjärna gissar hela tiden... Medvetande uppstår ur
@@ -401,6 +402,77 @@ final class ActiveInferenceEngine: ObservableObject {
     /// Boost epistemic drive from external signal (e.g., poor self-predictions → explore more)
     func boostEpistemicDrive(by delta: Double) {
         epistemicValue = min(1.0, epistemicValue + delta)
+    }
+
+    // MARK: - Qwen3 User Intent Prediction
+    // Uses the on-device LLM to predict what the user might ask next,
+    // based on recent conversation history and current cognitive state.
+
+    @Published private(set) var userIntentPredictions: [UserIntentPrediction] = []
+    private var lastPredictionTime: Date = .distantPast
+
+    struct UserIntentPrediction: Identifiable {
+        let id = UUID()
+        let predictedIntent: String
+        let confidence: Double
+        let timestamp: Date
+        var wasCorrect: Bool? = nil
+    }
+
+    /// Generates predictions about what the user might ask next using Qwen3.
+    /// Called periodically when a conversation is active.
+    func generateUserIntentPrediction(recentMessages: [String], currentFocus: String) async {
+        guard !ThermalSleepManager.shared.shouldPauseWork() else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastPredictionTime) >= 60 else { return }
+        lastPredictionTime = now
+
+        let context = recentMessages.suffix(5).joined(separator: "\n")
+        let prompt = """
+        Baserat på denna konversationshistorik, förutsäg kort (en mening) vad användaren \
+        troligtvis frågar härnäst:
+        \(context.prefix(500))
+        Aktuellt fokus: \(currentFocus)
+        Förutsägelse:
+        """
+
+        let result = await NeuralEngineOrchestrator.shared.generate(
+            prompt: prompt,
+            maxTokens: 50,
+            temperature: 0.6
+        )
+
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        await MainActor.run {
+            let prediction = UserIntentPrediction(
+                predictedIntent: trimmed,
+                confidence: self.forwardModelAccuracy,
+                timestamp: now
+            )
+            self.userIntentPredictions.append(prediction)
+            if self.userIntentPredictions.count > 20 { self.userIntentPredictions.removeFirst(5) }
+        }
+    }
+
+    /// Validates the most recent prediction against actual user input.
+    func validatePrediction(actualInput: String) async {
+        guard !userIntentPredictions.isEmpty else { return }
+        let lastIdx = userIntentPredictions.count - 1
+        let predicted = userIntentPredictions[lastIdx].predictedIntent.lowercased()
+        let actual = actualInput.lowercased()
+
+        let embPredicted = await NeuralEngineOrchestrator.shared.embed(predicted)
+        let embActual = await NeuralEngineOrchestrator.shared.embed(actual)
+        let similarity = await NeuralEngineOrchestrator.shared.cosineSimilarity(embPredicted, embActual)
+
+        await MainActor.run {
+            self.userIntentPredictions[lastIdx].wasCorrect = similarity > 0.5
+            if similarity > 0.5 {
+                self.correctPredictions += 1
+            }
+        }
     }
 
     // MARK: - Export prediktionsstatus

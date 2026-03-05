@@ -815,8 +815,8 @@ class ResourceMonitor: ObservableObject {
         memoryComponents = [
             ("Eon (total)", usedMB, Color(hex: "#7C3AED")),
             ("Foundation Model", min(usedMB * 0.50, 850), Color(hex: "#14B8A6")),
-            ("KB-BERT", min(usedMB * 0.11, 180), Color(hex: "#3B82F6")),
-            ("GPT-SW3", min(usedMB * 0.10, 175), Color(hex: "#F59E0B")),
+            ("Qwen3 Embed", min(usedMB * 0.11, 180), Color(hex: "#3B82F6")),
+            ("Qwen3 Gen", min(usedMB * 0.10, 175), Color(hex: "#F59E0B")),
             ("SwiftUI/Runtime", min(usedMB * 0.12, 200), Color(hex: "#6366F1")),
             ("Databas/Cache", min(usedMB * 0.07, 116), Color(hex: "#34D399")),
         ]

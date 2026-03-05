@@ -589,13 +589,13 @@ struct MemoryExplorerSection: View {
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(Color(hex: "#A78BFA").opacity(0.4))
                     }
-                    ForEach(dmn.spontaneousThoughts.suffix(5).reversed(), id: \.content) { thought in
+                    ForEach(Array(dmn.spontaneousThoughts.suffix(5).reversed())) { thought in
                         HStack(alignment: .top, spacing: 8) {
                             Circle()
                                 .fill(Color(hex: "#A78BFA").opacity(0.6))
                                 .frame(width: 5, height: 5)
                                 .padding(.top, 5)
-                            Text(thought.content)
+                            Text("\(thought.category.rawValue) (salience \(String(format: "%.2f", thought.salience)))")
                                 .font(.system(size: 11, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.6))
                                 .lineLimit(2)

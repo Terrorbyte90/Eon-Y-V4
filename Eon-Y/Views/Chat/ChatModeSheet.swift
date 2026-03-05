@@ -23,7 +23,7 @@ struct ChatModeSheet: View {
             VStack(spacing: 10) {
                 ModeOption(
                     title: "Normal",
-                    subtitle: "Snabba, direkta svar. Använder kognitiv cykel med GPT + BERT.",
+                    subtitle: "Snabba, direkta svar. Använder kognitiv cykel med Qwen3.",
                     icon: "bolt.fill",
                     color: Color(hex: "#34D399"),
                     isSelected: !isReasoningMode

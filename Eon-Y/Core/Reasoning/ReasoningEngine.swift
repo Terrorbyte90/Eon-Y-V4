@@ -349,14 +349,14 @@ actor ReasoningEngine {
     // MARK: - Adaptivt resonemang (väljer bäst strategi automatiskt)
 
     private func adaptiveReason(input: String, depth: Int, trace: ReasoningTrace) async -> ReasoningResult {
-        let strategy = selectBestStrategy(for: input)
+        let strategy = await selectBestStrategy(for: input)
         return await reason(about: input, strategy: strategy, depth: depth)
     }
 
     // v7: Consciousness-informed adaptive strategy selection
     // Uses NLTagger POS analysis + consciousness state (curiosity, surprise, criticality)
     // to choose the optimal reasoning strategy.
-    private func selectBestStrategy(for input: String) -> ReasoningStrategy {
+    private func selectBestStrategy(for input: String) async -> ReasoningStrategy {
         let lower = input.lowercased()
         let wordCount = lower.split(separator: " ").count
 
@@ -408,20 +408,18 @@ actor ReasoningEngine {
         if wordCount > 15 { return .treeOfThought }
 
         // --- Phase 3: v9 — Consciousness-informed strategy bias ---
-        let inference = ActiveInferenceEngine.shared
-        let crit = CriticalityController.shared
+        let epistemicVal = await ActiveInferenceEngine.shared.epistemicValue
+        let isSurprised = await ActiveInferenceEngine.shared.isSurprised
+        let surpriseStr = await ActiveInferenceEngine.shared.surpriseStrength
+        let regime = await CriticalityController.shared.regime
 
-        // High curiosity → abductive (generate best explanations)
-        if inference.epistemicValue > 0.7 { return .abductive }
+        if epistemicVal > 0.7 { return .abductive }
 
-        // Surprise → causal (find why prediction was wrong)
-        if inference.isSurprised && inference.surpriseStrength > 0.4 { return .causal }
+        if isSurprised && surpriseStr > 0.4 { return .causal }
 
-        // Subcritical → analogical (rigid thinking needs cross-domain connections)
-        if crit.regime == .subcritical { return .analogical }
+        if regime == .subcritical { return .analogical }
 
-        // Supercritical → deductive (chaotic thinking needs structure)
-        if crit.regime == .supercritical { return .deductive }
+        if regime == .supercritical { return .deductive }
 
         // --- Phase 4: Diversity-based selection ---
         // Ensure we don't over-use any single strategy
