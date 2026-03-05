@@ -410,47 +410,27 @@ final class FullLogMonitor: ObservableObject {
         monologueCancellable?.cancel()
     }
 
-    // v8: Thermal-aware metric timer — adjusts frequency based on thermal state
+    // v9: Thermal-aware metric timer — reduced frequency (was 1-2s, now 5-15s)
+    // Removed duplicate overload that existed in v8
     private func startThermalAwareMetricTimer() {
         metricTimer?.invalidate()
-        let interval: TimeInterval
-        switch ProcessInfo.processInfo.thermalState {
-        case .nominal:            interval = 1.0
-        case .fair:               interval = 2.0
-        case .serious:            interval = 5.0
-        case .critical:           interval = 10.0
-        @unknown default:         interval = 2.0
-        }
-        metricTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.updateMetrics()
-                // Re-evaluate thermal interval periodically
-                if Int.random(in: 0..<5) == 0 { self?.startThermalAwareMetricTimer() }
-            }
-        }
-        metricTimer?.fire()
-    }
-
-    // v8: Thermal-aware metric timer — reduces polling frequency under thermal stress
-    private func startThermalAwareMetricTimer(initial: Bool = true) {
-        metricTimer?.invalidate()
-        if initial { updateMetrics() }
+        updateMetrics()
         let thermal = ProcessInfo.processInfo.thermalState
         let interval: TimeInterval
         switch thermal {
-        case .nominal:  interval = 2.0   // Reduced from 1.0s
-        case .fair:     interval = 4.0
-        case .serious:  interval = 8.0
-        case .critical: interval = 15.0
-        @unknown default: interval = 2.0
+        case .nominal:  interval = 5.0    // was 1-2s — massive CPU saving
+        case .fair:     interval = 8.0    // was 2-4s
+        case .serious:  interval = 15.0   // was 5-8s
+        case .critical: interval = 30.0   // was 10-15s
+        @unknown default: interval = 5.0
         }
         metricTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.updateMetrics()
-                // Re-evaluate thermal interval periodically
+                // Re-evaluate thermal interval every 5th tick
                 let current = ProcessInfo.processInfo.thermalState
-                let expected: ProcessInfo.ThermalState = interval > 10 ? .critical : interval > 6 ? .serious : interval > 3 ? .fair : .nominal
-                if current != expected { self?.startThermalAwareMetricTimer(initial: false) }
+                let expected: ProcessInfo.ThermalState = interval > 20 ? .critical : interval > 10 ? .serious : interval > 6 ? .fair : .nominal
+                if current != expected { self?.startThermalAwareMetricTimer() }
             }
         }
     }

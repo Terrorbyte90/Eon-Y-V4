@@ -752,13 +752,14 @@ class ResourceMonitor: ObservableObject {
 
     private func startThermalAwareTimer() {
         timer?.invalidate()
+        // v2: Increased intervals to reduce thermal footprint (was 5/8/15/30)
         let interval: TimeInterval
         switch ProcessInfo.processInfo.thermalState {
-        case .nominal:            interval = 5.0
-        case .fair:               interval = 8.0
-        case .serious:            interval = 15.0
-        case .critical:           interval = 30.0
-        @unknown default:         interval = 8.0
+        case .nominal:            interval = 8.0    // was 5s
+        case .fair:               interval = 12.0   // was 8s
+        case .serious:            interval = 25.0   // was 15s
+        case .critical:           interval = 45.0   // was 30s
+        @unknown default:         interval = 10.0
         }
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
