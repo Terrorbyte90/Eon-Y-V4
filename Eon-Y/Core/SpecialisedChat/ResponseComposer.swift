@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - ResponseComposer: Bygger Eons svar
 // Tar all information (fråga, kunskap, strategi, tänkande) och komponerar
-// det bästa möjliga svaret med GPT-SW3 eller template-baserat.
+// det bästa möjliga svaret med Qwen3 eller template-baserat.
 
 struct ResponseDraft: Sendable {
     let text: String
@@ -14,9 +14,9 @@ struct ResponseDraft: Sendable {
     let generationMethod: GenerationMethod
 
     enum GenerationMethod: String, Sendable {
-        case gptSW3 = "GPT-SW3"
+        case neural = "Qwen3"
         case template = "template"
-        case hybrid = "hybrid"       // Template start + GPT-SW3 fortsättning
+        case hybrid = "hybrid"       // Template start + Qwen3 fortsättning
     }
 }
 
@@ -38,7 +38,7 @@ actor ResponseComposer {
         // Steg 1: Välj genereringsmetod
         let method = selectMethod(strategy: strategy, knowledge: knowledge)
 
-        // Steg 2: Bygg prompt (anpassad för 512-token GPT-SW3)
+        // Steg 2: Bygg prompt (kompakt för Qwen3)
         let prompt = buildCompactPrompt(
             question: question,
             knowledge: knowledge,
@@ -58,8 +58,8 @@ actor ResponseComposer {
                 selfKnowledge: selfKnowledge,
                 strategy: strategy
             )
-        case .gptSW3:
-            text = await generateGPTResponse(prompt: prompt, strategy: strategy)
+        case .neural:
+            text = await generateNeuralResponse(prompt: prompt, strategy: strategy)
         case .hybrid:
             text = await generateHybridResponse(
                 question: question,
@@ -125,7 +125,7 @@ actor ResponseComposer {
             usedSelfKnowledge: strategy.useSelfKnowledge,
             usedReasoning: !thinkingResults.isEmpty,
             promptUsed: prompt,
-            generationMethod: .gptSW3
+            generationMethod: .neural
         )
     }
 
@@ -137,20 +137,20 @@ actor ResponseComposer {
     ) -> ResponseDraft.GenerationMethod {
         switch strategy.type {
         case .greeting:
-            return .template  // Hälsningar behöver inte GPT-SW3
+            return .template  // Hälsningar behöver inte Qwen3
         case .selfExplanation:
-            return .hybrid    // Template-start + GPT-SW3 för naturlighet
+            return .hybrid    // Template-start + Qwen3 för naturlighet
         case .factual, .definition:
             if knowledge.hasStrongKnowledge {
-                return .hybrid  // Fakta-baserat + GPT-SW3 för språk
+                return .hybrid  // Fakta-baserat + Qwen3 för språk
             }
-            return .gptSW3
+            return .neural
         default:
-            return .gptSW3
+            return .neural
         }
     }
 
-    // MARK: - Kompakt prompt (max ~350 tokens för GPT-SW3:s 512-fönster)
+    // MARK: - Kompakt prompt (max ~350 tokens för bästa svarskvalitet)
 
     private func buildCompactPrompt(
         question: QuestionProfile,
@@ -213,7 +213,7 @@ actor ResponseComposer {
             charBudget -= ctx.count
         }
 
-        // 7. Frågan sist (viktigast — syns alltid i GPT-SW3:s fönster)
+        // 7. Frågan sist (viktigast — syns alltid närmast generering)
         let topicLabel = question.coreTopic.isEmpty ? "" : " om \(question.coreTopic)"
         parts.append("Användare: \(question.resolvedInput)")
         parts.append("Eon (svar\(topicLabel)):")
@@ -301,19 +301,19 @@ actor ResponseComposer {
             return swedishBuilder.buildUncertainResponse(topic: question.coreTopic)
 
         default:
-            // Fallback till GPT-SW3
+            // Fallback till Qwen3
             let prompt = "Du är Eon. Svara kort.\nAnvändare: \(question.resolvedInput)\nEon:"
             return await neuralEngine.generate(prompt: prompt, maxTokens: 100)
         }
     }
 
-    // MARK: - GPT-SW3 generering
+    // MARK: - Qwen3 generering
 
-    private func generateGPTResponse(prompt: String, strategy: ResponseStrategy) async -> String {
+    private func generateNeuralResponse(prompt: String, strategy: ResponseStrategy) async -> String {
         let temperature: Float
         switch strategy.tone {
         case .academic, .confident: temperature = 0.5
-        case .creative, .playful: temperature = 0.85
+        case .playful, .curious: temperature = 0.85
         case .warm, .empathetic: temperature = 0.7
         default: temperature = 0.65
         }
@@ -352,7 +352,7 @@ actor ResponseComposer {
             templateStart = ""
         }
 
-        // Steg 2: GPT-SW3 fortsättning
+        // Steg 2: Qwen3 fortsättning
         if !templateStart.isEmpty {
             let continuationPrompt = prompt + " " + templateStart
             let continuation = await neuralEngine.generate(
@@ -361,12 +361,11 @@ actor ResponseComposer {
                 temperature: 0.65
             )
 
-            // Rensa continuation så den inte upprepar template-starten
             let cleaned = removeOverlap(base: templateStart, continuation: continuation)
             return templateStart + " " + cleaned
         }
 
-        return await generateGPTResponse(prompt: prompt, strategy: strategy)
+        return await generateNeuralResponse(prompt: prompt, strategy: strategy)
     }
 
     // MARK: - Integrera tänkande i svar
@@ -402,7 +401,7 @@ actor ResponseComposer {
 
     // MARK: - Hjälpfunktioner
 
-    /// Tar bort överlappning mellan template-start och GPT-continuation
+    /// Tar bort överlappning mellan template-start och neural continuation
     private func removeOverlap(base: String, continuation: String) -> String {
         let baseWords = base.lowercased().components(separatedBy: .whitespacesAndNewlines).suffix(5)
         let contWords = continuation.components(separatedBy: .whitespacesAndNewlines)

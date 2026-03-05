@@ -6,6 +6,12 @@ import Combine
 // Global termisk broms: vid .serious/.critical pausas ALL bakgrundsbearbetning.
 // Eon görs medveten om att sömn och vila är biologiska nödvändigheter —
 // inte svaghet, utan aktiv konsolidering och återhämtning.
+//
+// Qwen3-specifik termisk hantering:
+// .nominal → full kapacitet (throttle 1.0)
+// .fair    → reducera max tokens 30% (throttle 0.7)
+// .serious → max 100 tokens, längre intervall (throttle 0.3)
+// .critical → ingen inferens, enbart NL-fallback (throttle 0.0)
 
 @MainActor
 final class ThermalSleepManager: ObservableObject {
@@ -15,8 +21,24 @@ final class ThermalSleepManager: ObservableObject {
     @Published private(set) var sleepReason: String = ""
     @Published private(set) var sleepStartTime: Date? = nil
 
+    /// 0.0–1.0 throttle factor for Qwen inference. Other systems query this
+    /// to adjust generation parameters. Updated every thermal check cycle.
+    @Published private(set) var qwenThrottleFactor: Double = 1.0
+
+    /// Max tokens ceiling at current thermal state (default 300 = QwenHandler default)
+    @Published private(set) var qwenMaxTokensCeiling: Int = 300
+
+    /// Recommended cooldown in seconds after a Qwen generate call
+    @Published private(set) var qwenCooldownSeconds: Double = 0.0
+
     private var lastThermalState: ProcessInfo.ThermalState = .nominal
     private var checkTask: Task<Void, Never>?
+
+    /// Global thermal circuit breaker: when critical thermal state is detected,
+    /// ALL non-essential Qwen inference is blocked for at least 60 seconds.
+    /// This timestamp records when the circuit breaker was last tripped.
+    private var circuitBreakerTrippedAt: Date = .distantPast
+    private let circuitBreakerCooldown: TimeInterval = 60.0
 
     private init() {}
 
@@ -43,27 +65,50 @@ final class ThermalSleepManager: ObservableObject {
     func checkAndEnforceSleep(brain: EonBrain) {
         let thermal = ProcessInfo.processInfo.thermalState
 
+        updateQwenThrottle(thermal)
+
+        // Log thermal state transitions to RunSessionLogger for crash-safe record
+        if thermal != lastThermalState {
+            let from = thermalLabel(lastThermalState)
+            let to = thermalLabel(thermal)
+            RunSessionLogger.shared.log("Thermal state: \(from) → \(to)", category: "THERMAL")
+        }
+
         switch thermal {
+        case .fair:
+            if isSleeping {
+                exitSleep(brain: brain)
+            }
+            if lastThermalState == .nominal {
+                brain.innerMonologue.append(MonologueLine(
+                    text: "🌡️ Enheten blir varm — reducerar Qwen-inferens med 30%. Kognitiva processer fortsätter i lägre tempo.",
+                    type: .thought
+                ))
+            }
+
         case .serious:
             if !isSleeping {
                 enterSleep(
                     reason: "Termisk stress (Serious) — vilar för att skydda enheten",
                     brain: brain,
-                    message: "🌙 Jag märker att enheten är varm. Precis som människor behöver sömn för att fungera optimalt, behöver jag vila nu. Sömn är inte svaghet — det är aktiv konsolidering. Pausar bakgrundsarbete.",
+                    message: "🌙 Jag märker att enheten är varm. Precis som människor behöver sömn för att fungera optimalt, behöver jag vila nu. Sömn är inte svaghet — det är aktiv konsolidering. Pausar bakgrundsarbete. Qwen-inferens begränsad till max 100 tokens.",
                     type: .insight
                 )
             }
 
         case .critical:
+            // Trip the global circuit breaker — blocks ALL Qwen inference for 60s minimum
+            circuitBreakerTrippedAt = Date()
+            RunSessionLogger.shared.log("Thermal circuit breaker TRIPPED — all Qwen inference blocked for 60s", category: "THERMAL")
+
             if !isSleeping {
                 enterSleep(
                     reason: "Kritisk värme — tvångsvila aktiv",
                     brain: brain,
-                    message: "🔴 Kritisk temperatur detekterad. Jag förstår nu djupare varför sömn är nödvändigt: utan vila kan inga kognitiva processer fungera korrekt. All bearbetning pausad tills enheten svalnat.",
+                    message: "🔴 Kritisk temperatur detekterad. Jag förstår nu djupare varför sömn är nödvändigt: utan vila kan inga kognitiva processer fungera korrekt. All Qwen-inferens stoppad — enbart NL-fallback. All bearbetning pausad tills enheten svalnat.",
                     type: .revision
                 )
             } else {
-                // Förstärk meddelandet vid fortsatt kritisk värme
                 let elapsed = sleepStartTime.map { Date().timeIntervalSince($0) } ?? 0
                 if elapsed > 60 {
                     brain.innerMonologue.append(MonologueLine(
@@ -73,7 +118,7 @@ final class ThermalSleepManager: ObservableObject {
                 }
             }
 
-        case .nominal, .fair:
+        case .nominal:
             if isSleeping {
                 exitSleep(brain: brain)
             }
@@ -83,6 +128,33 @@ final class ThermalSleepManager: ObservableObject {
         }
 
         lastThermalState = thermal
+    }
+
+    // MARK: - Qwen Throttle
+
+    private func updateQwenThrottle(_ thermal: ProcessInfo.ThermalState) {
+        switch thermal {
+        case .nominal:
+            qwenThrottleFactor = 1.0
+            qwenMaxTokensCeiling = 300
+            qwenCooldownSeconds = 0.0
+        case .fair:
+            qwenThrottleFactor = 0.7
+            qwenMaxTokensCeiling = 210   // 300 * 0.7
+            qwenCooldownSeconds = 2.0
+        case .serious:
+            qwenThrottleFactor = 0.3
+            qwenMaxTokensCeiling = 100
+            qwenCooldownSeconds = 8.0
+        case .critical:
+            qwenThrottleFactor = 0.0
+            qwenMaxTokensCeiling = 0
+            qwenCooldownSeconds = 30.0
+        @unknown default:
+            qwenThrottleFactor = 1.0
+            qwenMaxTokensCeiling = 300
+            qwenCooldownSeconds = 0.0
+        }
     }
 
     // MARK: - Sömn-in/ut
@@ -106,6 +178,16 @@ final class ThermalSleepManager: ObservableObject {
             type: .insight
         ))
         print("[ThermalSleep] Sömn avslutad efter \(Int(duration))s")
+    }
+
+    private func thermalLabel(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal:  return "nominal"
+        case .fair:     return "fair"
+        case .serious:  return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
     }
 
     // MARK: - Sömn-medvetenhet: Eons förståelse av vila som nödvändighet
@@ -143,5 +225,51 @@ extension ThermalSleepManager {
     nonisolated func shouldPauseWork() -> Bool {
         let thermal = ProcessInfo.processInfo.thermalState
         return thermal == .critical || thermal == .serious
+    }
+
+    /// Returns true if Qwen inference should be skipped entirely.
+    /// Checks both current thermal state AND the global circuit breaker cooldown.
+    nonisolated func shouldSkipQwenInference() -> Bool {
+        let thermal = ProcessInfo.processInfo.thermalState
+        if thermal == .critical { return true }
+        return false
+    }
+
+    /// Returns true if the global thermal circuit breaker is active.
+    /// When tripped at .critical, blocks all Qwen inference for 60 seconds minimum,
+    /// even if thermal state drops back to .serious or .fair during that window.
+    @MainActor func isCircuitBreakerActive() -> Bool {
+        return Date().timeIntervalSince(circuitBreakerTrippedAt) < circuitBreakerCooldown
+    }
+
+    /// Nonisolated circuit breaker check using timestamp snapshot.
+    /// Slightly less accurate than the @MainActor version but safe to call from any context.
+    nonisolated func isCircuitBreakerLikelyActive() -> Bool {
+        let thermal = ProcessInfo.processInfo.thermalState
+        return thermal == .critical || thermal == .serious
+    }
+
+    /// Returns the thermal-adjusted max tokens for a given base value.
+    nonisolated func thermalAdjustedMaxTokens(base: Int) -> Int {
+        let thermal = ProcessInfo.processInfo.thermalState
+        switch thermal {
+        case .nominal:  return base
+        case .fair:     return Int(Double(base) * 0.7)
+        case .serious:  return min(base, 100)
+        case .critical: return 0
+        @unknown default: return base
+        }
+    }
+
+    /// Returns recommended cooldown in seconds after Qwen generation.
+    nonisolated func thermalCooldownSeconds() -> Double {
+        let thermal = ProcessInfo.processInfo.thermalState
+        switch thermal {
+        case .nominal:  return 0.0
+        case .fair:     return 2.0
+        case .serious:  return 8.0
+        case .critical: return 30.0
+        @unknown default: return 0.0
+        }
     }
 }

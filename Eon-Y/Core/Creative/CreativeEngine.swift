@@ -1062,27 +1062,30 @@ final class CreativeEngine: ObservableObject {
 
     private func emotionToValence(_ emotion: EonEmotion) -> Double {
         switch emotion {
-        case .joyful: return 0.9
-        case .satisfied: return 0.7
-        case .curious: return 0.5
-        case .engaged: return 0.4
-        case .focused: return 0.3
-        case .contemplative: return 0.2
-        case .neutral: return 0.0
-        case .uncertain: return -0.3
+        case .joyful, .delighted, .euphoric, .grateful, .proud: return 0.9
+        case .satisfied, .content, .amused: return 0.7
+        case .curious, .fascinated, .intrigued, .wondering: return 0.5
+        case .engaged, .excited, .enthusiastic, .inspired: return 0.4
+        case .focused, .determined, .motivated: return 0.3
+        case .contemplative, .reflective, .meditative, .pensive: return 0.2
+        case .neutral, .serene, .peaceful: return 0.0
+        case .uncertain, .confused, .doubtful: return -0.3
+        case .anxious, .frustrated, .overwhelmed, .vulnerable: return -0.5
+        default: return 0.1
         }
     }
 
     private func emotionToArousal(_ emotion: EonEmotion) -> Double {
         switch emotion {
-        case .engaged: return 0.8
-        case .curious: return 0.7
-        case .joyful: return 0.6
-        case .focused: return 0.6
-        case .uncertain: return 0.5
-        case .contemplative: return 0.3
-        case .satisfied: return 0.3
-        case .neutral: return 0.2
+        case .engaged, .excited, .enthusiastic, .passionate: return 0.8
+        case .curious, .fascinated, .intrigued: return 0.7
+        case .joyful, .euphoric, .inspired: return 0.6
+        case .focused, .determined, .motivated: return 0.6
+        case .uncertain, .anxious, .overwhelmed: return 0.5
+        case .contemplative, .reflective, .pensive: return 0.3
+        case .satisfied, .content, .serene: return 0.3
+        case .neutral, .peaceful, .meditative: return 0.2
+        default: return 0.4
         }
     }
 
@@ -1120,6 +1123,8 @@ final class CreativeEngine: ObservableObject {
             return transition
                 ? "Plötsligt fullt engagemang — denna interaktion kräver allt jag har."
                 : "Varje kognitiv resurs är aktiv. Jag är helt närvarande i detta ögonblick."
+        default:
+            return "Jag upplever ett nyanserat tillstånd — \(emotion.rawValue). Varje känsla bär information."
         }
     }
 
@@ -1432,6 +1437,7 @@ extension EonEmotion {
         case .satisfied: return "Nöjd"
         case .contemplative: return "Kontemplativ"
         case .engaged: return "Engagerad"
+        default: return rawValue.capitalized
         }
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import Accelerate
+import Combine
 
 // MARK: - EchoStateNetwork: Default Mode Network — Spontan intern aktivitet
 // README §4.4: "class DefaultModeNetwork" — 256 noder, spektralradie 1.05

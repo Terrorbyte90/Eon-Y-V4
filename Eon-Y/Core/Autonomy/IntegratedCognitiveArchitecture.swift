@@ -121,22 +121,23 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
             }
 
             // Check and fire events (infrequently — every 5th cycle = ~30s)
-            if currentCycle % 5 == 0 {
+            // At .fair: reduce event check frequency to every 8th cycle
+            let thermalState = ProcessInfo.processInfo.thermalState
+            let eventFrequency = thermalState == .fair ? 8 : 5
+            if currentCycle % eventFrequency == 0 {
                 await checkAndFireEvents(state: state, brain: brain)
             }
 
-            // v6: Thermal-aware interval: 20s nominal (was 15s)
-            // .serious/.critical handled by shouldPauseWork() above — only nominal/fair reach here
-            let thermalState = ProcessInfo.processInfo.thermalState
+            // Thermal-aware interval with Qwen GPU heat consideration:
+            // At .fair the Metal GPU is already warm from Qwen — give more breathing room
             let baseInterval: UInt64
             switch thermalState {
-            case .nominal:  baseInterval = 20_000_000_000   // was 15s
-            case .fair:     baseInterval = 30_000_000_000   // was 20s
-            case .serious:  baseInterval = 60_000_000_000   // fallback if reached
-            case .critical: baseInterval = 90_000_000_000   // fallback if reached
+            case .nominal:  baseInterval = 20_000_000_000
+            case .fair:     baseInterval = 40_000_000_000   // was 30s → 40s to reduce GPU contention
+            case .serious:  baseInterval = 75_000_000_000   // was 60s → 75s
+            case .critical: baseInterval = 120_000_000_000  // was 90s → 120s
             @unknown default: baseInterval = 20_000_000_000
             }
-            // v4.1: Motor speed multiplier — Eon can speed up or slow down orchestration
             let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "orchestrator")
             try? await Task.sleep(nanoseconds: interval)
         }
@@ -324,17 +325,16 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
             }
             activePillars.remove(.gapEngine)
 
-            // Thermal-aware interval: 60s nominal → up to 480s critical
+            // Thermal-aware interval: scaled for Qwen Metal GPU coexistence
             let thermalState = ProcessInfo.processInfo.thermalState
             let baseInterval: UInt64
             switch thermalState {
             case .nominal:  baseInterval = 60_000_000_000
-            case .fair:     baseInterval = 120_000_000_000
-            case .serious:  baseInterval = 300_000_000_000
-            case .critical: baseInterval = 480_000_000_000
+            case .fair:     baseInterval = 150_000_000_000   // was 120s → 150s: give GPU room for Qwen
+            case .serious:  baseInterval = 360_000_000_000   // was 300s → 360s
+            case .critical: baseInterval = 600_000_000_000   // was 480s → 600s (10 min)
             @unknown default: baseInterval = 60_000_000_000
             }
-            // v4.1: Motor speed multiplier for metacognition
             let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "metacognition")
             try? await Task.sleep(nanoseconds: interval)
         }
@@ -412,17 +412,16 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
                 await runFeedbackAmplification(brain: brain)
             }
 
-            // Thermal-aware interval between pillar work: 15s nominal → 120s critical
+            // Thermal-aware interval between pillar work: scaled for Qwen Metal GPU heat
             let thermalState = ProcessInfo.processInfo.thermalState
             let baseInterval: UInt64
             switch thermalState {
             case .nominal:  baseInterval = 15_000_000_000
-            case .fair:     baseInterval = 30_000_000_000
-            case .serious:  baseInterval = 90_000_000_000
-            case .critical: baseInterval = 120_000_000_000
+            case .fair:     baseInterval = 40_000_000_000    // was 30s → 40s: reduce GPU contention with Qwen
+            case .serious:  baseInterval = 120_000_000_000   // was 90s → 120s
+            case .critical: baseInterval = 180_000_000_000   // was 120s → 180s (3 min)
             @unknown default: baseInterval = 15_000_000_000
             }
-            // v4.1: Motor speed multiplier for pillar work
             let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "pillars")
             try? await Task.sleep(nanoseconds: interval)
         }
@@ -730,7 +729,7 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         // v7: Also feed DMN spontaneous thoughts into workspace (competing for access)
         let dmn = EchoStateNetwork.shared
         if dmn.activityLevel > 0.3, let spontaneous = dmn.spontaneousThoughts.last {
-            await workspace.addThoughtFromText(spontaneous.content, source: "dmn", priority: dmn.activityLevel * 0.5)
+            await workspace.addThoughtFromText(spontaneous.category.rawValue, source: "dmn", priority: dmn.activityLevel * 0.5)
         }
 
         await workspace.runCompetition()

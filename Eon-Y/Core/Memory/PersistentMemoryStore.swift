@@ -592,20 +592,28 @@ actor PersistentMemoryStore {
         return count
     }
 
-    func pruneOldFacts(olderThan days: Int, minConfidence: Double) {
+    /// Deprioritizes old low-confidence facts by halving their confidence.
+    /// Memory is NEVER deleted — only deprioritized so it fades naturally in retrieval ranking.
+    func deprioritizeOldFacts(olderThan days: Int, belowConfidence: Double) {
         guard isReady else { return }
         let cutoff = Date().timeIntervalSince1970 - Double(days) * 86400
-        let sql = "DELETE FROM facts WHERE created_at < ? AND confidence < ?"
+        let sql = "UPDATE facts SET confidence = confidence * 0.5, updated_at = ? WHERE created_at < ? AND confidence < ? AND confidence > 0.01"
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_double(stmt, 1, cutoff)
-            sqlite3_bind_double(stmt, 2, minConfidence)
+            sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+            sqlite3_bind_double(stmt, 2, cutoff)
+            sqlite3_bind_double(stmt, 3, belowConfidence)
             if sqlite3_step(stmt) == SQLITE_DONE {
-                let deleted = sqlite3_changes(db)
-                if deleted > 0 { print("[Memory] Rensade \(deleted) gamla fakta") }
+                let changed = sqlite3_changes(db)
+                if changed > 0 { print("[Memory] Deprioriterade \(changed) gamla fakta (confidence halverad)") }
             }
         }
         sqlite3_finalize(stmt)
+    }
+
+    @available(*, deprecated, renamed: "deprioritizeOldFacts")
+    func pruneOldFacts(olderThan days: Int, minConfidence: Double) {
+        deprioritizeOldFacts(olderThan: days, belowConfidence: minConfidence)
     }
 
     func recentArticleTitles(limit: Int = 200) -> [String] {
@@ -753,6 +761,165 @@ actor PersistentMemoryStore {
         }
         sqlite3_finalize(stmt)
         return count
+    }
+
+    // MARK: - Random facts (used by SleepConsolidationEngine for REM replay)
+
+    func randomFacts(limit: Int = 4) -> [(subject: String, predicate: String, object: String, confidence: Double)] {
+        guard isReady else { return [] }
+        var results: [(String, String, String, Double)] = []
+        let sql = "SELECT subject, predicate, object, confidence FROM facts ORDER BY RANDOM() LIMIT ?"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                results.append((
+                    sqlText(stmt, 0),
+                    sqlText(stmt, 1),
+                    sqlText(stmt, 2),
+                    sqlite3_column_double(stmt, 3)
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    // MARK: - Memory Consolidation
+    // Periodically merges duplicate facts, strengthens frequently accessed facts,
+    // and creates summary facts from clusters of related facts.
+
+    func consolidateMemories() async {
+        guard isReady else { return }
+
+        // 1. Merge exact duplicate facts — keep the one with highest confidence
+        mergeDuplicateFacts()
+
+        // 2. Strengthen frequently accessed/high-evidence facts
+        strengthenStrongFacts()
+
+        // 3. Deprioritize old low-confidence facts (never delete)
+        deprioritizeOldFacts(olderThan: 30, belowConfidence: 0.2)
+
+        // 4. Create summary facts from clusters of related facts (same subject)
+        await createSummaryFacts()
+
+        print("[Memory] Konsolidering klar")
+    }
+
+    private func mergeDuplicateFacts() {
+        guard isReady else { return }
+        // Find duplicates: same subject+predicate+object, keep highest confidence
+        let findSql = """
+            SELECT subject, predicate, object, MAX(confidence) as max_conf, COUNT(*) as cnt
+            FROM facts
+            GROUP BY subject, predicate, object
+            HAVING cnt > 1
+        """
+        var stmt: OpaquePointer?
+        var duplicates: [(String, String, String, Double)] = []
+        if sqlite3_prepare_v2(db, findSql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                duplicates.append((
+                    sqlText(stmt, 0),
+                    sqlText(stmt, 1),
+                    sqlText(stmt, 2),
+                    sqlite3_column_double(stmt, 3)
+                ))
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        for (subj, pred, obj, maxConf) in duplicates {
+            // Keep the row with highest confidence, deprioritize others
+            let updateSql = """
+                UPDATE facts SET confidence = confidence * 0.1
+                WHERE subject = ? AND predicate = ? AND object = ?
+                AND confidence < ?
+            """
+            var updateStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, updateSql, -1, &updateStmt, nil) == SQLITE_OK {
+                bindText(updateStmt, 1, subj)
+                bindText(updateStmt, 2, pred)
+                bindText(updateStmt, 3, obj)
+                sqlite3_bind_double(updateStmt, 4, maxConf)
+                _ = sqlite3_step(updateStmt)
+            }
+            sqlite3_finalize(updateStmt)
+        }
+
+        if !duplicates.isEmpty {
+            print("[Memory] Sammanfogade \(duplicates.count) duplicerade faktakluster")
+        }
+    }
+
+    private func strengthenStrongFacts() {
+        guard isReady else { return }
+        // Facts with high confidence that are recent get a small boost
+        let sql = """
+            UPDATE facts SET confidence = MIN(0.99, confidence * 1.02), updated_at = ?
+            WHERE confidence > 0.7
+            AND updated_at > ?
+        """
+        var stmt: OpaquePointer?
+        let now = Date().timeIntervalSince1970
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_double(stmt, 1, now)
+            sqlite3_bind_double(stmt, 2, now - 86400 * 7) // Active in last 7 days
+            _ = sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    private func createSummaryFacts() async {
+        guard isReady else { return }
+        // Find subjects with many facts (>5) that don't already have summaries
+        let sql = """
+            SELECT subject, COUNT(*) as cnt FROM facts
+            WHERE predicate != 'sammanfattar' AND predicate != 'konsoliderad_sammanfattning'
+            GROUP BY subject HAVING cnt > 5
+            ORDER BY cnt DESC LIMIT 5
+        """
+        var stmt: OpaquePointer?
+        var subjects: [(String, Int)] = []
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                subjects.append((sqlText(stmt, 0), Int(sqlite3_column_int(stmt, 1))))
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        for (subject, _) in subjects {
+            let existingSummary = factsAbout(subject: subject).first { $0.predicate == "konsoliderad_sammanfattning" }
+            guard existingSummary == nil else { continue }
+
+            let facts = factsAbout(subject: subject)
+            let factStr = facts.prefix(8).map { "\($0.predicate): \($0.object)" }.joined(separator: "; ")
+            let summaryText = "Sammanfattat: \(subject) — \(String(factStr.prefix(200)))"
+
+            saveFact(
+                subject: subject,
+                predicate: "konsoliderad_sammanfattning",
+                object: summaryText,
+                confidence: 0.8,
+                source: "consolidation"
+            )
+        }
+    }
+
+    // MARK: - Strengthen a specific fact (called on retrieval to implement "use it or lose it")
+
+    func strengthenFact(subject: String, predicate: String) {
+        guard isReady else { return }
+        let sql = "UPDATE facts SET confidence = MIN(0.99, confidence * 1.05), updated_at = ? WHERE subject = ? AND predicate = ?"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+            bindText(stmt, 2, subject)
+            bindText(stmt, 3, predicate)
+            _ = sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
     }
 
     // MARK: - Helper

@@ -1,6 +1,7 @@
 # ── Stora ML-modeller (exkluderas från repo) ──────────────────────────────────
 Eon-Y/Models/GptSw3_1_3B_Instruct.mlpackage/
 Eon-Y/Models/KBBertSwedish.mlpackage/
+*.gguf
 
 # ── Xcode ─────────────────────────────────────────────────────────────────────
 *.xcuserstate
@@ -27,6 +28,10 @@ Packages/
 
 # ── iCloud ────────────────────────────────────────────────────────────────────
 *.icloud
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
 
 # ── Cursor ────────────────────────────────────────────────────────────────────
 .cursor/

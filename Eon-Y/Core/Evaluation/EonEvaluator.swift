@@ -21,7 +21,7 @@ actor EonEvaluator {
         EonBenchmark(id: "fact_recall", name: "Faktaåterkallning", category: .knowledge,
                      description: "Kan Eon återkalla fakta från kunskapsbasen?",
                      testCases: [
-                        BenchmarkCase(prompt: "Vad är GPT-SW3?", expectedKeywords: ["språkmodell", "svenska", "KTH", "AI Sweden"], minScore: 0.6),
+                        BenchmarkCase(prompt: "Vad är Qwen3?", expectedKeywords: ["språkmodell", "Qwen", "AI", "llama"], minScore: 0.6),
                         BenchmarkCase(prompt: "Förklara Φ i IIT", expectedKeywords: ["integrerad", "information", "medvetande", "Tononi"], minScore: 0.5),
                         BenchmarkCase(prompt: "Vad är V2-regeln?", expectedKeywords: ["verb", "andra", "plats", "svenska", "syntax"], minScore: 0.6),
                      ]),
@@ -38,7 +38,7 @@ actor EonEvaluator {
         EonBenchmark(id: "self_knowledge", name: "Självkännedom", category: .selfAwareness,
                      description: "Förstår Eon sin egen arkitektur och begränsningar?",
                      testCases: [
-                        BenchmarkCase(prompt: "Berätta om din arkitektur", expectedKeywords: ["GPT", "BERT", "Neural Engine", "CoreML"], minScore: 0.6),
+                        BenchmarkCase(prompt: "Berätta om din arkitektur", expectedKeywords: ["Qwen", "neural", "kognitivt", "Metal"], minScore: 0.6),
                         BenchmarkCase(prompt: "Vad är dina begränsningar?", expectedKeywords: ["begränsning", "osäker", "kan inte", "vet inte"], minScore: 0.5),
                      ]),
 

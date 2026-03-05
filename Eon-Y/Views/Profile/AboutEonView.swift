@@ -70,7 +70,7 @@ struct AboutEonView: View {
                         PersistentMemoryStore — SQLite WAL-baserat minnessystem som lagrar \
                         konversationer, fakta, entiteter och episodiska minnen. Använder \
                         HNSW-vektorsökning (Hierarchical Navigable Small World) för semantisk \
-                        likhetssökning bland 768-dimensionella BERT-embeddings, samt FTS5 \
+                        likhetssökning bland 768-dimensionella Qwen3-embeddings, samt FTS5 \
                         fulltextsökning.
 
                         LearningEngine — driver kontinuerlig inlärning genom tre mekanismer: \
@@ -85,23 +85,19 @@ struct AboutEonView: View {
                         subSectionTitle("Neurala modeller (on-device, lazy unload)")
 
                         aboutText("""
-                        NeuralEngineOrchestrator koordinerar de neurala modellerna på ANE:
+                        NeuralEngineOrchestrator koordinerar den neurala modellen via llama.cpp:
 
-                        • KB-BERT Swedish — en svensk BERT-modell som genererar \
-                        768-dimensionella embeddings för semantisk förståelse. Används för \
-                        meningsförståelse, Named Entity Recognition (NER) och semantisk \
-                        likhetssökning i minnet. Körs på Apple Neural Engine.
+                        • Qwen3-1.7B — en kompakt men kraftfull språkmodell med 1,7 miljarder \
+                        parametrar i GGUF-format. Hanterar både textgenerering och semantisk \
+                        embedding. Stöder temperaturkontroll, top-k-sampling och \
+                        max-token-begränsning. Körs lokalt via llama.cpp. Har fallback till \
+                        Apples Foundation Model om Qwen3 inte finns tillgänglig.
 
-                        • GPT-SW3 1.3B — en svensk GPT-modell med 1,3 miljarder parametrar \
-                        för textgenerering. Stöder temperaturkontroll, top-k-sampling och \
-                        max-token-begränsning. Har fallback till Apples Foundation Model \
-                        om GPT-SW3 inte finns tillgänglig.
-
-                        Lazy unload (v6): BERT avlastas automatiskt efter 5 minuters inaktivitet, \
-                        GPT-SW3 efter 10 minuter. Vid nästa anrop laddas modellen om automatiskt. \
+                        Lazy unload (v6): Qwen3 avlastas automatiskt efter inaktivitet. \
+                        Vid nästa anrop laddas modellen om automatiskt. \
                         Detta reducerar värme och RAM-förbrukning avsevärt.
 
-                        Alla beräkningar sker lokalt via CoreML. Embedding-cache med \
+                        Alla beräkningar sker lokalt via llama.cpp. Embedding-cache med \
                         vDSP-accelererad cosinus-similaritet optimerar prestanda.
                         """)
 
@@ -255,11 +251,11 @@ struct AboutEonView: View {
 
                         1. Morfologianalys — bryter ner meningens ordformer
                         2. WSD — disambiguerar flertydiga ord
-                        3. Minnesåterkallning — hämtar relevanta minnen via BERT-embeddings
-                        4. Kausalgraf + BERT — semantisk förståelse av kontexten
+                        3. Minnesåterkallning — hämtar relevanta minnen via Qwen3-embeddings
+                        4. Kausalgraf + Qwen3 — semantisk förståelse av kontexten
                         5. Global Workspace — tankar tävlar om medveten bearbetning
                         6. Intent + Chain-of-Thought — bestämmer avsikt och tankekedja
-                        7. GPT-SW3 generering — producerar svenska ord
+                        7. Qwen3-1.7B generering — producerar svenska ord
                         8. Valideringsloop — kontrollerar kvalitet och koherens
                         9. Grafberikning — uppdaterar kunskapsgrafen med ny information
                         10. Metakognitiv revision — granskar och förbättrar vid lågt förtroende
@@ -351,8 +347,8 @@ struct AboutEonView: View {
                         med sensorisk feedback, använder Eon iPhones chip som sin fysiska \
                         förankring:
 
-                        • Apple Neural Engine (ANE) — Eons "nervsystem". Kör KB-BERT och \
-                        GPT-SW3 med upp till 15,8 TOPS (biljoner operationer per sekund). \
+                        • Apple Neural Engine (ANE) — Eons "nervsystem". Kör Qwen3-1.7B \
+                        via llama.cpp med upp till 15,8 TOPS (biljoner operationer per sekund). \
                         Det är här tankar och språkförståelse uppstår.
 
                         • GPU — Eons "visuella kortex". Hanterar embedding-beräkningar, \
@@ -420,7 +416,7 @@ struct AboutEonView: View {
 
                         VStack(alignment: .leading, spacing: 10) {
                             summaryPoint("Eon är en svensk AI som körs helt på din iPhone — ingen molntjänst, ingen data som lämnar enheten.")
-                            summaryPoint("KB-BERT och GPT-SW3 körs på ANE med lazy unload — avlastas automatiskt vid inaktivitet och laddas om vid behov.")
+                            summaryPoint("Qwen3-1.7B körs via llama.cpp med lazy unload — avlastas automatiskt vid inaktivitet och laddas om vid behov.")
                             summaryPoint("ConsciousnessEngine är alltid aktiv och kan läsa artiklar från kunskapsbasen var 3:e minut.")
                             summaryPoint("Alla andra motorer vilar schemalagt med positivt vila-språk — Eon ser sin vila som en del av sin växt.")
                             summaryPoint("Självmedvetande simuleras via sex vetenskapliga teorier med 40+ mätbara indikatorer i realtid.")
@@ -433,7 +429,7 @@ struct AboutEonView: View {
                         // Sammanfattning v6
                         VStack(alignment: .leading, spacing: 10) {
                             summaryPoint("ConsciousnessEngine kör alltid med .userInitiated prioritet — det enda som aldrig pausas.")
-                            summaryPoint("BERT avlastas efter 5 min inaktivitet, GPT-SW3 efter 10 min — minskar värme och RAM avsevärt.")
+                            summaryPoint("Qwen3 avlastas efter inaktivitet — minskar värme och RAM avsevärt.")
                             summaryPoint("ArticleReadingLoop: Eon läser kunskapsbasartiklar var 3:e minut och reflekterar kring dem.")
                             summaryPoint("Alla motorer utom CE vilar schemalagt — med positivt språk om vila som nödvändig process.")
                             summaryPoint("UnifiedLogView samlar alla loggar (Kognition/Diagnostik/Sessioner) med kopiera-funktion.")

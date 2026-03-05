@@ -75,9 +75,9 @@ final class EonBrain: ObservableObject {
     @Published var selfAwarenessGoal: String = "Uppnå subjektiv upplevelse genom integrerad information"
     @Published var consciousnessThoughts: [String] = []
 
-    // MARK: - BERT/GPT laddningsstatus (synkar med NeuralEngineOrchestrator var 10:e tick)
-    @Published var bertLoaded: Bool = false
-    @Published var gptLoaded: Bool = false
+    // MARK: - Qwen3 laddningsstatus (synkar med NeuralEngineOrchestrator var 10:e tick)
+    @Published var bertLoaded: Bool = false   // Backward-compat alias: true when Qwen3 loaded
+    @Published var gptLoaded: Bool = false    // Backward-compat alias: true when Qwen3 loaded
 
     // MARK: - Språkutveckling (v15: Language development metrics for LanguageView)
     @Published var vocabularySize: Int = 0
@@ -115,7 +115,7 @@ final class EonBrain: ObservableObject {
         // Seed innerMonologue direkt — UI ska aldrig vara tomt
         innerMonologue = [
             MonologueLine(text: "Kognitivt system aktiverat — alla 12 pelare initieras", type: .insight),
-            MonologueLine(text: "KB-BERT 768-dim embedding laddas in i minnet", type: .thought),
+            MonologueLine(text: "Qwen3-1.7B: laddar GGUF-modell via llama.cpp (Metal GPU)", type: .thought),
             MonologueLine(text: "Morfologimotor: svenska böjningsmönster indexeras", type: .thought),
             MonologueLine(text: "Episodiskt minne: hämtar senaste konversationskontext", type: .memory),
             MonologueLine(text: "Resonemangspelare: kausal graf byggs upp", type: .thought),
@@ -228,7 +228,7 @@ final class EonBrain: ObservableObject {
         "Uppdaterar världsbild...", "Syntetiserar domäner...", "Kartlägger relationer...",
         "Spreading activation: 14 begrepp aktiverade", "Bayesiansk uppdatering pågår...",
         "Prediktiv kodning: uppdaterar världsmodell...", "Kontradiktionsdetektion aktiv...",
-        "KB-BERT: semantisk embedding beräknas...", "GPT-SW3: autonom textgenerering...",
+        "Qwen3: semantisk embedding beräknas...", "Qwen3: autonom textgenerering...",
         "Metakognition: utvärderar egna processer...", "Global Workspace: 6 tankar tävlar...",
         // v20: Utökade processlabels
         "Introspektiv skanning: analyserar tankekvalitet...", "Emotionell kalibrering pågår...",
@@ -313,7 +313,7 @@ final class EonBrain: ObservableObject {
                     self.conversationCount = await memory.conversationCount()
                 }
 
-                // BERT/GPT-status — synka från NeuralEngineOrchestrator var 6:e tick (~60s)
+                // Qwen3-status — synka från NeuralEngineOrchestrator var 6:e tick (~60s)
                 if masterTickCount % 6 == 0 {
                     self.bertLoaded = await neuralEngine.bertLoaded
                     self.gptLoaded = await neuralEngine.gptLoaded
@@ -322,6 +322,31 @@ final class EonBrain: ObservableObject {
                 // v15: Språkutveckling — synka från LearningEngine var 3:e tick (~30s)
                 if masterTickCount % 3 == 0 {
                     await self.syncLanguageMetrics()
+                }
+
+                // Qwen3 autonomous learning — every 10th tick (~150s), thermal-aware
+                if masterTickCount % 10 == 0 && !ThermalSleepManager.shared.shouldPauseWork() {
+                    Task.detached(priority: .utility) {
+                        await LearningEngine.shared.learnFromQwen()
+                    }
+                    self.appendMonologue(MonologueLine(
+                        text: "Autonom inlärning: Qwen3 genererar ny kunskap (tick \(self.masterTickCount))",
+                        type: .insight
+                    ))
+                }
+
+                // Vocabulary expansion — every 30th tick (~450s), pick a recent word to expand
+                if masterTickCount % 30 == 0 && !ThermalSleepManager.shared.shouldPauseWork() {
+                    let recentWords = await LearningEngine.shared.dailyMetrics().recentWords
+                    if let wordToExpand = recentWords.randomElement() {
+                        Task.detached(priority: .utility) {
+                            await LearningEngine.shared.expandVocabulary(from: wordToExpand)
+                        }
+                        self.appendMonologue(MonologueLine(
+                            text: "Ordnätsexpansion: bygger ut vokabulär kring '\(wordToExpand)'",
+                            type: .insight
+                        ))
+                    }
                 }
             }
         }
@@ -424,6 +449,12 @@ final class EonBrain: ObservableObject {
                             eonResponse: learnResp
                         )
                     }
+                    await MainActor.run {
+                        self.appendMonologue(MonologueLine(
+                            text: "Inlärning: extraherar kunskap från konversation (Qwen3-assisterad)",
+                            type: .memory
+                        ))
+                    }
                 } catch {
                     continuation.yield("Förlåt, något gick fel: \(error.localizedDescription)")
                 }
@@ -480,12 +511,7 @@ final class EonBrain: ObservableObject {
         }
     }
 
-    private func appendMonologue(_ line: MonologueLine) async {
-        innerMonologue.append(line)
-        if innerMonologue.count > 200 {
-            innerMonologue.removeFirst(50)
-        }
-    }
+    
 
     private func loadPersistedState() {
         guard !isPreviewInstance else { return }
@@ -624,7 +650,7 @@ final class EonBrain: ObservableObject {
             let thoughts = dmn.spontaneousThoughts
             if let latest = thoughts.last {
                 return MonologueLine(
-                    text: "DMN spontan aktivitet: \(latest.content.prefix(60))",
+                    text: "DMN spontan aktivitet: \(latest.category.rawValue) (salience \(String(format: "%.2f", latest.salience)))",
                     type: .thought
                 )
             }
@@ -728,8 +754,8 @@ enum ThinkingStep: Int, CaseIterable, Identifiable {
     case memoryRetrieval   // HNSW + FTS5
     case causalGraph       // Pelare B
     case globalWorkspace   // GWT
-    case chainOfThought    // CoT + BERT-PLL
-    case generation        // GPT-SW3
+    case chainOfThought    // CoT + PLL
+    case generation        // Qwen3
     case validation        // Loop 1
     case enrichment        // Loop 2
     case metacognition     // Loop 3 + Pelare C

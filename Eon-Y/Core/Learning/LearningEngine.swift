@@ -282,9 +282,56 @@ actor LearningEngine {
         let dueItems = getDueItems()
         activeStudyTopics = Array(dueItems.prefix(10).map { $0.topic })
 
+        // Qwen3-powered concept extraction (background, thermal-aware)
+        if !ThermalSleepManager.shared.shouldPauseWork() && newWordsThisConversation.count >= 2 {
+            await extractAndLearnConceptsWithQwen(
+                newWords: newWordsThisConversation,
+                context: allText
+            )
+        }
+
         // Persist and notify proxy
         persistState()
         await notifyProxy()
+    }
+
+    /// Uses Qwen3 to understand and define newly encountered words from a conversation.
+    private func extractAndLearnConceptsWithQwen(newWords: [String], context: String) async {
+        let wordList = newWords.prefix(5).joined(separator: ", ")
+        let contextSnippet = String(context.prefix(300))
+
+        let prompt = """
+        Du är en svensk språkexpert. Jag hittade dessa nya ord i en konversation: \(wordList)
+        Kontext: "\(contextSnippet)"
+        För varje ord, ge en kort definition och ordklass. Svara i formatet:
+        [ord]: [ordklass] — [definition]
+        """
+
+        let response = await NeuralEngineOrchestrator.shared.generate(
+            prompt: prompt, maxTokens: 200, temperature: 0.5
+        )
+
+        guard !response.isEmpty else { return }
+
+        for line in response.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard let colonIdx = trimmed.firstIndex(of: ":") else { continue }
+            let word = trimmed[trimmed.startIndex..<colonIdx]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let rest = String(trimmed[trimmed.index(after: colonIdx)...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard word.count > 1 && word.count < 30 && !rest.isEmpty else { continue }
+
+            await PersistentMemoryStore.shared.saveFact(
+                subject: word,
+                predicate: "qwen3_definition",
+                object: rest,
+                confidence: 0.7,
+                source: "qwen3_conversation_learning"
+            )
+        }
     }
 
     /// Extract Swedish words from text using NLTagger for proper linguistic tokenization
@@ -499,6 +546,157 @@ actor LearningEngine {
     /// Count of detected compound words
     func compoundWordCount() -> Int {
         compoundWordCache.count
+    }
+
+    // MARK: - Qwen3-Powered Autonomous Learning
+
+    /// Ask Qwen3 to generate a new Swedish word/concept with definition and usage,
+    /// then persist it as a fact. Called periodically from the brain's master tick.
+    func learnFromQwen() async {
+        guard !ThermalSleepManager.shared.shouldPauseWork() else { return }
+
+        let weakestDomain = competencyBook.values.sorted { $0.level < $1.level }.first?.domain ?? "Semantik"
+        let existingWords = Array(uniqueSwedishWords.prefix(10)).joined(separator: ", ")
+
+        let prompt = """
+        Du är en svensk språkexpert. Generera ETT nytt svenskt ord eller begrepp inom domänen "\(weakestDomain)".
+        Ord jag redan kan: \(existingWords)
+        Ge mig ett NYTT ord jag inte redan kan.
+        Svara EXAKT i detta format (inget annat):
+        ORD: [ordet]
+        DEFINITION: [kort definition på svenska]
+        EXEMPEL: [en exempelmening]
+        DOMÄN: \(weakestDomain)
+        """
+
+        let response = await NeuralEngineOrchestrator.shared.generate(
+            prompt: prompt, maxTokens: 150, temperature: 0.8
+        )
+
+        guard !response.isEmpty else { return }
+
+        let parsed = parseQwenWordResponse(response)
+        guard let word = parsed.word, let definition = parsed.definition else { return }
+
+        recordSwedishWord(word)
+
+        await PersistentMemoryStore.shared.saveFact(
+            subject: word,
+            predicate: "definition",
+            object: definition,
+            confidence: 0.75,
+            source: "qwen3_autonomous_learning"
+        )
+
+        if let example = parsed.example {
+            await PersistentMemoryStore.shared.saveFact(
+                subject: word,
+                predicate: "användningsexempel",
+                object: example,
+                confidence: 0.7,
+                source: "qwen3_autonomous_learning"
+            )
+        }
+
+        let domain = parsed.domain ?? weakestDomain
+        addFSRSItem(topic: "Qwen-ord: \(word)", domain: domain, initialDifficulty: 0.4)
+
+        if var comp = competencyBook[domain] {
+            comp.level = min(0.95, comp.level + 0.002)
+            comp.lastStudied = Date()
+            competencyBook[domain] = comp
+            UserDefaults.standard.set(comp.level, forKey: "competency_\(domain)")
+        }
+
+        persistState()
+        await notifyProxy()
+    }
+
+    /// Uses Qwen3 to expand vocabulary around a known word — generates synonyms,
+    /// antonyms, and related terms, then stores them.
+    func expandVocabulary(from word: String) async {
+        guard !ThermalSleepManager.shared.shouldPauseWork() else { return }
+
+        let prompt = """
+        Du är en svensk språkexpert. Givet ordet "\(word)", ge mig:
+        SYNONYMER: [kommaseparerad lista, max 4]
+        ANTONYMER: [kommaseparerad lista, max 3]
+        RELATERADE: [kommaseparerad lista med närliggande begrepp, max 4]
+        Svara EXAKT i formatet ovan, bara svenska ord.
+        """
+
+        let response = await NeuralEngineOrchestrator.shared.generate(
+            prompt: prompt, maxTokens: 120, temperature: 0.7
+        )
+
+        guard !response.isEmpty else { return }
+
+        let lines = response.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let prefix: String?
+            let relation: String?
+            if trimmed.uppercased().hasPrefix("SYNONYMER:") {
+                prefix = "SYNONYMER:"
+                relation = "synonym_till"
+            } else if trimmed.uppercased().hasPrefix("ANTONYMER:") {
+                prefix = "ANTONYMER:"
+                relation = "antonym_till"
+            } else if trimmed.uppercased().hasPrefix("RELATERADE:") {
+                prefix = "RELATERADE:"
+                relation = "relaterat_till"
+            } else {
+                prefix = nil
+                relation = nil
+            }
+
+            guard let pfx = prefix, let rel = relation else { continue }
+            let wordsStr = trimmed.dropFirst(pfx.count).trimmingCharacters(in: .whitespaces)
+            let words = wordsStr.components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { $0.count > 1 && $0.count < 30 }
+
+            for relatedWord in words.prefix(4) {
+                recordSwedishWord(relatedWord)
+                await PersistentMemoryStore.shared.saveFact(
+                    subject: relatedWord,
+                    predicate: rel,
+                    object: word,
+                    confidence: 0.7,
+                    source: "qwen3_vocabulary_expansion"
+                )
+            }
+        }
+
+        let domain = detectDomain(from: word)
+        addFSRSItem(topic: "Ordnät: \(word)", domain: domain, initialDifficulty: 0.3)
+
+        persistState()
+        await notifyProxy()
+    }
+
+    /// Parses a Qwen3 word-generation response into structured components.
+    private func parseQwenWordResponse(_ response: String) -> (word: String?, definition: String?, example: String?, domain: String?) {
+        var word: String?
+        var definition: String?
+        var example: String?
+        var domain: String?
+
+        for line in response.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("ORD:") {
+                word = trimmed.dropFirst(4).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            } else if upper.hasPrefix("DEFINITION:") {
+                definition = String(trimmed.dropFirst(11).trimmingCharacters(in: .whitespacesAndNewlines))
+            } else if upper.hasPrefix("EXEMPEL:") {
+                example = String(trimmed.dropFirst(8).trimmingCharacters(in: .whitespacesAndNewlines))
+            } else if upper.hasPrefix("DOMÄN:") {
+                domain = String(trimmed.dropFirst(6).trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+
+        return (word, definition, example, domain)
     }
 
     // MARK: - Autonomous Exploration (v17)
@@ -794,9 +992,11 @@ actor LearningEngine {
 
         // Update competency based on rating, review count, mastery trajectory, and recall difficulty
         if let domain = fsrsItems[idx].domain {
-            let masteryFactor = min(1.0, Double(reviewCount + 1) / 5.0) // Full mastery after 5 reviews
-            let learningBoost = 0.005 * rating * masteryFactor * activeRecallBonus * (1.0 - (competencyBook[domain]?.level ?? 0.3))
-            competencyBook[domain]?.level = min(0.99, (competencyBook[domain]?.level ?? 0.05) + learningBoost)
+            let masteryFactor = min(1.0, Double(reviewCount + 1) / 5.0)
+            let currentLevel = competencyBook[domain]?.level ?? 0.3
+            let learningBoost = 0.005 * rating * masteryFactor * activeRecallBonus * (1.0 - currentLevel)
+            let newLevel = min(0.99, (competencyBook[domain]?.level ?? 0.05) + learningBoost)
+            competencyBook[domain]?.level = newLevel
             competencyBook[domain]?.lastStudied = Date()
             if let level = competencyBook[domain]?.level {
                 UserDefaults.standard.set(level, forKey: "competency_\(domain)")
@@ -1147,19 +1347,17 @@ actor LearningEngine {
     // Tracks learning speed per domain — fast learners get harder material sooner,
     // slow learners get more repetition and simpler breakdowns.
 
-    private var learningVelocity: [String: [Double]] = [:]  // Domain → recent deltas
+    private var domainVelocityHistory: [String: [Double]] = [:]
 
     private func trackLearningVelocity(domain: String, delta: Double) {
-        learningVelocity[domain, default: []].append(delta)
-        // v26: Fix force unwrap — use safe access pattern
-        if (learningVelocity[domain]?.count ?? 0) > 20 {
-            learningVelocity[domain]?.removeFirst()
+        domainVelocityHistory[domain, default: []].append(delta)
+        if (domainVelocityHistory[domain]?.count ?? 0) > 20 {
+            domainVelocityHistory[domain]?.removeFirst()
         }
     }
 
-    /// Returns learning speed for a domain: >0.02 = fast, <0.005 = slow
     func domainLearningSpeed(_ domain: String) -> Double {
-        guard let history = learningVelocity[domain], history.count >= 3 else { return 0.01 }
+        guard let history = domainVelocityHistory[domain], history.count >= 3 else { return 0.01 }
         return history.suffix(10).reduce(0, +) / Double(history.suffix(10).count)
     }
 

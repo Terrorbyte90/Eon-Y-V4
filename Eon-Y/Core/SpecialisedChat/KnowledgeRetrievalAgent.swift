@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - KnowledgeRetrievalAgent: Parallell kunskapssökning
 // Söker ALLA kunskapskällor samtidigt: fakta, artiklar, minnen, konversationer.
-// BERT-rankar resultaten och skapar en kompakt kunskapsbunt.
+// Semantiskt rankar resultaten och skapar en kompakt kunskapsbunt.
 
 struct KnowledgeBundle: Sendable {
     let facts: [RankedFact]
@@ -77,12 +77,12 @@ actor KnowledgeRetrievalAgent {
         inputEmbedding: [Float],
         deadline: Date
     ) async -> KnowledgeBundle {
-        let hasBERT = !inputEmbedding.allSatisfy({ $0 == 0 })
+        let hasEmbedding = !inputEmbedding.allSatisfy({ $0 == 0 })
 
         // Kör ALLA sökningar parallellt
-        async let factsResult = searchAndRankFacts(input: input, entities: entities, embedding: inputEmbedding, hasBERT: hasBERT)
-        async let articlesResult = searchAndRankArticles(input: input, embedding: inputEmbedding, hasBERT: hasBERT, maxArticles: 1)
-        async let memoriesResult = searchAndRankMemories(input: input, embedding: inputEmbedding, hasBERT: hasBERT)
+        async let factsResult = searchAndRankFacts(input: input, entities: entities, embedding: inputEmbedding, hasBERT: hasEmbedding)
+        async let articlesResult = searchAndRankArticles(input: input, embedding: inputEmbedding, hasBERT: hasEmbedding, maxArticles: 1)
+        async let memoriesResult = searchAndRankMemories(input: input, embedding: inputEmbedding, hasBERT: hasEmbedding)
 
         let facts = await factsResult
         let articles = await articlesResult
@@ -98,11 +98,11 @@ actor KnowledgeRetrievalAgent {
         entities: [ExtractedEntity],
         inputEmbedding: [Float]
     ) async -> KnowledgeBundle {
-        let hasBERT = !inputEmbedding.allSatisfy({ $0 == 0 })
+        let hasEmbedding = !inputEmbedding.allSatisfy({ $0 == 0 })
 
-        async let factsResult = searchAndRankFacts(input: input, entities: entities, embedding: inputEmbedding, hasBERT: hasBERT, deepMode: true)
-        async let articlesResult = searchAndRankArticles(input: input, embedding: inputEmbedding, hasBERT: hasBERT, maxArticles: 3)
-        async let memoriesResult = searchAndRankMemories(input: input, embedding: inputEmbedding, hasBERT: hasBERT)
+        async let factsResult = searchAndRankFacts(input: input, entities: entities, embedding: inputEmbedding, hasBERT: hasEmbedding, deepMode: true)
+        async let articlesResult = searchAndRankArticles(input: input, embedding: inputEmbedding, hasBERT: hasEmbedding, maxArticles: 3)
+        async let memoriesResult = searchAndRankMemories(input: input, embedding: inputEmbedding, hasBERT: hasEmbedding)
 
         let facts = await factsResult
         let articles = await articlesResult
@@ -154,7 +154,7 @@ actor KnowledgeRetrievalAgent {
 
         guard !allFacts.isEmpty else { return [] }
 
-        // v24: Parallelize BERT ranking with TaskGroup (was sequential — saves ~800ms)
+        // v24: Parallelize semantic ranking with TaskGroup (was sequential — saves ~800ms)
         if hasBERT {
             let maxEmbeds = deepMode ? 15 : 8
             let topFacts = Array(allFacts.prefix(maxEmbeds))
@@ -203,14 +203,14 @@ actor KnowledgeRetrievalAgent {
 
         if hasBERT {
             var scored: [(article: KnowledgeArticle, score: Float)] = []
-            // v14: Pre-filter by keyword overlap before BERT (saves embed calls)
+            // v14: Pre-filter by keyword overlap before embedding (saves embed calls)
             let inputWords = Set(input.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
             let preFiltered = articles.sorted { a, b in
                 let aWords = Set(a.title.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
                 let bWords = Set(b.title.lowercased().components(separatedBy: .whitespaces).filter { $0.count > 3 })
                 return inputWords.intersection(aWords).count > inputWords.intersection(bWords).count
             }
-            // v24: Parallelize article BERT ranking with TaskGroup (was sequential)
+            // v24: Parallelize article semantic ranking with TaskGroup (was sequential)
             let topArticles = Array(preFiltered.prefix(10))
             await withTaskGroup(of: (KnowledgeArticle, Float)?.self) { group in
                 for article in topArticles {
@@ -254,7 +254,7 @@ actor KnowledgeRetrievalAgent {
         guard !rawMemories.isEmpty else { return [] }
 
         let now = Date()
-        // v24: Parallelize memory BERT ranking with TaskGroup (was sequential)
+        // v24: Parallelize memory semantic ranking with TaskGroup (was sequential)
         if hasBERT {
             var scored: [KnowledgeBundle.RankedMemory] = []
             await withTaskGroup(of: KnowledgeBundle.RankedMemory.self) { group in

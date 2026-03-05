@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		9BC4FA022F59AFC700A95420 /* llama in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002AA000002AA000002 /* llama */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		9B388BB42F523DE700F48273 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -37,15 +41,14 @@
 				Models/BatchCosineSimilarity.mlpackage,
 				Models/ComplexityEstimator.mlpackage,
 				Models/EmotionMultiLabel.mlpackage,
-				Models/GptSw3_1_3B_Instruct.mlpackage,
 				Models/IntentClassifier.mlpackage,
-				Models/KBBertSwedish.mlpackage,
 				Models/RegisterDetector.mlpackage,
 				Models/SentimentScorer.mlpackage,
 				Models/TopicClassifier.mlpackage,
 				Resources/bert_vocab.txt,
 				Resources/gpt_sw3_vocab.json,
 				Resources/lexicon_seed.json,
+				"Resources/Models/Qwen3-1.7B-Q4_K_M.gguf",
 			);
 			target = 9B388BA52F523DE600F48273 /* Eon-Y */;
 		};
@@ -77,6 +80,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9BC4FA022F59AFC700A95420 /* llama in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -137,6 +141,7 @@
 			);
 			name = "Eon-Y";
 			packageProductDependencies = (
+				AA000002AA000002AA000002 /* llama */,
 			);
 			productName = "Eon-Y";
 			productReference = 9B388BA62F523DE600F48273 /* Eon-Y.app */;
@@ -220,6 +225,9 @@
 			);
 			mainGroup = 9B388B9D2F523DE600F48273;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "llama" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9B388BA72F523DE600F48273 /* Products */;
 			projectDirPath = "";
@@ -347,7 +355,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -405,7 +413,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -426,7 +434,7 @@
 				DEVELOPMENT_TEAM = G648H762LD;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = "Eon-Y/Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -455,7 +463,7 @@
 				DEVELOPMENT_TEAM = G648H762LD;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = "Eon-Y/Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -481,7 +489,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = G648H762LD;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "FuturaLuna.Eon-YTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -503,7 +511,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = G648H762LD;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "FuturaLuna.Eon-YTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -597,6 +605,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "llama" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ggml-org/llama.cpp";
+			requirement = {
+				kind = revision;
+				revision = d05b3127bd30515955aa4ee2bacdb68ebafe88f4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA000002AA000002AA000002 /* llama */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA000001AA000001AA000001 /* XCRemoteSwiftPackageReference "llama" */;
+			productName = llama;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9B388B9E2F523DE600F48273 /* Project object */;
 }

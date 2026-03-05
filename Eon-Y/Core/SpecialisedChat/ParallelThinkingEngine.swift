@@ -176,9 +176,9 @@ actor ParallelThinkingEngine {
                     reasoning.append("Fakta: \(fact)")
                 }
                 confidence = Double(min(topFacts.count, 3)) * 0.25
-                // BERT-validera matchning
+                // Semantisk validering av matchning
                 if let firstFact = topFacts.first {
-                    let sim = await bertSimilarity(question.resolvedInput, firstFact)
+                    let sim = await semanticSimilarity(question.resolvedInput, firstFact)
                     confidence = max(confidence, Double(sim))
                     reasoning.append("Fakta-relevans: \(String(format: "%.0f%%", sim * 100))")
                 }
@@ -293,7 +293,7 @@ actor ParallelThinkingEngine {
         knowledge: KnowledgeBundle,
         timeBudget: TimeInterval
     ) async -> ThinkingPath {
-        // Djupare version: mer BERT-validering, fler steg
+        // Djupare version: mer semantisk validering, fler steg
         let startTime = Date()
         var reasoning: [String] = []
         var relevantFacts: [String] = []
@@ -312,11 +312,11 @@ actor ParallelThinkingEngine {
         reasoning.append(contentsOf: basicPath.reasoning)
         confidence = basicPath.confidence
 
-        // Steg 2: BERT-validering av varje resonemangssteg
+        // Steg 2: Semantisk validering av varje resonemangssteg
         let remaining = timeBudget - Date().timeIntervalSince(startTime)
         if remaining > 0.5 {
             for fact in topFacts.prefix(3) {
-                let sim = await bertSimilarity(question.resolvedInput, fact)
+                let sim = await semanticSimilarity(question.resolvedInput, fact)
                 if sim > 0.4 {
                     reasoning.append("✓ Validerat: '\(String(fact.prefix(50)))' (relevans: \(String(format: "%.0f%%", sim * 100)))")
                 }
@@ -325,7 +325,7 @@ actor ParallelThinkingEngine {
 
         // Steg 3: Korsvalidera med artiklar
         if let article = knowledge.articles.first, remaining > 1.0 {
-            let articleSim = await bertSimilarity(question.resolvedInput, article.title + " " + String(article.content.prefix(100)))
+            let articleSim = await semanticSimilarity(question.resolvedInput, article.title + " " + String(article.content.prefix(100)))
             if articleSim > 0.3 {
                 reasoning.append("Stöds av artikel: '\(article.title)' (relevans: \(String(format: "%.0f%%", articleSim * 100)))")
                 confidence = max(confidence, Double(articleSim) * 0.9)
@@ -334,7 +334,7 @@ actor ParallelThinkingEngine {
 
         // Steg 4: Integrera minnen
         for mem in knowledge.memories.prefix(2) {
-            let memSim = await bertSimilarity(question.resolvedInput, String(mem.content.prefix(100)))
+            let memSim = await semanticSimilarity(question.resolvedInput, String(mem.content.prefix(100)))
             if memSim > 0.35 {
                 reasoning.append("Erfarenhet stödjer: '\(String(mem.content.prefix(60)))'")
                 confidence += Double(memSim) * 0.1
@@ -403,14 +403,14 @@ actor ParallelThinkingEngine {
         let validatedSteps = reasoning.filter { $0.hasPrefix("✓") }.count
         let base = buildConclusion(approach: approach, reasoning: reasoning, question: question, facts: facts)
         if validatedSteps > 0 {
-            return "\(base) (Validerat med \(validatedSteps) BERT-kontroller, konfidenspoäng: \(String(format: "%.0f%%", confidence * 100)))"
+            return "\(base) (Validerat med \(validatedSteps) Qwen3-kontroller, konfidenspoäng: \(String(format: "%.0f%%", confidence * 100)))"
         }
         return base
     }
 
-    // MARK: - BERT-hjälp
+    // MARK: - Semantisk likhet
 
-    private func bertSimilarity(_ a: String, _ b: String) async -> Float {
+    private func semanticSimilarity(_ a: String, _ b: String) async -> Float {
         let embA = await neuralEngine.embed(String(a.prefix(128)))
         let embB = await neuralEngine.embed(String(b.prefix(128)))
         return await neuralEngine.cosineSimilarity(embA, embB)

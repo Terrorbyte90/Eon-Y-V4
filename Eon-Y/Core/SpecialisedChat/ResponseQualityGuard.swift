@@ -12,9 +12,9 @@ struct ValidatedResponse: Sendable {
     let modifications: [String]       // Beskrivning av ändringar
 
     struct ResponseQuality: Sendable {
-        let coherence: Double         // 0-1: BERT-koherens med frågan
-        let relevance: Double         // 0-1: BERT-relevans mot ämnet
-        let fluency: Double           // 0-1: språklig flytande (BERT PLL)
+        let coherence: Double         // 0-1: semantisk koherens med frågan
+        let relevance: Double         // 0-1: semantisk relevans mot ämnet
+        let fluency: Double           // 0-1: språklig flytande (PLL)
         let isRepetitive: Bool
         let hasPromptLeakage: Bool
         let isComplete: Bool          // Avslutas med hel mening
@@ -73,13 +73,13 @@ actor ResponseQualityGuard {
             modifications.append("Fallback-svar genererat (för kort)")
         }
 
-        // 7. BERT-koherens (v14: skippa för hälsningar och korta template-svar)
+        // 7. Semantisk koherens (v14: skippa för hälsningar och korta template-svar)
         let coherence: Double
         let relevance: Double
-        let skipBERT = question.questionType == .greeting ||
+        let skipSemanticCheck = question.questionType == .greeting ||
                        question.questionType == .personal ||
-                       text.count < 40 // Korta svar behöver inte BERT-check
-        if skipBERT {
+                       text.count < 40
+        if skipSemanticCheck {
             coherence = 0.7  // Anta rimlig koherens
             relevance = 0.6
         } else {
@@ -140,7 +140,7 @@ actor ResponseQualityGuard {
         // Kör normal validering först
         var result = await validate(draft: draft, question: question, knowledge: knowledge)
 
-        // Extra: BERT PLL för språklig kvalitet
+        // Extra: PLL för språklig kvalitet
         let pll = await neuralEngine.bertPLL(sentence: String(result.text.prefix(200)))
         let adjustedFluency = (result.quality.fluency + pll) / 2.0
 
@@ -219,7 +219,7 @@ actor ResponseQualityGuard {
         return (result.trimmingCharacters(in: .whitespacesAndNewlines), hadLeakage)
     }
 
-    // MARK: - Koherenskontroll (BERT)
+    // MARK: - Koherenskontroll (semantisk)
 
     private func quickCoherenceCheck(question: String, response: String) async -> Double {
         let qEmb = await neuralEngine.embed(String(question.prefix(128)))
@@ -228,7 +228,7 @@ actor ResponseQualityGuard {
         return Double(max(0, sim))
     }
 
-    // MARK: - Relevanskontroll (BERT)
+    // MARK: - Relevanskontroll (semantisk)
 
     private func quickRelevanceCheck(topic: String, response: String) async -> Double {
         guard !topic.isEmpty else { return 0.5 }

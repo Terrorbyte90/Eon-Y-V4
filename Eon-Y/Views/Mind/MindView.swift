@@ -411,8 +411,8 @@ struct MindView: View {
             }
 
             HStack(spacing: 10) {
-                modelCard("GPT-SW3", "1.3B · ANE", "cpu", Color(hex: "#7C3AED"), brain.neuralEngine.isLoaded)
-                modelCard("KB-BERT", "768-dim · INT8", "waveform", Color(hex: "#34D399"), brain.neuralEngine.isLoaded)
+                modelCard("Qwen3", "1.7B · GGUF", "cpu", Color(hex: "#7C3AED"), brain.neuralEngine.isLoaded)
+                modelCard("llama.cpp", "Inference", "waveform", Color(hex: "#34D399"), brain.neuralEngine.isLoaded)
             }
         }
         .padding(16)
@@ -739,7 +739,7 @@ struct CognitiveCycleRingView: View {
         ("Kausal",     Color(hex: "#FB923C"), "arrow.triangle.turn.up.right.diamond"),
         ("GWT",        Color(hex: "#FBBF24"), "globe"),
         ("CoT",        Color(hex: "#10B981"), "list.bullet.indent"),
-        ("GPT",        Color(hex: "#7C3AED"), "cpu"),
+        ("Qwen",       Color(hex: "#7C3AED"), "cpu"),
         ("Validering", Color(hex: "#F472B6"), "checkmark.shield"),
         ("Graf",       Color(hex: "#34D399"), "point.3.connected.trianglepath.dotted"),
         ("Meta",       Color(hex: "#8B5CF6"), "brain.head.profile"),
@@ -1551,11 +1551,11 @@ extension ThinkingStep {
         case .morphology:    return "Analyserar morfologi, lemmatisering och ordformer i inmatningen via SwedishLanguageCore."
         case .wsd:           return "Word Sense Disambiguation — disambiguerar flertydiga ord baserat på kontext."
         case .memoryRetrieval: return "Söker i SQLite-minnet efter relevanta konversationer och hämtar senaste historiken."
-        case .causalGraph:   return "Beräknar KB-BERT 768-dim embedding och extraherar namngivna entiteter."
+        case .causalGraph:   return "Beräknar Qwen3 768-dim embedding och extraherar namngivna entiteter."
         case .globalWorkspace: return "Global Workspace Theory — bygger den fullständiga prompten med all kognitiv kontext."
         case .chainOfThought: return "Chain-of-Thought reasoning — loggar tankekedjan i inner monologue."
-        case .generation:    return "GPT-SW3 1.3B genererar svar via CoreML/Apple Foundation Models/NL-fallback."
-        case .validation:    return "Loop 1 — BERT cosine similarity validerar koherens. WSD-mismatch triggar regenerering."
+        case .generation:    return "Qwen3-1.7B genererar svar via llama.cpp/Apple Foundation Models/NL-fallback."
+        case .validation:    return "Loop 1 — Qwen3 cosine similarity validerar koherens. WSD-mismatch triggar regenerering."
         case .enrichment:    return "Loop 2 — Extraherade entiteter och fakta sparas tillbaka till kunskapsgrafen."
         case .metacognition: return "Loop 3 — Om konfidens < 60% revideras svaret av MetacognitiveReviser."
         case .idle:          return "Systemet är i viloläge."
