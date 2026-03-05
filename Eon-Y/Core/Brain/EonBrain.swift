@@ -259,7 +259,15 @@ final class EonBrain: ObservableObject {
         masterTickStarted = true
         Task { @MainActor in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10s
+                // v7: Thermal-aware master tick — 15s nominal, 30s fair, pause at serious/critical
+                let thermalState = ProcessInfo.processInfo.thermalState
+                if thermalState == .serious || thermalState == .critical {
+                    try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s vila
+                    await Task.yield()
+                    continue
+                }
+                let tickInterval: UInt64 = thermalState == .fair ? 20_000_000_000 : 15_000_000_000
+                try? await Task.sleep(nanoseconds: tickInterval) // 15s (was 10s)
                 await Task.yield()
                 masterTickCount += 1
 

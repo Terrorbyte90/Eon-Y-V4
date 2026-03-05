@@ -142,6 +142,6 @@ extension ThermalSleepManager {
     /// Tar hänsyn till både termisk sömn och direkt termisk state.
     nonisolated func shouldPauseWork() -> Bool {
         let thermal = ProcessInfo.processInfo.thermalState
-        return thermal == .critical
+        return thermal == .critical || thermal == .serious
     }
 }
