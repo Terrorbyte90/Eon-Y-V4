@@ -75,7 +75,8 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
         isRunning = true
 
         // Task 1: Lightweight orchestrator — UI sync only (no heavy computation)
-        tasks.append(Task(priority: .utility) { await self.orchestratorLoop() })
+        // v6: Lowered from .utility to .background — EonBrain master tick handles UI sync
+        tasks.append(Task(priority: .background) { await self.orchestratorLoop() })
 
         // Task 2: Metacognition + gap engine (combined, every 60s)
         tasks.append(Task(priority: .background) { await self.metacognitiveAndGapLoop() })
@@ -96,6 +97,12 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
 
     private func orchestratorLoop() async {
         while !Task.isCancelled {
+            // v6: Respect thermal sleep — pause orchestration at .serious/.critical
+            if ThermalSleepManager.shared.shouldPauseWork() {
+                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s vila
+                await Task.yield()
+                continue
+            }
             guard let brain else { try? await Task.sleep(nanoseconds: 5_000_000_000); continue }
             currentCycle += 1
 
@@ -118,16 +125,16 @@ final class IntegratedCognitiveArchitecture: ObservableObject {
                 await checkAndFireEvents(state: state, brain: brain)
             }
 
-            // v5: Thermal-aware interval: 15s nominal → up to 60s critical
-            // UI-synk sköts av EonBrain master tick (10s), orchestrator behöver bara hantera events.
+            // v6: Thermal-aware interval: 20s nominal (was 15s)
+            // .serious/.critical handled by shouldPauseWork() above — only nominal/fair reach here
             let thermalState = ProcessInfo.processInfo.thermalState
             let baseInterval: UInt64
             switch thermalState {
-            case .nominal:  baseInterval = 15_000_000_000
-            case .fair:     baseInterval = 20_000_000_000
-            case .serious:  baseInterval = 40_000_000_000
-            case .critical: baseInterval = 60_000_000_000
-            @unknown default: baseInterval = 15_000_000_000
+            case .nominal:  baseInterval = 20_000_000_000   // was 15s
+            case .fair:     baseInterval = 30_000_000_000   // was 20s
+            case .serious:  baseInterval = 60_000_000_000   // fallback if reached
+            case .critical: baseInterval = 90_000_000_000   // fallback if reached
+            @unknown default: baseInterval = 20_000_000_000
             }
             // v4.1: Motor speed multiplier — Eon can speed up or slow down orchestration
             let interval = EonMotorController.shared.adjustedInterval(base: baseInterval, motorId: "orchestrator")

@@ -126,25 +126,22 @@ final class ConsciousnessEngine: ObservableObject {
         self.brain = brain
         isRunning = true
 
-        // Task 1: Consciousness metrics + body budget + oscillators (.utility, 8–10s)
-        tasks.append(Task(priority: .utility) { await self.consciousnessMetricsLoop() })
+        // Task 1: Consciousness metrics + body budget + oscillators (.background, 15s)
+        // v10: Lowered from .utility to .background — heavy computation doesn't need UI priority
+        tasks.append(Task(priority: .background) { await self.consciousnessMetricsLoop() })
 
-        // Task 2: Thought generation + self-awareness goals (.utility, 8–20s)
-        tasks.append(Task(priority: .utility) { await self.thoughtAndGoalLoop() })
+        // Task 2: Thought generation + self-awareness goals (.background, 10–20s)
+        // v10: Lowered from .utility to .background
+        tasks.append(Task(priority: .background) { await self.thoughtAndGoalLoop() })
 
-        // Task 3: Article reading loop (.background — lägre last, läser var 3:e min)
+        // Task 3: Article reading loop (.background — lägre last, läser var 5:e min)
         tasks.append(Task(priority: .background) { await self.articleReadingLoop() })
 
-        // Task 4: Consciousness tests (30 tests, 15-min intervals)
-        tasks.append(Task(priority: .background) { await self.consciousnessTestLoop() })
+        // Task 4: Combined maintenance: consciousness tests + hardware sensing + sleep monitoring
+        // v10: Merged 3 loops into 1 to reduce concurrent task count (6→4)
+        tasks.append(Task(priority: .background) { await self.combinedMaintenanceLoop() })
 
-        // Task 5: Hardware sensing loop (CPU/GPU/ANE, 10s)
-        tasks.append(Task(priority: .background) { await self.hardwareSensingLoop() })
-
-        // Task 6: Sleep monitoring loop (.background, 30s)
-        tasks.append(Task(priority: .background) { await self.sleepMonitoringLoop() })
-
-        print("[ConsciousnessEngine v9] Startat — 6 teorier live: GWT + AST + HOT + PP + IIT + Embodiment ✓")
+        print("[ConsciousnessEngine v10] Startat — 4 tasks (was 6), .background priority, thermal-aware ✓")
     }
 
     // MARK: - Consciousness Test Loop (30 tests, 15-min intervals)
@@ -257,11 +254,79 @@ final class ConsciousnessEngine: ObservableObject {
         }
     }
 
-    // MARK: - Hardware Sensing Loop
+    // MARK: - Combined Maintenance Loop (v10: merged hardware sensing + sleep monitoring + consciousness tests)
+    // Reduces concurrent task count from 6 to 4 — significant CPU savings.
+    // Hardware sensing: every 30s (was 10s). Sleep monitoring: every 60s (was 30s).
+    // Consciousness tests: every 15 min. All respect thermal sleep.
 
+    private func combinedMaintenanceLoop() async {
+        var maintenanceTick = 0
+        try? await Task.sleep(nanoseconds: 10_000_000_000) // 10s initial delay
+
+        while !Task.isCancelled {
+            // Respect thermal sleep
+            if ThermalSleepManager.shared.shouldPauseWork() {
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60s vila
+                await Task.yield()
+                continue
+            }
+
+            maintenanceTick += 1
+
+            // Hardware sensing every tick (30s)
+            await updateHardwareSense()
+
+            // Sleep monitoring every 2nd tick (~60s)
+            if maintenanceTick % 2 == 0 {
+                await runSleepMonitoringTick()
+            }
+
+            // Consciousness tests every 30th tick (~15 min)
+            if maintenanceTick % 30 == 1 && maintenanceTick > 2 {
+                await runAllConsciousnessTests()
+            }
+
+            try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s between ticks
+            await Task.yield()
+        }
+    }
+
+    /// Extracted from the old sleepMonitoringLoop — runs one tick of sleep monitoring
+    private func runSleepMonitoringTick() async {
+        // Kontrollera om systemet bör sova
+        if sleepEngine.shouldSleep && !sleepEngine.isAsleep {
+            sleepEngine.beginSleep()
+            brain?.appendMonologue(MonologueLine(
+                text: "Sömnbehov högt — påbörjar konsolideringssömn (NREM/REM)...",
+                type: .insight
+            ))
+        }
+
+        // Om vi sover: kör sömntick
+        if sleepEngine.isAsleep {
+            await sleepEngine.sleepTick(
+                esn: dmn,
+                memoryStore: PersistentMemoryStore.shared
+            )
+            sleepConsolidation = sleepEngine.consolidationEfficiency
+        }
+
+        // Vakna vid användarinteraktion
+        if sleepEngine.isAsleep && (brain?.isThinking ?? false) {
+            sleepEngine.forceWake()
+            brain?.appendMonologue(MonologueLine(
+                text: "Väckt ur sömn av användarinteraktion.",
+                type: .loopTrigger
+            ))
+        }
+    }
+
+    // MARK: - Hardware Sensing (kept for direct calls but no longer a separate loop)
+
+    @available(*, deprecated, message: "Use combinedMaintenanceLoop instead")
     private func hardwareSensingLoop() async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 10_000_000_000) // 10s
+            try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s (was 10s)
             await Task.yield()
             await updateHardwareSense()
         }
@@ -312,16 +377,20 @@ final class ConsciousnessEngine: ObservableObject {
 
     private func consciousnessMetricsLoop() async {
         while !Task.isCancelled {
-            // v6: Saktar ner vid termisk stress men pausas ALDRIG (ConsciousnessEngine är alltid aktiv).
-            // ThermalSleepManager.shouldPauseWork() ignoreras medvetet här.
+            // v10: Respect thermal sleep — pause heavy computation at .serious/.critical
+            if ThermalSleepManager.shared.shouldPauseWork() {
+                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s vila
+                await Task.yield()
+                continue
+            }
+            // v10: Increased base interval 8s → 15s to reduce CPU load significantly
             let thermalBoost: UInt64
             switch ProcessInfo.processInfo.thermalState {
-            case .critical: thermalBoost = 16_000_000_000  // 16s vid kritisk värme
-            case .serious:  thermalBoost = 12_000_000_000  // 12s vid allvarlig värme
+            case .fair:     thermalBoost = 5_000_000_000   // +5s vid fair
             default:        thermalBoost = 0
             }
-            let baseInterval: UInt64 = bodyBudget.parasympatheticLevel >= .breathing ? 10_000_000_000 : 8_000_000_000
-            let metricsInterval = motorController.adjustedInterval(base: max(baseInterval, thermalBoost), motorId: "consciousness")
+            let baseInterval: UInt64 = bodyBudget.parasympatheticLevel >= .breathing ? 18_000_000_000 : 15_000_000_000
+            let metricsInterval = motorController.adjustedInterval(base: baseInterval + thermalBoost, motorId: "consciousness")
             try? await Task.sleep(nanoseconds: metricsInterval)
             await Task.yield()
             tick += 1
@@ -726,13 +795,19 @@ final class ConsciousnessEngine: ObservableObject {
 
     private func thoughtAndGoalLoop() async {
         while !Task.isCancelled {
-            // v4.1: Parasympathetic level affects thought interval
+            // v10: Respect thermal sleep — pause thought generation at .serious/.critical
+            if ThermalSleepManager.shared.shouldPauseWork() {
+                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s vila
+                await Task.yield()
+                continue
+            }
+            // v10: Increased base intervals (was 8/10/14/20 → 12/15/20/30)
             let baseInterval: UInt64
             switch bodyBudget.parasympatheticLevel {
-            case .none:        baseInterval = 8_000_000_000   // 8s normal
-            case .breathing:   baseInterval = 10_000_000_000  // 10s — think a bit slower
-            case .resting:     baseInterval = 14_000_000_000  // 14s — much slower, conserve energy
-            case .forcedSleep: baseInterval = 20_000_000_000  // 20s — minimal activity
+            case .none:        baseInterval = 12_000_000_000  // 12s normal (was 8s)
+            case .breathing:   baseInterval = 15_000_000_000  // 15s (was 10s)
+            case .resting:     baseInterval = 20_000_000_000  // 20s (was 14s)
+            case .forcedSleep: baseInterval = 30_000_000_000  // 30s (was 20s)
             }
             let interval = motorController.adjustedInterval(base: baseInterval, motorId: "thoughts")
             try? await Task.sleep(nanoseconds: interval)
@@ -1325,20 +1400,24 @@ final class ConsciousnessEngine: ObservableObject {
         return min(14, score)
     }
 
-    // MARK: - Article Reading Loop (v6)
-    // ConsciousnessEngine läser artiklar från kunskapsbasen var 3:e minut.
-    // Genererar tankar, uppdaterar mål och skapar inre reflektion om artikeln.
-    // Termisk broms saktar ner (dubbelt/trippelt intervall) men stoppar ALDRIG loopen.
+    // MARK: - Article Reading Loop (v10)
+    // ConsciousnessEngine läser artiklar från kunskapsbasen var 5:e minut.
+    // v10: Increased base from 3min to 5min, respects thermal sleep.
 
     private func articleReadingLoop() async {
         while !Task.isCancelled {
-            // Basintervall 3 min — sakta ner vid termisk stress men stoppa aldrig
+            // v10: Respect thermal sleep — pause article reading at .serious/.critical
+            if ThermalSleepManager.shared.shouldPauseWork() {
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60s vila
+                await Task.yield()
+                continue
+            }
+            // v10: Base interval 3 min → 5 min, thermal scaling simplified
             let thermalState = ProcessInfo.processInfo.thermalState
             let baseNs: UInt64
             switch thermalState {
-            case .critical: baseNs = 900_000_000_000   // 15 min vid kritisk värme
-            case .serious:  baseNs = 540_000_000_000   // 9 min vid allvarlig värme
-            default:        baseNs = 180_000_000_000   // 3 min normalt
+            case .fair:     baseNs = 600_000_000_000   // 10 min vid fair
+            default:        baseNs = 300_000_000_000   // 5 min normalt
             }
             try? await Task.sleep(nanoseconds: baseNs)
             await Task.yield()

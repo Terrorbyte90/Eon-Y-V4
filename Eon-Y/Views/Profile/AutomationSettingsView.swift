@@ -28,9 +28,9 @@ struct AutomationSettingsView: View {
 
     @State private var showResetAlert = false
 
-    // Timer for live phase progress
+    // Timer for live phase progress — v2: 1s → 3s to reduce CPU
     @State private var now = Date()
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {

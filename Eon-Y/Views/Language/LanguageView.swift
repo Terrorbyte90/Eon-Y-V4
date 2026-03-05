@@ -50,7 +50,8 @@ struct LanguageView: View {
             loadCompetencies()
             learning.refresh()
         }
-        .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
+            // v2: Reduced from 15s to 30s to lower CPU impact while view is visible
             learning.refresh()
             loadCompetencies()
         }

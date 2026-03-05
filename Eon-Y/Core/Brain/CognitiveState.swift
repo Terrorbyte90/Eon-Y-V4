@@ -385,7 +385,7 @@ final class CognitiveState: ObservableObject {
     @MainActor
     private func startStateMonitor() async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 12_000_000_000) // v4: 8s → 12s — further CPU reduction
+            try? await Task.sleep(nanoseconds: 20_000_000_000) // v5: 12s → 20s — thermal reduction
             // Flush eventuella pending propagations som inte nått batch-tröskeln
             if !pendingPropagations.isEmpty { flushPendingUpdates() }
             updateFeedbackLoops()
