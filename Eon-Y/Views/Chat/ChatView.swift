@@ -966,7 +966,7 @@ struct LiveThinkingBubble: View {
         .offset(y: appeared ? 0 : 12)
         .onAppear {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) { appeared = true }
-            dotTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { _ in
+            dotTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { _ in
                 Task { @MainActor in dotPhase = (dotPhase + 1) % 3 }
             }
         }
